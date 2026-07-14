@@ -1,0 +1,49 @@
+# task-state.mmd — 任务状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> in_progress: PATCH /tasks/{id} state=in_progress
+    in_progress --> completed: PATCH state=completed + actual_minutes
+    in_progress --> abandoned: PATCH state=abandoned + abandoned_reason
+    pending --> abandoned: 任务从未启动就被放弃
+    pending --> expired: 超过 expires_at
+    in_progress --> expired: 超过 expires_at
+    completed --> [*]
+    abandoned --> [*]
+    expired --> [*]
+```
+
+## 合法转移矩阵
+
+| From | To | 触发条件 | 副作用 |
+|---|---|---|---|
+| pending | in_progress | PATCH state=in_progress | task.started_at 写入 |
+| in_progress | completed | PATCH state=completed + actual_minutes | task.completed_at + actual_minutes |
+| in_progress | abandoned | PATCH + abandoned_reason | task.abandoned_at + abandoned_reason |
+| pending | abandoned | PATCH + abandoned_reason | task.abandoned_at |
+| pending/in_progress | expired | 后台 cron job（每 5 分钟） | task.expires_at = now() |
+
+## 非法转移
+
+| 尝试 | 响应 |
+|---|---|
+| completed → any | 409 STATE_TASK_INVALID_TRANSITION |
+| abandoned → any | 409 |
+| expired → any | 409 |
+| * → pending | 409 |
+| completed → abandoned（事后改"我其实没完成"） | 不允许（设计选择，避免统计污染） |
+
+## 校验位置
+
+- Service：`services/task.py::assert_task_transition()`
+- Repository：写入前再校验一次 version（乐观锁）
+
+## abandoned_reason 枚举
+
+参 [tasks 表](../data-models/tasks.md) CHECK。
+
+## 引用
+
+- 表：[tasks.md](../data-models/tasks.md)
+- API：[tasks.md](../api-spec/tasks.md)

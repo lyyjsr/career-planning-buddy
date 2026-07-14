@@ -1,0 +1,43 @@
+# plan-status.mmd — 计划状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> active: persist 节点 commit
+    active --> completed: 用户提交 review（plan 全 task 完成）
+    active --> archived: 90 天归档 OR 用户主动归档
+    pending --> archived: 用户取消未启动的 plan
+    completed --> archived: 历史归档
+    archived --> [*]
+```
+
+## 合法转移
+
+| From | To | 触发 |
+|---|---|---|
+| pending | active | persist 节点 commit（transaction_status=committed） |
+| active | completed | reviews 中 completed_task_ids 覆盖所有 plan task |
+| active | archived | 90 天归档 cron OR 用户主动归档 |
+| pending | archived | 未启动 plan 取消 |
+| completed | archived | 老计划归档 |
+
+## 非法转移
+
+| 尝试 | 响应 |
+|---|---|
+| active → pending | 409 STATE_PLAN_INVALID_TRANSITION |
+| archived → any | 409 |
+| completed → active | 不允许（避免复活已结束 plan） |
+
+## version 字段
+
+每次 status 转移必须 increment version（乐观锁）。Router 通过 `If-Match-Version` 强制。
+
+## 校验位置
+
+- Service：`services/plan.py::assert_plan_status_transition()`
+
+## 引用
+
+- 表：[plans.md](../data-models/plans.md)
+- API：[agent-runs.md](../api-spec/agent-runs.md)（plan_ready 事件触发 active）

@@ -1,0 +1,40 @@
+# run-status.mmd — plan_run 状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> running: AgentRunService.invoke(graph)
+    running --> completed: 全节点成功 + persist commit
+    running --> failed: 任一节点 fail + 不可恢复
+    running --> degraded: 降级路径触发（fallback_reason 非 null）
+    completed --> [*]
+    failed --> [*]
+    degraded --> [*]
+```
+
+## 合法转移矩阵
+
+| From | To | 触发条件 | 副作用 |
+|---|---|---|---|
+| pending | running | Service 调 LangGraph | run.started_at 写入 |
+| running | completed | persist 节点 commit + 全节点 success | run.finished_at 写入；final_plan_id 填充 |
+| running | failed | 任一 hard failure（如 plan 事务回滚） | run.finished_at + fallback_reason |
+| running | degraded | 降级路径触发（如 agent max_rounds_exhausted） | run.finished_at + fallback_reason |
+
+## 非法转移响应
+
+| 转移尝试 | 响应 |
+|---|---|
+| completed/failed/degraded → running | 409 STATE_RUN_ALREADY_FINISHED |
+| completed → failed | 409 STATE_RUN_ALREADY_FINISHED |
+| 任一终态 → pending | 409 |
+
+## 校验位置
+
+- Pydantic：`schemas/agent_run.py` 用 `@model_validator` 守
+- Service：`services/agent_run.py::assert_can_transition()`
+
+## 引用
+
+- 表：[trace-tables.md #agent_runs](../data-models/trace-tables.md)
+- API：[agent-runs.md](../api-spec/agent-runs.md)
