@@ -17,7 +17,7 @@ English summary: Third-party capability integration — external vendor protocol
 
 | # | 文档 | 状态 | 阶段 |
 |---|---|---|---|
-| H01 | [DeepSeek API 对接](./deepseek-api.md) | 已补 v1.0 | 阶段 3 PoC 直接依赖 |
+| H01 | [DeepSeek API 对接](./deepseek-api.md) | 已补 v1.0 | Pre-Stage 0 Provider PoC 直接依赖 |
 | H02 | Tavily Search 对接（[待补]） | 占位 | 阶段 4 |
 | H03 | pgvector 使用（[待补]） | 占位 | 阶段 0-1 |
 

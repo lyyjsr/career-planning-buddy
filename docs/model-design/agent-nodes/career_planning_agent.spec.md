@@ -125,7 +125,7 @@ stateDiagram-v2
 |---|---|
 | `node_name` | `"career_planning_agent"` |
 | `prompt_version` | `"career_planning_agent/v1"` |
-| `model` | `"deepseek-v4"` |
+| `model` | `"deepseek-chat"` |
 | `status` | `"ok"`/`"degraded"` |
 | `rounds_used` | `1` |
 | `tool_calls_used` | `3` |

@@ -3,7 +3,7 @@
 | 版本 | v1.0 |
 |---|---|
 | 日期 | 2026-07-24 |
-| 状态 | 草稿（**对接事实来自官方公开文档**；待 Stage 3 spike 跑通后回填实测） |
+| 状态 | 草稿（**对接事实来自官方公开文档**；待 Pre-Stage 0 Provider PoC 跑通后回填实测） |
 | 来源 | DeepSeek 官方文档 https://api-docs.deepseek.com/ |
 | 关联 | [../architecture/adr.md ADR-005](../architecture/adr.md) · [../standards/error-handling-standard.md](../standards/error-handling-standard.md) |
 
@@ -41,6 +41,8 @@ ADR-005 决策：核心规划 / 蒸馏用强模型；简单节点（intent_class
 | Embedding | DeepSeek 同厂 Embedding（或备选 `bge-m3`）| `tools/executors/rag_retrieve` | 待 spike 验证 |
 
 **ADR-005 提到的"DeepSeek V4"是项目内代号**——实际发布版本号以 DeepSeek 官方为准，开 spike 验证时优先锁定最新稳定版。
+
+DeepSeek V4 是项目选型候选称呼；代码配置、Trace 示例与 PoC 实测必须使用官方 model id（当前为 `deepseek-chat`），不得把项目代号当作真实 model id。
 
 ---
 
@@ -153,7 +155,7 @@ class LLMProvider(Protocol):
     ) -> LLMResponse: ...
 ```
 
-### 5.2 DeepSeek 实现（`backend/app/providers/llm/deepseek.py`，Stage 3 才落地）
+### 5.2 DeepSeek 实现（`backend/app/providers/llm/deepseek.py`，Stage 3 真实模型注入时落地）
 
 ```python
 # 伪代码——Stage 3 落地
@@ -229,12 +231,12 @@ DEEPSEEK_RETRY_MAX=2
 
 ---
 
-## 8. Stage 3 spike 的具体动作（与 [../architecture/poc-verification-report.md](../architecture/poc-verification-report.md) 对齐）
+## 8. Pre-Stage 0 Provider PoC 的具体动作（与 [../architecture/poc-verification-report.md](../architecture/poc-verification-report.md) 对齐）
 
 1. 写 50 行 Python 脚本（不经 FastAPI）：
 
    ```python
-   # scripts/poc_deepseek.py（Stage 3 才落地）
+   # scripts/poc_deepseek.py（Pre-Stage 0 Provider PoC 落地）
    import openai, json
    client = openai.AsyncOpenAI(api_key="...", base_url="https://api.deepseek.com")
    for case in load_cases():  # 5-10 个金标 case

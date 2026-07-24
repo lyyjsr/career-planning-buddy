@@ -53,7 +53,7 @@ English summary: AI agents should load only the docs required by the task, then 
 | 某特性的任务澄清/计划 | `docs/requirements/<feature>/clarify.md`、`plan.md`、`tasks.md` |
 | 验证与评审 | [verification-and-review](./verification-and-review.md)、[use-case-development-checklist](./use-case-development-checklist.md) |
 | 门禁排查 | [check-scripts-spec](./check-scripts-spec.md) |
-| 当前阶段与下一步 | [stage-delivery-definition](./stage-delivery-definition.md) |
+| 当前状态与下一步 | 根 [README.md](../../README.md)；阶段编号见 [stage-delivery-definition](./stage-delivery-definition.md) |
 | Spec-Driven 流程 | [spec-driven-workflow](./spec-driven-workflow.md) |
 
 ---

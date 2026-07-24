@@ -72,11 +72,9 @@
 
 ---
 
-## 7. 当前阶段
+## 7. 当前状态
 
-**📍 阶段 0：工程基线**
-
-下一步：搭骨架 + import-linter + docs 目录 + Docker Compose 模板。
+当前状态与下一步以根 [README.md](../../README.md) 为准；阶段编号以 [stage-delivery-definition.md](./stage-delivery-definition.md) 为准。
 
 退出条件：见 [阶段化交付定义](./stage-delivery-definition.md)。
 

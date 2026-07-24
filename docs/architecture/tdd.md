@@ -9,6 +9,8 @@
 | 设计哲学 | 单核心 Agent + 受控节点 + 六层 Harness + 证据驱动规划 + 执行反馈闭环 |
 | 来源 | 基于同伴 TDD（六层 Harness/Trace/Replay/Eval/Provider/上下文工程）深度融合产品 PRD（复盘-调整双层、陪伴 6 时刻、任务质量 5 维评分、安全分流） |
 
+> DeepSeek V4 是项目选型候选称呼；代码配置、Trace 示例与 PoC 实测必须使用官方 model id（当前为 `deepseek-chat`），不得把项目代号当作真实 model id。
+
 ---
 
 ## 0. 执行摘要

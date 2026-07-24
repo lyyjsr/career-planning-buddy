@@ -11,7 +11,7 @@
 | id | `uuid` | NO | `gen_random_uuid()` | PK | run 全局 ID |
 | user_id | `uuid` | NO | — | FK→users.id | —— |
 | session_id | `uuid` | NO | — | —— | 会话 ID（多 run 共一会话） |
-| status | `varchar(16)` | NO | `'pending'` | CHECK ∈ {`pending`,`running`,`completed`,`failed`,`degraded`} | 状态机见 state-machines/run-status.mmd |
+| status | `varchar(16)` | NO | `'pending'` | CHECK ∈ {`pending`,`running`,`completed`,`failed`,`degraded`,`cancelled`} | 状态机见 state-machines/run-status.mmd |
 | intent_result | `jsonb` | YES | NULL | —— | 来自 intent_router 节点 |
 | final_plan_id | `uuid` | YES | NULL | FK→plans.id | 最终 plan（commit 后填） |
 | total_cost_cny | `float` | NO | `0.0` | `Field(ge=0)` | 累计成本（含所有节点 token） |
@@ -21,7 +21,7 @@
 | fallback_reason | `varchar(64)` | YES | NULL | —— | 见 [verification-and-review.md §错误码](../../governance/verification-and-review.md)（未来的 standards/error-handling-standard.md） |
 | created_at | `timestamptz` | NO | `now()` | —— | —— |
 | started_at | `timestamptz` | YES | NULL | —— | 状态从 pending→running |
-| finished_at | `timestamptz` | YES | NULL | —— | 状态到 completed/failed/degraded |
+| finished_at | `timestamptz` | YES | NULL | —— | 状态到 completed/failed/degraded/cancelled |
 
 ## 2. agent_steps — 每节点一行
 
@@ -84,7 +84,7 @@ INSERT INTO agent_steps (id, run_id, node_name, node_index, prompt_version, mode
 VALUES
   ('st-1-...', 'r-2a8f-...', 'risk_gate', 0, NULL, NULL, 0, 0, 0, 80),
   ('st-2-...', 'r-2a8f-...', 'intent_router', 1, 'intent_router/v1', 'deepseek-chat', 430, 62, 0.0021, 1180),
-  ('st-3-...', 'r-2a8f-...', 'career_planning_agent', 2, 'career_planning_agent/v1', 'deepseek-v4', 3820, 1240, 0.0452, 22340);
+  ('st-3-...', 'r-2a8f-...', 'career_planning_agent', 2, 'career_planning_agent/v1', 'deepseek-chat', 3820, 1240, 0.0452, 22340);
 
 -- 2 个 tool_calls（属于 career_planning_agent 步骤）
 INSERT INTO tool_calls (id, step_id, run_id, tool_name, round, args_hash, result_token_count, latency_ms)

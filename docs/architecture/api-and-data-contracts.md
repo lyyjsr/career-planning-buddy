@@ -229,7 +229,7 @@
 | run_id | UUID | |
 | user_id | UUID | |
 | intent | IntentType | |
-| status | `running / success / fallback / error / cancelled` | |
+| status | `pending / running / completed / failed / degraded / cancelled` | |
 | prompt_version | string | Prompt 模板版本 |
 | model_name | string | 使用的模型 |
 | tool_calls_count | int | 工具调用总次数 |
@@ -288,10 +288,11 @@ candidate（敏感待确认）→ confirmed → closed → deleted
 ### 6.4 AgentRunStatus
 
 ```
-running → success
-   │
-   ├→ fallback（降级完成，带 fallback_reason）
-   ├→ error（不可恢复失败）
+pending → running → completed
+   │          │
+   │          ├→ degraded（降级完成，带 fallback_reason）
+   │          ├→ failed（不可恢复失败）
+   │          └→ cancelled（用户取消）
    └→ cancelled（用户取消）
 ```
 

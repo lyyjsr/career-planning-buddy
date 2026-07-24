@@ -23,7 +23,7 @@
 |---|---|
 | `run_id` | `str`（UUIDv4） |
 | `status` | `Literal["pending"]` |
-| `stream_url` | `str` |
+| `events_url` | `str` |
 
 **示例**：
 ```http
@@ -35,7 +35,7 @@ Idempotency-Key: idem-9af2
 {
   "run_id": "r-2a8f-...",
   "status": "pending",
-  "stream_url": "/api/v1/agent-runs/r-2a8f-.../stream"
+  "events_url": "/api/v1/agent-runs/r-2a8f-.../events"
 }
 ```
 
@@ -47,7 +47,7 @@ Idempotency-Key: idem-9af2
 | 409 | STATE_RUN_ALREADY_ACTIVE | 同用户已有 pending/running run |
 | 429 | RATE_LIMITED_RUN_PER_USER | 单用户 > 5 runs/min |
 
-## 端点：GET /api/v1/agent-runs/{run_id}/stream
+## 端点：GET /api/v1/agent-runs/{run_id}/events
 
 SSE 流，推 plan_run 中间态。
 
@@ -68,7 +68,7 @@ SSE 流，推 plan_run 中间态。
 
 **浏览器示例**：
 ```js
-const es = new EventSource(`/api/v1/agent-runs/${runId}/stream`);
+const es = new EventSource(`/api/v1/agent-runs/${runId}/events`);
 es.addEventListener("progress", (e) => setProgress(JSON.parse(e.data)));
 es.addEventListener("plan_ready", (e) => setPlan(JSON.parse(e.data)));
 es.addEventListener("complete", () => es.close());
@@ -82,7 +82,7 @@ es.addEventListener("complete", () => es.close());
 | 字段 | 类型 |
 |---|---|
 | `run_id` | `str` |
-| `status` | `Literal["completed","failed","degraded"]` |
+| `status` | `Literal["pending","running","completed","failed","degraded","cancelled"]` |
 | `plan` | `Plan \| null` |
 | `tasks` | `list[Task]` |
 | `companion_message` | `str \| null` |
@@ -104,7 +104,7 @@ sequenceDiagram
     SVC->>DB: insert agent_runs (pending)
     SVC-->>API: run_id
     API-->>U: 202 + run_id
-    U->>API: GET /stream (SSE)
+    U->>API: GET /events (SSE)
     API->>SVC: stream(run_id)
     SVC->>G: invoke graph → events
     G->>DB: write each step trace

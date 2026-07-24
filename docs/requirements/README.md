@@ -41,4 +41,4 @@ docs/requirements/<feature>/
 
 ## 当前状态
 
-阶段 0 工程基线：目录与规范已就位，首个 feature 目录在阶段 1 契约冻结时落地。
+当前状态与下一步以根 [README.md](../../README.md) 为准；阶段编号以 [stage-delivery-definition.md](../governance/stage-delivery-definition.md) 为准。

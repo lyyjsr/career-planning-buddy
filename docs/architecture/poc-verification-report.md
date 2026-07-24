@@ -3,10 +3,10 @@
 | 版本 | v1.0 |
 |---|---|
 | 日期 | 2026-07-24 |
-| 状态 | **草稿矩阵已就绪；实测数据待 Stage 3 spike 跑完回填** |
-| 目的 | 阶段 3（PoC 验证）的退出产物。没有此报告 + 全部假设判定 Pass，不进入 Stage 0/1（阶段 6 / 代码）|
+| 状态 | **草稿矩阵已就绪；实测数据待 Pre-Stage 0 Provider PoC 跑完回填** |
+| 目的 | Stage 0 前置 Provider PoC 的退出产物。没有此报告 + 全部假设判定 Pass，不进入 Stage 0/1（代码）|
 
-English summary: PoC verification report for Stage 3 exit. Lists 7 falsifiable hypotheses with thresholds, test method, and a blank measurement table to be filled after the spike. Any single FAIL triggers the ADR-005 fallback chain.
+English summary: Pre-Stage 0 provider PoC report. Lists 7 falsifiable hypotheses with thresholds, test method, and a blank measurement table to be filled after the spike. Any single FAIL triggers the ADR-005 fallback chain.
 
 ---
 

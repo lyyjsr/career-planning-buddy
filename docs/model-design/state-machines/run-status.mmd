@@ -3,29 +3,34 @@
 ```mermaid
 stateDiagram-v2
     [*] --> pending
-    pending --> running: AgentRunService.invoke(graph)
-    running --> completed: 全节点成功 + persist commit
-    running --> failed: 任一节点 fail + 不可恢复
-    running --> degraded: 降级路径触发（fallback_reason 非 null）
+    pending --> running: worker picked
+    pending --> cancelled: user cancel
+    running --> completed: persist commit + all required nodes success
+    running --> degraded: fallback result persisted
+    running --> failed: hard failure + rollback
+    running --> cancelled: user cancel / timeout cancel
     completed --> [*]
-    failed --> [*]
     degraded --> [*]
+    failed --> [*]
+    cancelled --> [*]
 ```
 
 ## 合法转移矩阵
 
 | From | To | 触发条件 | 副作用 |
 |---|---|---|---|
-| pending | running | Service 调 LangGraph | run.started_at 写入 |
-| running | completed | persist 节点 commit + 全节点 success | run.finished_at 写入；final_plan_id 填充 |
+| pending | running | Worker / Service 接管 run 并启动 LangGraph | run.started_at 写入 |
+| pending | cancelled | 用户在执行前取消 | run.finished_at 写入 |
+| running | completed | persist 节点 commit + 全部必要节点 success | run.finished_at 写入；final_plan_id 填充 |
+| running | degraded | 降级结果已持久化（如 agent max_rounds_exhausted） | run.finished_at + fallback_reason |
 | running | failed | 任一 hard failure（如 plan 事务回滚） | run.finished_at + fallback_reason |
-| running | degraded | 降级路径触发（如 agent max_rounds_exhausted） | run.finished_at + fallback_reason |
+| running | cancelled | 用户取消或服务端取消超时 run | run.finished_at + fallback_reason |
 
 ## 非法转移响应
 
 | 转移尝试 | 响应 |
 |---|---|
-| completed/failed/degraded → running | 409 STATE_RUN_ALREADY_FINISHED |
+| completed/failed/degraded/cancelled → running | 409 STATE_RUN_ALREADY_FINISHED |
 | completed → failed | 409 STATE_RUN_ALREADY_FINISHED |
 | 任一终态 → pending | 409 |
 

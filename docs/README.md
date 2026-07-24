@@ -46,7 +46,7 @@ English summary: This directory is the categorized source of truth for project c
 - [ADR 架构决策记录 v2.1](./architecture/adr.md)（9 条，G/T 模板 + ADR-009 LangGraph）
 - [TDD 技术设计文档 v1.0](./architecture/tdd.md)
 - [API 与数据契约 v1.0](./architecture/api-and-data-contracts.md)
-- [PoC 验证报告 v1.0](./architecture/poc-verification-report.md) — **阶段 3 退出物（进 Stage 0 前必读）**
+- [PoC 验证报告 v1.0](./architecture/poc-verification-report.md) — **Stage 0 前置 Provider PoC 退出物（进 Stage 0 前必读）**
 - [技术点决策矩阵](./architecture/technology-decision-matrix.md)
 
 ## 模型与交互设计稿 `model-design/`
@@ -118,6 +118,16 @@ English summary: This directory is the categorized source of truth for project c
 
 ---
 
+## 权威关系
+
+- 当前状态与下一步：以根 [README.md](../README.md) 为准。
+- 阶段编号：以 [governance/stage-delivery-definition.md](./governance/stage-delivery-definition.md) 为准。
+- API 路径、状态枚举、错误码：以 [architecture/api-and-data-contracts.md](./architecture/api-and-data-contracts.md) 为准。
+- 端点、节点、数据表施工细节：以 [model-design/](./model-design/README.md) 为准，但不得覆盖 architecture 的契约。
+- [design-input/](./design-input/README.md) 仅用于追溯，不作为事实源。
+
+---
+
 ## 写作约定
 
 - `docs/` 的一级目录表达文档类别；正式文档使用语义化文件名（不含数字前缀），设计输入归档保留原数字前缀。
@@ -142,4 +152,4 @@ English summary: This directory is the categorized source of truth for project c
 
 ## 当前阶段
 
-📍 **阶段 0：工程基线** —— 下一步见 [阶段化交付定义](./governance/stage-delivery-definition.md)。
+当前状态与下一步以根 [README.md](../README.md) 为准；阶段编号以 [阶段化交付定义](./governance/stage-delivery-definition.md) 为准。
