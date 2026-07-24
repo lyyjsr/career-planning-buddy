@@ -11,7 +11,20 @@
 | LLM | DeepSeek V4 主选，五类 Provider Protocol 抽象 |
 | 部署 | Docker Compose（单机）|
 | 开发方式 | Spec-Driven（文档先定稿，AI 编程助手按 spec 执行） |
-| 当前阶段 | 📍 阶段 0：工程基线 |
+| 当前阶段 | 📍 **SDD 文档预备阶段**（spec 已 95% 覆盖，代码尚未启动） |
+
+---
+
+> ⚠️ **当前状态（2026-07-24）**
+>
+> 本仓库当前**只有文档，没有代码**：`backend/` / `frontend/` / `scripts/` / `infra/` 等目录尚未创建。
+> 这是 **Spec-Driven Development 的预期状态**，不是 bug。
+>
+> - 文档侧进度：阶段 1-5 已完整，阶段 3（PoC）有待 spike 验证（见 [PoC 验证报告](./docs/architecture/poc-verification-report.md)）
+> - 下一步动作：跑 DeepSeek V4 PoC spike → 全 Go 后启动 Stage 0 工程基线
+> - **想 fork 自己启动？** 先读 [PoC 验证报告](./docs/architecture/poc-verification-report.md) + [DeepSeek 对接](./docs/third-party-integration/deepseek-api.md)，需自备 `DEEPSEEK_API_KEY`
+>
+> 下面"快速开始"段是 **Stage 0 完成后**才会激活——当前 `infra/docker-compose.yml` / `backend/pyproject.toml` / `scripts/check.sh` 均未创建。
 
 ---
 
@@ -102,22 +115,19 @@ dazi/
 
 ## 当前进度
 
-📍 **阶段 0：工程基线**
+📍 **SDD 文档预备阶段**（spec 已就绪 / 代码未启动）
 
-退出条件：
-- [x] 仓库初始化（backend / frontend / docs / scripts / infra 五圈层）
-- [x] FastAPI 空骨架 + `/health` 返回 200
-- [x] React 空骨架首屏显示标题
-- [x] Docker Compose 模板（postgres + backend + caddy）
-- [x] import-linter 配置就位
-- [x] `scripts/check.sh` 总入口
-- [x] `docs/` 八类目录就位
-- [x] `.env.example` + `.gitignore`
-- [x] 根 README + 多人协作约定
-- [ ] 本地实测：fastapi 起动 + import-linter 绿 + pytest 绿
-- [ ] Alembic 第一条迁移（pgvector 扩展 + users 表）
+下一步关键路径（按依赖顺序）：
 
-下一步：[docs/governance/stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md) 阶段 1 契约冻结。
+| # | 动作 | 文档依据 | 前置 |
+|---|---|---|---|
+| 1 | 跑 DeepSeek V4 spike（50 行脚本验证 7 项假设） | [PoC 验证报告 §4 执行计划](./docs/architecture/poc-verification-report.md) | 取得 `DEEPSEEK_API_KEY` |
+| 2 | spike 全部 Go（H1-H4 + H7 通过） → ADR-005 升号 "Accepted（已验证）" | 同上 §6 Go/No-Go 矩阵 | 1 |
+| 3 | 启动 **Stage 0 工程基线**：FastAPI `/health` + Docker + Alembic + `scripts/check.sh` | [stage-delivery-definition.md §阶段 0](./docs/governance/stage-delivery-definition.md) | 2 |
+| 4 | Stage 1 契约冻结：Pydantic + Alembic 迁移 + Provider Protocol + 状态机枚举 | 同上 §阶段 1 | 3 |
+| 5 | Stage 2 纵切 Mock 跑通：LangGraph + 11 节点 Mock + Trace 表有数据 | 同上 §阶段 2 | 4 |
+
+> **重要**：在 spike 全 Go 之前，任何 `backend/` 代码不应启动。否则地基不稳。
 
 ---
 
