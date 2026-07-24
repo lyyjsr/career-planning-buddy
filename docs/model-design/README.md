@@ -32,7 +32,16 @@ model-design/
 │   └── safe_response.spec.md
 ├── data-models/                       数据库表 spec（每表一份 + ER 全图）
 ├── api-spec/                          API 端点 spec（每资源一份）
-└── state-machines/                    状态机 spec（mermaid + 转移矩阵）
+├── state-machines/                    状态机 spec（mermaid + 转移矩阵）
+├── harness/                           Harness 反馈层 spec（Trace/Replay/Eval 总览 + 子 spec）
+│   ├── README.md                      5 分钟入门（24 模块 + mermaid 全图）
+│   ├── harness-overview.md            harness 总图（24 模块 + 四层模型 + Stage 映射）
+│   ├── implementation-structure.md    施工总图（完整目录树 + import-linter 增强 + 生命周期钩子）
+│   ├── replay.md                      Replay 机制（输入快照 / prompt 锁定 / diff）
+│   └── eval-system.md                 Eval 数据集 / grader / 报告 / Bad Case / CI 门禁
+│                                       (代码落地于 backend/app/evals/，与 harness/ 并列)
+└── ui-spec/                           前端交互 spec（页面级）
+    └── developer-trace.md             Trace / Replay / Eval / Bad Case 开发者页面
 ```
 
 ## 与相邻目录的边界
@@ -40,7 +49,10 @@ model-design/
 - `architecture/tdd.md` 定义六层 + 工作流整体；`model-design/agent-nodes/` 给每个节点的字段级 spec
 - `architecture/api-and-data-contracts.md` 是 API/状态机的来源；`model-design/api-spec/` 把它拆为每端点一份（便于 AI 上下文聚焦）
 - `architecture/tdd.md §11` 列表名；`model-design/data-models/` 给每张表完整字段+索引+约束+示例行
+- `architecture/tdd.md §12` 概念性定义 Trace/Replay/Eval；`model-design/harness/` 把它们展开为字段级施工 spec（含新增表 `replay_runs` / `eval_cases` / `eval_runs` / `eval_cases_verdicts`）
 
 ## 读取顺序
 
 写节点 N 的代码 → 读 `agent-nodes/N.spec.md` + 它引用的 `data-models/<表>.md` + `state-machines/<机>.mmd` + `api-spec/<资源>.md`。
+
+写 Harness 反馈层代码（Stage 5）→ 读 `harness/harness-overview.md` 再分支到 `harness/replay.md` 或 `harness/eval-system.md` + 配套 `ui-spec/developer-trace.md`。
