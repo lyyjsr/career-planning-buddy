@@ -45,6 +45,7 @@ English summary: This directory is the categorized source of truth for project c
 - [ADR 架构决策记录 v2.1](./architecture/adr.md)（9 条，G/T 模板 + ADR-009 LangGraph）
 - [TDD 技术设计文档 v1.0](./architecture/tdd.md)
 - [API 与数据契约 v1.0](./architecture/api-and-data-contracts.md)
+- [PoC 验证报告 v1.0](./architecture/poc-verification-report.md) — **阶段 3 退出物（进 Stage 0 前必读）**
 - [技术点决策矩阵](./architecture/technology-decision-matrix.md)
 
 ## 模型与交互设计稿 `model-design/`

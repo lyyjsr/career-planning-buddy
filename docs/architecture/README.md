@@ -14,15 +14,17 @@ English summary: Cross-cutting contracts — layered architecture, ADR, TDD, API
 - `standards/` 承接"怎么写 Python/FastAPI 代码"；本目录承接"架构怎么分层、什么技术栈、什么决策"。
 - `design-input/` 保留旧版 ADR 作为决策演进资料，非权威。
 
-## 文档
+## 文档清单
 
-| 文档 | 作用 |
-|---|---|
-| [ADR v2.0](./adr.md) | 8 条核心技术决策 + 演进路径 |
-| [TDD v1.0](./tdd.md) | 系统分层、Agent 设计、Harness、数据架构 |
-| [API 与数据契约 v1.0](./api-and-data-contracts.md) | 接口路径、Schema、状态机、Payload 示例 |
-| [技术点决策矩阵](./technology-decision-matrix.md) | 每个技术点现在做/延后/不做 |
+| 文档 | 作用 | 阶段定位 |
+|---|---|---|
+| [ADR v2.0](./adr.md) | 9 条核心技术决策 + 演进路径 | 阶段 2-4 |
+| [TDD v1.0](./tdd.md) | 系统分层、Agent 设计、Harness、数据架构 | 阶段 4-5 |
+| [API 与数据契约 v1.0](./api-and-data-contracts.md) | 接口路径、Schema、状态机、Payload 示例 | 阶段 4 |
+| [PoC 验证报告 v1.0](./poc-verification-report.md) | 阶段 3 退出物；7 个待验证假设（H1-H7） + Go/No-Go 矩阵 | **阶段 3** |
+| [技术点决策矩阵](./technology-decision-matrix.md) | 每个技术点现在做/延后/不做 | 阶段 4 |
 
 ## 读取顺序
 
-新增功能时建议读：ADR → TDD → API 契约。决策依据看 ADR，实现细节看 TDD，接口字段看 API 契约。
+- **进 Stage 0 之前必读**：[PoC 验证报告](./poc-verification-report.md)（确认 Go 才开工）
+- 新增功能时建议读：ADR → TDD → API 契约。决策依据看 ADR，实现细节看 TDD，接口字段看 API 契约。
