@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as Frontend
+    participant API as FastAPI
+    participant SVC as AgentRunService
+    participant G as LangGraph
+    participant Prov as LLM/Search/Embedding Providers
+    participant DB as Postgres
+
+    U->>FE: 提交首条消息
+    FE->>API: POST /api/v1/agent-runs (Idempotency-Key)
+    API->>SVC: create(user_id, body)
+    SVC->>DB: INSERT agent_runs (status=pending)
+    SVC-->>API: run_id
+    API-->>FE: 202 + run_id + events_url
+
+    FE->>API: GET /agent-runs/{run_id}/events (SSE)
+    API->>SVC: stream(run_id)
+    SVC->>G: invoke graph
+
+    loop 节点循环
+        G->>Prov: 调 LLM/Search/Embedding
+        Prov-->>G: 结果
+        G->>DB: write_step (agent_steps)
+        G-->>SVC: 事件
+        SVC-->>FE: SSE: progress / node.* / tool.* / companion.message
+    end
+
+    G->>DB: persist 事务 INSERT plans+tasks+atoms+candidates
+    G-->>SVC: run.completed(plan_id)
+    SVC-->>FE: SSE: plan.ready + run.completed
+    FE->>U: 渲染今日任务卡 + 陪伴话术

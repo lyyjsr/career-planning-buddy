@@ -14,7 +14,7 @@ English mirror: [AGENTS.md](./AGENTS.md)。完整释义宪法（更详细说明�
 
 **不是**：多 Agent 系统（只有 1 个真 Agent）、Java 业务系统、聊天机器人、demo。
 
-当前阶段：阶段 0 工程基线。见 [stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md)。
+当前状态与下一步：以根 [README.md](./README.md) 为准；阶段编号以 [stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md) 为准。
 
 ## 规范读取路径
 

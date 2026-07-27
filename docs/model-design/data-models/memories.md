@@ -10,11 +10,13 @@
 | user_id | `uuid` | NO | — | FK→users.id | —— |
 | memory_type | `varchar(32)` | NO | — | CHECK ∈ {`profile_fact`,`stable_preference`,`execution_pattern`,`session_temp`} | 4 类型（敏感内容不入此表，走 memory_candidates） |
 | content_json | `jsonb` | NO | — | —— | 按 type 不同结构 |
-| sensitivity | `varchar(16)` | NO | `'none'` | CHECK ∈ {`none`,`sensitive`} | 标记 |
+| status | `varchar(16)` | NO | `'active'` | CHECK ∈ {`active`,`closed`} | 用户主动"关闭"后入此状态（保留行供审计，但不再入上下文）；删除走 DELETE 行 |
+| sensitivity | `varchar(16)` | NO | `'none'` | CHECK ∈ {`none`} | **保留字段但不允许 'sensitive'**（敏感只入 candidates，见 candidates.md）；保留字段名以兼容历史 INV；新写入恒为 'none' |
 | embedding | `vector(1024)` | YES | NULL | —— | DeepSeek Embedding 1024 维（仅 type=execution_pattern 等需要检索的类型） |
 | confidence | `float` | NO | `1.0` | CHECK between 0 and 1 | 行为挖掘的置信度（profile_fact=1.0） |
 | expires_at | `timestamptz` | YES | NULL | —— | type=session_temp 24h 后自动过期；execution_pattern 90 天归档 |
 | created_at | `timestamptz` | NO | `now()` | —— | —— |
+| closed_at | `timestamptz` | YES | NULL | —— | status 转 'closed' 时写入 |
 | last_used_at | `timestamptz` | YES | NULL | —— | 检索访问时间（按时间降权用） |
 | source | `varchar(16)` | NO | `'user'` | CHECK ∈ {`user`,`agent_proposal`,`agent_observed`} | 来源标记 |
 
@@ -23,7 +25,8 @@
 | 名 | 字段 | 类型 | 用途 |
 |---|---|---|---|
 | idx_memory_user_type | (user_id, memory_type) | btree | 类型筛选 + 同类内查 |
-| idx_memory_embedding | embedding | **ivfflat** (pgvector) | 余弦相似度 RAG |
+| idx_memory_user_status | (user_id, status) WHERE status='active' | btree | 仅查激活记忆，跳过 closed |
+| idx_memory_embedding | embedding | **ivfflat** (pgvector ivfflat, vector_cosine_ops) | 余弦相似度 RAG |
 | idx_memory_expires | (expires_at) WHERE expires_at IS NOT NULL | btree | TTL 清理任务 |
 
 ## 外键

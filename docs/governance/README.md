@@ -20,6 +20,7 @@ English summary: How AI and humans operate in this repo — reading guide, dev w
 - AGENTS（双语根入口）：[../../AGENTS.md](../../AGENTS.md) · [../../AGENTS.zh-CN.md](../../AGENTS.zh-CN.md)
 - [AI 协作宪章（释义版）](./AGENTS.md)
 - [开发流程](./development-workflow.md)
+- [本地开发与调试手册](./local-development-guide.md)
 - [新增用例开发 Checklist](./use-case-development-checklist.md)
 - [验证与评审](./verification-and-review.md)
 

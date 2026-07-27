@@ -17,6 +17,9 @@ English summary: What the project is — business positioning, unified vocabular
 ## 文档
 
 - [产品概览 PRD v2.0](./product-overview.md)
+- [需求规格说明书 SRS](./srs.md) — 面向开发/评审，整理用户角色、功能边界、验收指标和需求追踪矩阵
+- [用户使用说明书](./user-manual.md) — 面向最终用户/产品演示者，说明首次建档、生成规划、今日任务、每日复盘、重规划、记忆管理与状态变化
+- [项目演示脚本](./demo-walkthrough.md) — 面向作品展示/面试演示，串起用户价值、核心链路与工程亮点
 
 ## 待补文档（按阶段化交付推进到阶段 1 时补齐）
 

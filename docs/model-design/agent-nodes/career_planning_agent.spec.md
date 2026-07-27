@@ -125,7 +125,7 @@ stateDiagram-v2
 |---|---|
 | `node_name` | `"career_planning_agent"` |
 | `prompt_version` | `"career_planning_agent/v1"` |
-| `model` | `"deepseek-v4"` |
+| `model` | `"deepseek-chat"` |
 | `status` | `"ok"`/`"degraded"` |
 | `rounds_used` | `1` |
 | `tool_calls_used` | `3` |
@@ -157,7 +157,82 @@ stateDiagram-v2
 8. `agent/nodes/career_planning_agent.py` 主循环 + harness 调用
 9. `tests/agent/test_career_planning_agent.py` 5 case
 
-## 9. 引用
+## 9. Prompt 形状约束（spec-driven 编码时 AI 助手必读）
+
+> **仅约束形状与位置**，不约束 prompt 内容。内容在 Stage 3 真实模型接入后迭代（见 [stage-delivery-definition.md §阶段 3](../../governance/stage-delivery-definition.md)）。
+> 本节是 [prompt-versioning-standard.md](../../standards/prompts/prompt-versioning-standard.md) 的位置/结构/起步集补充；版本号铁律仍以该标准为准。
+
+### 9.1 文件位置约定（按 goal_type 分目录）
+
+按 [PRD §3.3 通用化扩展性设计](../../overview/product-overview.md) 的 6 个 `goal_type` 分目录：
+
+```text
+backend/app/prompts/
+├── _shared/                        跨 goal_type 共享常量
+│   ├── system_base.py              角色设定 + 安全边界 + 输出格式（SYSTEM 段公用）
+│   ├── few_shot_examples.py        5 维质量评分的 8 个对比样例（good vs bad）
+│   └── tool_descriptions.py        4 Tool 的描述文本（注入 SYSTEM 段）
+├── ai_backend/                     ← MVP 起步集（Stage 3 写 v1）
+│   ├── diagnose_v1.py
+│   └── plan_v1.py
+├── agent_app/                      ← Stage 4+ 复制 ai_backend 改 ≤20%
+├── backend_java/                   ← Stage 4+
+├── data_engineer/                  ← Stage 4+
+├── fullstack/                      ← Stage 4+
+└── other/                          ← goal_type=other 通用兜底（PRD §3.3 day-1 建好）
+```
+
+### 9.2 单个 `*_vN.py` 文件四段结构（铁律）
+
+所有 `diagnose_v*.py` / `plan_v*.py` 文件必须导出以下 4 个模块级常量字符串：
+
+```python
+# prompts/ai_backend/plan_v1.py
+SYSTEM = "..."           # 角色设定、能力边界、安全约束、工具列表
+                         # 必须注入 _shared/system_base.py + _shared/tool_descriptions.py
+TASK_TEMPLATE = "..."    # 业务任务模板（diagnose 或 plan；含 {placeholders}）
+CONSTRAINTS = "..."      # today_tasks 必含 starter_action、禁模糊动词、单任务时长上限...
+OUTPUT_FORMAT = "..."    # JSON schema（与 PlanningAgentResult.PlanCandidate Pydantic 对齐）
+```
+
+**禁止**：把 prompt 写成单字符串拼接、跨段常量、运行时动态组合。所有四段必须静态可读，便于 Replay diff。
+
+### 9.3 版本号铁律（与 [prompt-versioning-standard.md](../../standards/prompts/prompt-versioning-standard.md) 对齐）
+
+- 第一次写 = `*_v1.py`
+- 任何修改 → 新建 `*_v2.py`，旧版保留（不编辑、不删除）
+- 禁止编辑已存在的 `vN` 文件
+- agent_steps 表的 `prompt_version` 字段写入 `"<goal_type>/<task>/v<N>"`（例 `"ai_backend/plan/v1"`）
+- Replay 跑历史 run 时按 `prompt_version` 锁定输入快照，比对 v1 vs v2 输出差异
+
+### 9.4 MVP 起步集（Stage 3 边界）
+
+| 项 | MVP 是否写 | 起步策略 |
+|---|---|---|
+| `prompts/_shared/system_base.py` | ✅ 写 | 第一份公用常量 |
+| `prompts/_shared/few_shot_examples.py` | ✅ 写 | 8 个对比样例（good/bad）转写自 [PRD §7 5 维质量评分](../../overview/product-overview.md) |
+| `prompts/_shared/tool_descriptions.py` | ✅ 写 | 4 Tool 描述 |
+| `prompts/ai_backend/plan_v1.py` | ✅ 写 | 第一份业务 prompt（首发场景） |
+| `prompts/ai_backend/diagnose_v1.py` | ✅ 写 | 第二份（建档阶段用） |
+| `prompts/{其它 5 个 goal_type}/*_v1.py` | ❌ 不写 | Stage 4+ 复制 ai_backend 改 ≤20%，不预先写 |
+| `prompts/other/*_v1.py` | ✅ 写 | 通用兜底（PRD §3.3 "未支持场景的产品行为"要求 day-1 有兜底模板） |
+
+### 9.5 与 [harness/eval-system.md](../harness/eval-system.md) 的关系（V 层闭环）
+
+- Eval dataset（30 case）必须覆盖每个 goal_type 至少 1 个 case
+- Bad Case 回流时，若判断是 prompt 问题 → 触发 `vN+1`，新建版本（不允许原地改）
+- Replay 跑 v1 vs v2 时，6 grader 维度的 diff 必须留档
+
+### 9.6 文档约束（写 prompt 前必读）
+
+- prompt **内容** 不入 spec 仓库（属于代码迭代物，归 `backend/app/prompts/`）
+- prompt **形状 / 位置 / 版本规则** 由本 §10 约束
+- §10.2 四段结构若需结构性修改（如改为 5 段、新增段）→ 必走 [spec-driven-workflow.md](../../governance/spec-driven-workflow.md)，记 ADR
+- prompt 内容审阅走 [prompt-review-checklist.md](../../standards/prompts/prompt-review-checklist.md)
+
+---
+
+## 10. 引用
 
 - [ADR-002](../../architecture/adr.md) 单 Agent 范式
 - [ADR-005](../../architecture/adr.md) V4 主选

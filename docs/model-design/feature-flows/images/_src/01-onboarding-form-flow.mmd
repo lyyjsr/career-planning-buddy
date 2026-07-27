@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as Frontend
+    participant API as FastAPI Router
+    participant SVC as services.auth / services.profile
+    participant DB as Postgres
+
+    U->>FE: 打开应用
+    FE->>API: POST /api/v1/auth/login {"token":"guest-xxx"}
+    API->>SVC: services.auth.login(token)
+    SVC->>DB: UPSERT users (brief_login_type='guest')
+    SVC-->>API: {access_token, user_id}
+    API-->>FE: 200 {access_token, user_id}
+
+    U->>FE: 填表单（goal_type / stage / time_budget_minutes）
+    FE->>API: PUT /api/v1/profile (Bearer JWT, Idempotency-Key)
+    API->>SVC: services.profile.upsert(user_id, body)
+    SVC->>DB: UPSERT user_profiles (含 version=1)
+    SVC-->>API: UserProfile
+    API-->>FE: 200 UserProfile
+
+    alt 必填字段缺失 / 范围越界
+        SVC-->>API: ValidationError
+        API-->>FE: 422 VALIDATION_PROFILE_INCOMPLETE
+        FE->>U: 红框提示
+    end

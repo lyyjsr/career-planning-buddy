@@ -14,7 +14,7 @@ Chinese mirror: [AGENTS.zh-CN.md](./AGENTS.zh-CN.md). Full prose constitution (d
 
 This is **not**: a multi-agent system (only 1 real Agent), a Java business system, a chatbot, or a demo.
 
-State: Stage 0 (engineering baseline). See [stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md).
+Current status and next step: root [README.md](./README.md) is authoritative; stage numbering is defined in [stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md).
 
 ## Required Reading Paths
 

@@ -9,6 +9,8 @@
 | 设计哲学 | 单核心 Agent + 受控节点 + 六层 Harness + 证据驱动规划 + 执行反馈闭环 |
 | 来源 | 基于同伴 TDD（六层 Harness/Trace/Replay/Eval/Provider/上下文工程）深度融合产品 PRD（复盘-调整双层、陪伴 6 时刻、任务质量 5 维评分、安全分流） |
 
+> DeepSeek V4 是项目选型候选称呼；代码配置、Trace 示例与 PoC 实测必须使用官方 model id（当前为 `deepseek-chat`），不得把项目代号当作真实 model id。
+
 ---
 
 ## 0. 执行摘要
@@ -328,6 +330,28 @@ dazi/
 - 每工具调用超时 10s
 - 不可访问其他用户的记忆
 - 工具结果必须经脱敏和长度限制后入 context
+
+### 6.4 Tool 选择启发式（Agent 行为约束，对应 ETCLOVG T 层）
+
+> 本表是 [career_planning_agent.spec.md §5 主循环](../model-design/agent-nodes/career_planning_agent.spec.md) 的 Tool 调用判据；
+> 不是硬规则，是 LLM 系统提示词中应注入的偏好（转写到 [prompts/_shared/tool_descriptions.py](../model-design/agent-nodes/career_planning_agent.spec.md) 与各 goal_type prompt 的 CONSTRAINTS 段）。
+
+| 业务场景 | 首选 Tool | 备选 Tool | 停止 / 收敛条件 |
+|---|---|---|---|
+| 用户问"X 公司 / 招聘 / JD / 政策" | `web_search` | — | 已有 ≥2 个 web_search 结果 |
+| 用户问"我适不适合 X 方向" / 含模糊动词 | `rag_retrieve` | `memory_lookup` | 已有 ≥1 个匹配经验原子（embedding cos ≥ 0.75） |
+| 用户问"上次复盘 / 历史影响今天什么" | `memory_lookup` | — | 用户历史 < 3 条记忆 → 跳过工具直接生成 |
+| 上下文 > 6 轮对话（约 4k tokens） | `context_summarize` | — | 每轮循环前强制调用一次 |
+| `intent=replan`（已有 plan，仅需调整） | 不调 Tool | — | 直接基于 PlanningContext 生成新 PlanCandidate |
+| 用户消息含模糊动词（"了解 / 熟悉 / 研究"） | `rag_retrieve` | `web_search` | 找到具体动作范例后再停止 |
+
+**边界规则**：
+
+- **每轮优先级**：先看"有无 replan 提示" → 否则看 user_profile 缺槽 → 否则看场景查表
+- **轮内上限**：单轮 ≤4 工具调用（INV-6 已约束，本节是行为补充而非重复约束）
+- **prompt 注入**：本表必须转写为 prompt 的 `CONSTRAINTS` 段，让 LLM 知道选择偏好（详见 [career_planning_agent.spec.md §9 Prompt 形状约束](../model-design/agent-nodes/career_planning_agent.spec.md)）
+- **Eval 验证**：30 case 中"Tool 选择合理性"是 [eval-system.md](../model-design/harness/eval-system.md) 的 6 grader 维度之一
+- **Replay diff**：当 T 层策略变化（如调整 cos 阈值）时，按 [prompt-versioning-standard](../standards/prompts/prompt-versioning-standard.md) 升 `vN+1` 跑同输入 diff
 
 ---
 

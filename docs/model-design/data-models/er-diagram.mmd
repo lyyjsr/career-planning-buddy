@@ -16,6 +16,10 @@ erDiagram
     agent_runs ||--o{ agent_steps : has
     agent_steps ||--o{ tool_calls : triggered
 
+    plans ||--o{ companion_messages : themed_by
+    reviews ||--o{ companion_messages : themed_by
+    tasks ||--o{ companion_messages : themed_by
+
     search_sources }o--o{ experience_atoms : distilled_into
 
     users {
