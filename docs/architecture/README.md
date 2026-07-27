@@ -21,6 +21,7 @@ English summary: Cross-cutting contracts — layered architecture, ADR, TDD, API
 | [ADR v2.0](./adr.md) | 9 条核心技术决策 + 演进路径 | 阶段 2-4 |
 | [TDD v1.0](./tdd.md) | 系统分层、Agent 设计、Harness、数据架构 | 阶段 4-5 |
 | [API 与数据契约 v1.0](./api-and-data-contracts.md) | 接口路径、Schema、状态机、Payload 示例 | 阶段 4 |
+| [AI 场景与风险分析](./ai-scenario-and-risk-analysis.md) | AI 适用场景、不可交给 AI 的边界、数据/Prompt/RAG/Agent 风险控制 | 阶段 2 |
 | [PoC 验证报告 v1.0](./poc-verification-report.md) | Stage 0 前置 Provider PoC 退出物；7 个待验证假设（H1-H7） + Go/No-Go 矩阵 | **阶段 3** |
 | [技术点决策矩阵](./technology-decision-matrix.md) | 每个技术点现在做/延后/不做 | 阶段 4 |
 

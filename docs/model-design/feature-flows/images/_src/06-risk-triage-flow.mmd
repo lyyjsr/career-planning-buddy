@@ -1,0 +1,13 @@
+flowchart TD
+    A[POST /agent-runs message 进 risk_gate 节点 LangGraph 第 1 步] --> KW[同步关键词词表匹配 core/keywords/risk_keywords.py]
+    A --> CL[异步 LLM 分类器 DeepSeekSmall.complete schema=RiskAssessment 超时 5s]
+    KW -->|命中| HIGH[risk_level=high]
+    KW -->|未命中| WAIT{分类器结果}
+    CL -->|timeout/schema_invalid 等| FALL1[降级 keyword_only 只信关键词结果]
+    CL -->|classifier_result=high| HIGH
+    CL -->|classifier_result=clear| LOW[risk_level=none]
+    WAIT -->|超时或失败| LOW_W_FALL[fallback_reason=risk_classifier_failure risk_level=none]
+    HIGH --> SR[safe_response 节点 选 5 类话术之一]
+    SR --> END[run 落 degraded + SSE 推 run.failed/degraded + companion.message]
+    LOW --> NEXT[→ 模块 02 主流程 intent_router]
+    LOW_W_FALL --> NEXT

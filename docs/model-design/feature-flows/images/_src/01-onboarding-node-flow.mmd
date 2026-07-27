@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    participant SVC as AgentRunService
+    participant RG as risk_gate (规则+LLM)
+    participant IR as intent_router (LLM)
+    participant CLR as clarification (程序)
+    participant TRACE as trace_writer
+
+    SVC->>RG: RiskRequest(user_id, message, profile_summary)
+    RG->>RG: 关键词词表（同步）
+    RG->>RG: DeepSeekSmallProvider.complete (异步超时 5s)
+    RG-->>SVC: RiskAssessment
+    RG->>TRACE: write_step(risk_gate)
+
+    alt risk_level="high"
+        SVC->>SVC: 路由到 safe_response（模块06）
+    else none/low
+        SVC->>IR: IntentRequest(user_id, message, goal_type, session_id)
+        IR->>IR: DeepSeekSmallProvider.complete (LLM structured output, 超时 10s)
+        IR->>IR: INV-1~5 validators
+        IR-->>SVC: IntentResult
+        IR->>TRACE: write_step(intent_router)
+
+        alt needs_clarification=true
+            SVC->>CLR: IntentResult(missing_slots)
+            CLR->>CLR: core/slots/slot_questions.py 查模板
+            CLR-->>SVC: ClarificationRequest
+            CLR->>TRACE: write_step(clarification)
+            SVC-->>SVC: SSE 推 clarification.requested
+        else 槽位齐全
+            SVC->>SVC: 路由到模块 02 生成规划
+        end
+    end

@@ -36,6 +36,9 @@ English summary: This directory is the categorized source of truth for project c
 用于理解项目为什么存在、面向什么用户、包含哪些业务场景。回答"是什么"。
 
 - [产品概览 PRD v2.0](./overview/product-overview.md)
+- [需求规格说明书 SRS](./overview/srs.md)
+- [用户使用说明书](./overview/user-manual.md)
+- [项目演示脚本](./overview/demo-walkthrough.md)
 - [目录入口 README](./overview/README.md)（待补：统一术语表、限界上下文、用例追踪）
 
 ## 架构设计 `architecture/`
@@ -46,6 +49,7 @@ English summary: This directory is the categorized source of truth for project c
 - [ADR 架构决策记录 v2.1](./architecture/adr.md)（9 条，G/T 模板 + ADR-009 LangGraph）
 - [TDD 技术设计文档 v1.0](./architecture/tdd.md)
 - [API 与数据契约 v1.0](./architecture/api-and-data-contracts.md)
+- [AI 场景与风险分析](./architecture/ai-scenario-and-risk-analysis.md)
 - [PoC 验证报告 v1.0](./architecture/poc-verification-report.md) — **Stage 0 前置 Provider PoC 退出物（进 Stage 0 前必读）**
 - [技术点决策矩阵](./architecture/technology-decision-matrix.md)
 
@@ -54,6 +58,9 @@ English summary: This directory is the categorized source of truth for project c
 **施工级 spec**——给 AI 写代码直接照抄的"蓝图"。每个子目录有具体编法规范。
 
 - [model-design 目录入口](./model-design/README.md)
+- [端到端运行流程](./model-design/end-to-end-runtime-flow.md) — 启动、建档、规划、SSE、任务、复盘、记忆、安全分流的完整工程链路
+- [知识库 / 数据设计说明](./model-design/data-seeding-and-sources.md) — 数据源、经验原子、RAG、种子数据、质量规则
+- [前端页面使用流](./model-design/ui-spec/product-navigation.md) — PC/移动端导航、主路径、页面状态映射
 - [Agent 节点 spec（11 份）](./model-design/agent-nodes/README.md) — 七要素：输入/输出/不变量/错误边界/状态机/副作用/Trace
 - [数据模型 spec（10 表 + ER 图）](./model-design/data-models/README.md) — 完整字段/约束/索引/示例行
 - [API 端点 spec（7 端点）](./model-design/api-spec/README.md) — 从 architecture/api-and-data-contracts.md 拆出
@@ -76,6 +83,7 @@ English summary: This directory is the categorized source of truth for project c
 - [AI 渐进式加载指南](./governance/ai-reading-guide.md)
 - [AGENTS.md AI 协作宪章](./governance/AGENTS.md)
 - [开发流程](./governance/development-workflow.md)
+- [本地开发与调试手册](./governance/local-development-guide.md)
 - [Spec-Driven 工作流（澄清→计划→任务）](./governance/spec-driven-workflow.md)
 - [新增用例开发 Checklist](./governance/use-case-development-checklist.md)
 - [验证与评审](./governance/verification-and-review.md)

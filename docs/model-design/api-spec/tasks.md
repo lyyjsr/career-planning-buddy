@@ -36,8 +36,13 @@
 | `version` | `int` | ✅（乐观锁） |
 | `actual_minutes` | `int \| null` | state=completed 时填 |
 | `abandoned_reason` | `Literal["too_hard","too_easy","no_time","lost_interest","blocked","other"] \| null` | state=abandoned 时填 |
+| `abandoned_reason_text` | `str \| null` | `abandoned_reason='other'` 时必填，max 200 |
 
-**成功响应 200** 完整 `Task`（含新 version）。
+**成功响应 200** `UpdateTaskResponse`：
+| 字段 | 类型 |
+|---|---|
+| `task` | 完整 `Task`（含新 version）|
+| `companion_message` | `str \| null`（任务完成/放弃触发了陪伴时刻 T2/T3 时返回，见 [companion_response.spec.md](../agent-nodes/companion_response.spec.md)）|
 
 **错误**：
 | HTTP | code |

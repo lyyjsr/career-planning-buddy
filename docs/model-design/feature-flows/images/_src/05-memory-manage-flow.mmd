@@ -1,0 +1,15 @@
+flowchart TD
+    ENTER[用户进入 我的记忆 页] --> LIST[GET /api/v1/memories 按 type 分组列出]
+    ENTER --> CAND[GET /api/v1/memory-candidates 列待确认候选]
+    CAND --> CONFIRM{用户操作}
+    CONFIRM -->|确认| ACCEPT[POST /memory-candidates/id/confirm]
+    CONFIRM -->|拒绝| REJECT[POST /memory-candidates/id/reject]
+    ACCEPT --> MIG[memory_candidates 状态 confirmed 迁移到 memories.status=active 填 activated_memory_id]
+    REJECT --> REJC[memory_candidates 状态 rejected]
+    LIST --> OPS{用户操作}
+    OPS -->|关闭| CLOSE[PATCH /memories/id status=closed]
+    OPS -->|重新激活| ACT[PATCH /memories/id status=active]
+    OPS -->|删除| DEL[DELETE /memories/id]
+    CLOSE --> INACTIVECtx[不再进入 PlanningContext.memory_block]
+    ACT --> ACTIVECtx[重新进入 context_builder]
+    DEL --> HARDDEL[memories 表 DELETE 行]

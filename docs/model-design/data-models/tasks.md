@@ -21,6 +21,7 @@
 | completed_at | `timestamptz` | YES | NULL | —— | 进入 completed 时 |
 | abandoned_at | `timestamptz` | YES | NULL | —— | —— |
 | abandoned_reason | `varchar(32)` | YES | NULL | CHECK ∈ {`too_hard`,`too_easy`,`no_time`,`lost_interest`,`blocked`,`other`} | —— |
+| abandoned_reason_text | `varchar(200)` | YES | NULL | 当 abandoned_reason='other' 时必填 | 用户自由文本（PRD §6.2 "放弃任务记录原因"产品要求） |
 | expires_at | `timestamptz` | YES | NULL | —— | 进入 expire 时 |
 
 ## 索引
@@ -49,3 +50,9 @@ VALUES ('t-1a8b-...', 'p-9e2a-...', 'u-7c3e2f1a-...', 0, 'pending',
 ## 关联状态机
 
 参 [state-machines/task-state.mmd](../state-machines/task-state.mmd)。
+
+## 跨表副作用
+
+- `pending → in_progress` 时：写 `tasks.started_at`；**并触发 plan 状态机副作用**——若 `plans.status='active'`，由 service 同事务 `UPDATE plans SET status='adopted', adopted_at=now(), version=version+1`（见 [plan-status.mmd](../state-machines/plan-status.mmd) active→adopted 转移）。
+- `in_progress → completed` 时：写 `tasks.completed_at` 和 `actual_minutes`。
+- `in_progress / pending → abandoned` 时：写 `tasks.abandoned_at` 与 `abandoned_reason`（含 'other' 时必填 `abandoned_reason_text`）。

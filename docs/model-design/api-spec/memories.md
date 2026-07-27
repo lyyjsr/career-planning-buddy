@@ -28,6 +28,26 @@
 | 404 | NOT_FOUND_MEMORY |
 | 403 | AUTH_NOT_OWN_MEMORY |
 
+## 端点：PATCH /api/v1/memories/{memory_id}
+
+切换记忆状态（关闭/激活）。**必填 Idempotency-Key + version**。
+
+**请求 Schema** `UpdateMemoryRequest`：
+| 字段 | 类型 | 必填 |
+|---|---|---|
+| `status` | `Literal["active","closed"]` | ✅ |
+| `version` | `int` | ✅（乐观锁） |
+
+**成功响应 200** 完整 `Memory`（新 version）。
+
+**错误**：
+| HTTP | code |
+|---|---|
+| 404 | NOT_FOUND_MEMORY |
+| 403 | AUTH_NOT_OWN_MEMORY |
+| 409 | STATE_VERSION_CONFLICT |
+| 422 | VALIDATION_MEMORY_INVALID |
+
 ## 端点：GET /api/v1/memory-candidates
 
 列待用户确认的记忆候选（来自 memory_candidates 表）。

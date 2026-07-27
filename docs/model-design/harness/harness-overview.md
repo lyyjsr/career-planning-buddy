@@ -202,7 +202,65 @@ flowchart TD
 
 ---
 
-## 2. 四层 harness 模型（来自《Harness-engineering 开源工程分享》§1.6 + LangChain Anatomy）
+## 2. ETCLOVG 七层——学术 SSoT 分类法（顶层骨架）
+
+> 资料来源：Li et al., *Agent Harness Engineering: A Survey*, 2026（CMU / UAB / Yale 等机构联合综述，[GitHub: Picrew/awesome-agent-harness](https://github.com/Picrew/awesome-agent-harness)）。
+> 本仓库采用此分类法作为 harness 设计的**顶层骨架与完整性 checklist**；下文 §3 的 24 模块 + A/B/C/D/E/F 内部分组是它的**展开与填料**。
+
+### 2.1 七层定义（survey §2.3）
+
+| 层 | 名称 | 定义 | 在本项目中的承担 |
+|---|---|---|---|
+| **E** | Execution（执行环境） | Agent 代码在哪运行、有什么沙箱约束 | Docker Compose + FastAPI 单后端（无需沙箱，业务不写代码任务） |
+| **T** | Tooling（工具协议） | 工具如何描述、发现、调用、扩展 | `tools/` ToolSpec + 白名单 + ToolRegistry（见 [TDD §6](../../architecture/tdd.md) + 本节 §3.2） |
+| **C** | Context & Memory（上下文） | 短/中/长期上下文与记忆系统 | PlanningContext + `memories` / `memory_candidates` / `experience_atoms`（见 [TDD §7](../../architecture/tdd.md) + 本节 §3.1） |
+| **L** | Lifecycle & Orchestration（生命周期） | 单 Agent 循环 + 状态机 + 检查点 + 多 Agent 编排 | LangGraph StateGraph（survey §6.3 明列属 **Graph composition pattern**）+ checkpointer + 11 节点 + 4 状态机（见 [TDD §4](../../architecture/tdd.md) + 本节 §3.3/3.4） |
+| **O** | Observability（可观测性） | Trace / Cost / Reliability / 失败模式 | `agent_runs` / `agent_steps` / `tool_calls` 三表 + `cost_cny` / `latency_ms` 字段（见 [trace-tables.md](../data-models/trace-tables.md) + 本节 §3.5 E1） |
+| **V** | Verification & Evaluation（验证评测） | 任务基准 → 准备性 → 受控执行 → 多层判断 → 持续回归 | rule_validator + quality_reviewer + revise_or_fallback + 30 case Eval + CI 门禁（见本节 §3.6 + [eval-system.md](./eval-system.md)） |
+| **G** | Governance & Security（治理） | 权限 / 身份 / Hook / 审计 / 宪法 / 组件硬化 | risk_gate + safe_response + JWT + AGENTS.md 宪章（见本节 §3.7） |
+
+### 2.2 五层 vs 七层关系（防止混淆）
+
+| 概念 | 性质 | 关系 |
+|---|---|---|
+| **本仓库 5 件套**（Trace / Budget / Checkpoint / Replay / Eval） | 工业组件清单（实现视角） | 是 ETCLOVG **L + O + V 三层的子集** |
+| **ETCLOVG 七层** | 学术分类法（设计视角） | 是 5 件套的**上位 checklist** |
+| **24 模块（§3）** | LangChain Anatomy 24 模块（填料视角） | **横跨** ETCLOVG 七层——是细节展开 |
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│  ETCLOVG 7 层（顶层设计骨架——本节）                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  四层实践模型 + 24 模块（§3——内部细节填料）           │  │
+│  │  ┌──────────────────────────────────────────────┐  │  │
+│  │  │  5 件套（Trace/Budget/Checkpoint/Replay/Eval） │  │  │
+│  │  │  = ETCLOVG L+O+V 工业子集（运行时核心护栏）      │  │  │
+│  │  └──────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────┘  │
+│  + E 执行 + T 工具 + C 上下文 + G 治理（外延扩展）          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 2.3 覆盖度清单（每层都需在 spec 中找得到落位）
+
+> 这是 spec-startup 完整性判定表；任一层标 🔴 必须先补 spec 再启动 Stage 3 编码。
+
+| 层 | 覆盖度 | spec 落位 | 缺口动作 |
+|---|---|---|---|
+| E | 🟡 部分 | [tdd.md §2](../../architecture/tdd.md) Docker Compose | MVP 不需要沙箱，Docker 已够，暂不补 |
+| T | 🟡 部分 | [tdd.md §6](../../architecture/tdd.md) + 本节 §3.2 | **补 [tdd.md §6.4 Tool 选择启发式](../../architecture/tdd.md)**（已有方案） |
+| C | ✅ 完整 | [tdd.md §7](../../architecture/tdd.md) + [data-models/memories.md](../data-models/memories.md) | 无 |
+| L | ✅ 完整 | [tdd.md §4](../../architecture/tdd.md) + [state-machines/](../state-machines/) | 无（Graph composition pattern 经典） |
+| O | ✅ 完整 | [trace-tables.md](../data-models/trace-tables.md) + [agent_runs/steps/calls 三表] | 无 |
+| V | ✅ 完整 | 本节 §3.6 + [eval-system.md](./eval-system.md) + CI 门禁 ≥85% | 无 |
+| G | 🟡 部分 | risk_gate / safe_response 节点 + JWT + [AGENTS.md 宪章] | MVP 范围声明只覆盖最小集；远期补审计/宪法（[proscope](../../standards/security-and-compliance.md)） |
+
+---
+
+## 3. 四层实践模型（harness 内部资源视图，LangChain Anatomy 来源）
+
+> 本节是「项目内部如何把 24 module 分组到 4 个工程域」的视图；它与 §2 ETCLOVG 是「资源视角 vs 分类视角」的关系。
+> 来源：《Harness-engineering 开源工程分享》PDF §1.6 + LangChain Anatomy。
 
 | 层 | 职责 | 本仓库落位 |
 |---|---|---|
@@ -213,11 +271,11 @@ flowchart TD
 
 ---
 
-## 3. 模块清单（24 anatomy × 本仓库映射）
+## 4. 模块清单（24 anatomy × 本仓库映射）
 
-业界六份一手资料合并去重得 24 个 harness 模块，下表逐项映射到本仓库已有 spec 或显式标注"缺失"。**任何新增设计先对照此表，不重复造已有件。**
+业界六份一手资料合并去重得 24 个 harness 模块，下表逐项映射到本仓库已有 spec 或显式标注"缺失"。**任何新增设计先对照此表，不重复造已有件。** 这 24 模块按 A/B/C/D/E/F 六组组织（来自 LangChain Anatomy），与 §2 ETCLOVG 七层的多对多映射见每节末尾。
 
-### 3.1 A 输入侧（让模型"想对"）
+### 4.1 A 输入侧（让模型"想对"）  → ETCLOVG **C** + 部分 **T**
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -225,7 +283,7 @@ flowchart TD
 | A2 | Context Engineering（召回→压缩→组装） | ✅ | [context_builder.spec.md](../agent-nodes/context_builder.spec.md)、[TDD §7](../../architecture/tdd.md) |
 | A3 | Memory（跨会话 + AGENTS.md 加载） | ✅ | `memories` / `memory_candidates` 表 |
 
-### 3.2 B 输出侧（让模型"能做"）
+### 4.2 B 输出侧（让模型"能做") → ETCLOVG **T** + 部分 **G**
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -233,7 +291,7 @@ flowchart TD
 | B2 | Action / Observation 协议 | ✅ | [career_planning_agent.spec.md](../agent-nodes/career_planning_agent.spec.md) §7 |
 | B3 | Tool Middleware（超时/重试/审计/只读） | ⚠️ 部分 | [TDD §12.4](../../architecture/tdd.md) 仅预算；中间件实现在 Stage 3 |
 
-### 3.3 C 环境与执行
+### 4.3 C 环境与执行 → ETCLOVG **E** + **T**
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -241,7 +299,7 @@ flowchart TD
 | C2 | Sandbox / Runtime | ✅ | Stage 0 Docker Compose + Stage 3 故障注入 |
 | C3 | Model Configuration & Routing | ✅ | [ADR-005](../../architecture/adr.md) + Provider 五类 Protocol |
 
-### 3.4 D 控制义务（让模型"做对"）
+### 4.4 D 控制义务（让模型"做对") → ETCLOVG **L** + **G**
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -250,7 +308,7 @@ flowchart TD
 | D3 | Budget（token/cost/time/calls） | ✅ | [TDD §12.4](../../architecture/tdd.md) + §14 |
 | D4 | Hooks / Middleware | ⚠️ 部分 | [check-scripts-spec.md](../../governance/check-scripts-spec.md) CI hook；运行时级 hook 非 MVP |
 
-### 3.5 E 可观测 / 可恢复
+### 4.5 E 可观测 / 可恢复 → ETCLOVG **O** + **L**（Checkpoint）
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -259,7 +317,7 @@ flowchart TD
 | E3 | Replay（同输入 + Prompt 版本重跑 + diff） | 🆕 **本系列补** | [replay.md](./replay.md) |
 | E4 | Dev Dashboard | 🆕 **本系列补** | [../ui-spec/developer-trace.md](../ui-spec/developer-trace.md) |
 
-### 3.6 F 评测 / 进化
+### 4.6 F 评测 / 进化 → ETCLOVG **V**
 
 | # | 模块 | 状态 | 落位 / spec |
 |---|---|---|---|
@@ -273,7 +331,7 @@ flowchart TD
 
 ---
 
-## 4. 运行时数据流（run 级别）
+## 5. 运行时数据流（run 级别）
 
 ```mermaid
 flowchart LR
@@ -295,7 +353,7 @@ flowchart LR
 
 ---
 
-## 5. harness 模块仓库结构（参考）
+## 6. harness 模块仓库结构（参考）
 
 > ⚠️ 当前仓库尚未有 `backend/`，下面是 Stage 0+ 落地后的目标结构。与 [TDD §3.3](../../architecture/tdd.md) 一致。
 >
@@ -372,7 +430,7 @@ backend/app/
 
 ---
 
-## 6. 实施时序（与 stage-delivery 对齐）
+## 7. 实施时序（与 stage-delivery 对齐）
 
 ```mermaid
 gantt
@@ -408,15 +466,15 @@ gantt
 
 ---
 
-## 7. 范围声明
+## 8. 范围声明
 
-### 7.1 本系列补的（E3 / E4 / F2 / F3 / F4）
+### 8.1 本系列补的（E3 / E4 / F2 / F3 / F4）
 
 - [replay.md](./replay.md) — Replay 机制（输入快照 / prompt_version 锁定 / diff 展示）
 - [eval-system.md](./eval-system.md) — Eval 数据集 schema + grader 接口 + 报告 + Bad Case 回流 + CI 门禁
 - [../ui-spec/developer-trace.md](../ui-spec/developer-trace.md) — Trace 调试页前端交互
 
-### 7.2 本系列明确不补的
+### 8.2 本系列明确不补的
 
 | 不补 | 理由 |
 |---|---|
@@ -427,7 +485,7 @@ gantt
 
 ---
 
-## 8. 参考依据
+## 9. 参考依据
 
 | 来源 | 用于本文 § |
 |---|---|
@@ -440,7 +498,8 @@ gantt
 | [stage-delivery-definition.md](../../governance/stage-delivery-definition.md) | §6 |
 | 《Harness-engineering 开源工程分享》PDF §1.6 | §0.1, §2 |
 | arXiv:2604.21003v3《The Last Harness You'll Ever Build》§2.1 | §0.1 |
-| LangChain《Anatomy of an Agent Harness》(Trivedy, 2026) | §0.1, §1 |
+| LangChain《Anatomy of an Agent Harness》(Trivedy, 2026) | §0.1, §1, §3 |
+| **Li et al., *Agent Harness Engineering: A Survey*, 2026**（[GitHub](https://github.com/Picrew/awesome-agent-harness)；**ETCLOVG 七层分类法**） | **§2 顶层骨架** |
 | OpenHands ConversationState / EventLog | §1 |
 | Anthropic Rajasekaran 2026 Generator/Evaluator | §1 |
 
