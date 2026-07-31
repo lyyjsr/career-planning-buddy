@@ -27,8 +27,8 @@
 
 ## 4. 核心价值
 
-1. 根据目标、阶段、截止时间和技能现状生成计划；
-2. 今日只给 1~3 个高质量任务；
+1. 根据目标、阶段、截止时间和技能现状生成 1~8 周方向与每周重点；
+2. 每次只展开当天 1~3 个高质量任务；
 3. 每个任务都有 starter_action、deliverable 和预计时长；
 4. 记录开始、完成、放弃和实际耗时；
 5. 复盘后根据事实建议重规划；
@@ -102,14 +102,14 @@ flowchart TD
 
 一次计划至少包含：
 
-- summary；
-- rationale；
-- 1~3 个当天任务；
+- 1~8 周的 planning window、overall_direction 和 weekly_focus；
+- summary、rationale；
+- 仅 `plan_date` 当天的 1~3 个任务；
 - 每个任务的 title、task_type、scheduled_date、starter_action、deliverable、estimated_minutes；
 - 使用过的来源；
-- replan 时的 adjustment_reason。
+- adjust replan 时的 adjustment_reason。
 
-产品铁律：宁可给 1 个可完成任务，也不给 3 个空泛任务。
+产品铁律：方向可以看中期，但行动只展开到今天；宁可给 1 个可完成任务，也不给 3 个空泛任务。
 
 ## 9. 计划质量规则
 
@@ -125,7 +125,7 @@ flowchart TD
 
 ## 10. 复盘和重规划
 
-Review 内容：mood、blockers、adjustment_request、free_text。
+Review 内容：mood、blockers、adjustment_request、free_text。复盘后用户总可以主动生成次日计划：没有明显偏差时 continue，有调整需求时 adjust。
 
 系统从任务表计算完成/放弃统计。以下情况建议重规划：
 
@@ -138,8 +138,8 @@ Review 内容：mood、blockers、adjustment_request、free_text。
 原则：
 
 - 不静默替换计划；
-- 用户确认后才创建 replan Run；
-- 新计划成功后才归档旧计划；
+- 用户点击“生成明日任务/调整明日计划”后才创建 replan Run；
+- 只有归档旧计划和创建新计划的同一事务成功提交后，旧计划才归档；
 - 已完成事实不得丢失；
 - 连续完成不自动加量。
 
@@ -154,7 +154,7 @@ Review 内容：mood、blockers、adjustment_request、free_text。
 - 建议重规划；
 - 次日续接。
 
-常见话术模板化，复杂复盘才可调用模型。
+MVP 全部使用版本化模板，避免陪伴话术占用规划模型预算；后续如实验模型生成，必须单独配置、评测并保留模板兜底。
 
 ## 12. 风险分流
 

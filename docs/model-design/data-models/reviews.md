@@ -14,10 +14,10 @@
 | abandoned_count | integer | NO | default 0 | Service 从 tasks 计算 |
 | suggested_replan | boolean | NO | default false | 是否建议重规划 |
 | replan_reason | varchar(500) | YES | | 规则或 Agent 理由 |
-| accepted_replan_run_id | uuid | YES | UNIQUE, FK agent_runs.id | 用户接受后创建的 Run |
+| next_plan_run_id | uuid | YES | UNIQUE, FK agent_runs.id | 续接/调整下一计划时创建的 Run |
 | idempotency_key | varchar(64) | NO | | 写请求幂等 |
 | created_at | timestamptz | NO | now() | |
 
 约束：UNIQUE `(user_id, idempotency_key)`；建议 UNIQUE `(user_id, plan_id, review_date)`，同一天修改用 PATCH 扩展而不是重复 POST。
 
-客户端不传 completed_task_ids / abandoned_task_ids，数据库任务状态是唯一事实源。
+客户端不传 completed_task_ids / abandoned_task_ids，数据库任务状态是唯一事实源。每条 Review 最多创建一个 next_plan_run；即使 `suggested_replan=false`，用户也可在完成复盘后续接次日计划。

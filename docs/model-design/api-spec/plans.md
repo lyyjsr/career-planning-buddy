@@ -2,11 +2,11 @@
 
 ## GET /api/v1/plans/active
 
-返回状态为 generated 或 active 的当前计划。无计划返回 404。
+返回状态为 generated 或 active 的当前行动计划。无计划返回 404。
 
 ## GET /api/v1/plans
 
-Query：`status`, `cursor`, `limit`。返回 Cursor 分页历史。
+Query：`status`, `date_from`, `date_to`, `cursor`, `limit`。返回 Cursor 分页历史。
 
 ## GET /api/v1/plans/{plan_id}
 
@@ -16,11 +16,30 @@ Query：`status`, `cursor`, `limit`。返回 Cursor 分页历史。
 {
   "plan_id": "c91f8734-2839-4f55-9db1-1c39b8a410f2",
   "status": "active",
-  "summary": "本周优先把 Agent 项目做成可演示闭环",
+  "plan_date": "2026-07-31",
+  "horizon_start": "2026-07-31",
+  "horizon_end": "2026-09-03",
+  "overall_direction": "五周内完成 Agent 项目闭环并进入模拟面试阶段",
+  "weekly_focus": [
+    {
+      "week_index": 1,
+      "focus": "补齐可演示的 Agent Run 闭环",
+      "success_signal": "能够演示一次完整 Run 和 Trace"
+    }
+  ],
+  "summary": "今天先把 Run Trace 的数据库闭环跑通",
   "rationale": "...",
   "adjustment_reason": null,
   "tasks": [],
-  "sources": [],
+  "sources": [
+    {
+      "kind": "search_source",
+      "id": "f880d3e2-2de7-48aa-b123-068d1d6f5e69",
+      "title": "示例来源",
+      "url": "https://example.com",
+      "reliability": 0.8
+    }
+  ],
   "companion_message": "...",
   "version": 2,
   "adopted_at": "...",
@@ -28,15 +47,22 @@ Query：`status`, `cursor`, `limit`。返回 Cursor 分页历史。
 }
 ```
 
-PlanDetail 由 plans、tasks、search_sources、companion_messages 拼装。
+PlanDetail 由 plans、tasks、`weekly_focus_json`、`evidence_refs_json`、对应 Memory/ExperienceAtom/SearchSource 和 companion_messages 拼装。来源字段按 kind 返回适合用户展示的摘要；Memory 不返回不必要的敏感原文。
 
 ## GET /api/v1/plans/{plan_id}/sources
 
-返回该计划产生 Run 的证据来源。
+按 `evidence_refs_json` 顺序返回该计划实际使用的证据。支持 kind：memory、experience_atom、search_source。
+
+- search_source 可返回审核后的 URL/title/snippet；
+- experience_atom 返回 title/evidence/reliability；
+- memory 返回类型和脱敏摘要，不暴露被关闭或删除的原文；
+- 引用失效时返回 `available=false`，不 silently 替换为其他证据。
 
 ## 规则
 
 - 用户只能读取自己的计划；
 - 活跃计划定义为 generated/active；
-- 新 replan 成功后旧活跃计划转 archived；
-- 无单独“采纳”接口，首个任务开始即视为采纳。
+- completed 计划仍可作为“生成次日任务”的来源；
+- 新 continue/adjust 计划事务成功后，来源计划转 archived；
+- 无单独“采纳”接口，首个任务开始即视为采纳；
+- `/today` 只展示当前 `plan_date` 的 Task，中期 weekly_focus 不会一次展开成几十个未来 Task。

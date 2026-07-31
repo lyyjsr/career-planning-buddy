@@ -2,55 +2,132 @@
 
 ## 定位
 
-系统唯一真 Agent。根据 PlanningContext 选择白名单 Tool 并生成结构化计划候选，不直接写数据库。
+系统唯一真 Agent。它接收只读 `PlanningContext`，在 Stage 4 可自主选择白名单 Tool，最终生成结构化 `PlanCandidate`。它不直接写数据库、不改变业务状态，也不能调用副作用 Tool。
+
+产品输出分两层：
+
+1. **方向层**：面向 1~8 周的整体方向和每周重点；
+2. **行动层**：只生成 `planning_date` 当天可执行的 1~3 个任务。
+
+这样既能回答“未来几周怎么准备”，又避免一次生成几十个很快失效的任务。次日通过来源计划和复盘生成新的计划版本。
+
+完整循环见 [`../agent-runtime/README.md`](../agent-runtime/README.md)，Tool 契约见 [`../tools/README.md`](../tools/README.md)。
+
+## Input
+
+```python
+class CareerPlanningAgentInput(BaseModel):
+    run_id: UUID
+    intent: Literal["create_plan", "replan"]
+    replan_mode: Literal["initial", "continue", "adjust"]
+    effective_goal_type: GoalType
+    user_request: str
+    planning_context: PlanningContext
+    available_tools: list[ModelToolSpec]
+    remaining_deadline_ms: int
+```
+
+`PlanningContext` 只包含序列化、脱敏后的画像、规划窗口、当前/来源计划、近期任务与复盘、已确认记忆和证据目录。
 
 ## 预算
 
 | 项 | 上限 |
 |---|---:|
+| AgentTurn 主调用 | Stage 2/3 最多 1；Stage 4/5 最多 3 |
+| 格式修复 | 全 Run 最多 1，单独计入全局预算 |
 | Tool Calling 轮次 | 2 |
+| 每轮 Tool 数 | 2 |
 | Tool 调用总数 | 4 |
-| 主模型调用总数 | 3（含最终生成） |
 | 单 Tool 超时 | 8s |
 | Agent 节点超时 | 30s |
 
-## 可用 Tool
-
-- Stage 2：context_summarize（可选，确定性实现）；
-- Stage 4：memory_lookup、web_search、rag_retrieve。
+Stage 2/3 的 `available_tools=[]`，模型必须直接返回候选；Stage 4 才开放 `memory_lookup`、`rag_retrieve`、`web_search`。
 
 ## Output
 
 ```python
-PlanCandidate(
-  summary: str,
-  rationale: str,
-  adjustment_reason: str | None,
-  assumptions: list[str],
-  tasks: list[TaskCandidate],
-  source_ids: list[UUID]
-)
+class WeeklyFocusCandidate(BaseModel):
+    week_index: int = Field(ge=1, le=8)
+    focus: str = Field(min_length=1, max_length=160)
+    success_signal: str = Field(min_length=1, max_length=200)
 
-TaskCandidate(
-  title: str,
-  task_type: TaskType,
-  scheduled_date: date,
-  starter_action: str,
-  deliverable: str,
-  estimated_minutes: int,
-  rationale: str | None
-)
+class PlanCandidate(BaseModel):
+    plan_date: date
+    horizon_start: date
+    horizon_end: date
+    overall_direction: str = Field(min_length=1, max_length=500)
+    weekly_focus: list[WeeklyFocusCandidate] = Field(min_length=1, max_length=8)
+    summary: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=2000)
+    adjustment_reason: str | None = Field(default=None, max_length=1000)
+    assumptions: list[str] = Field(default_factory=list, max_length=5)
+    tasks: list[TaskCandidate] = Field(min_length=1, max_length=3)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=10)
+
+class EvidenceRef(BaseModel):
+    kind: Literal["memory", "experience_atom", "search_source"]
+    id: UUID
+
+class TaskCandidate(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    task_type: TaskType
+    scheduled_date: date
+    starter_action: str = Field(min_length=1, max_length=240)
+    deliverable: str = Field(min_length=1, max_length=240)
+    estimated_minutes: int = Field(ge=5, le=480)
+    rationale: str | None = Field(default=None, max_length=500)
 ```
 
-## 不变量
+`horizon_start/horizon_end` 必须等于 `PlanningContext.planning_window`。用户没有明确周期时，ContextBuilder 根据 profile.deadline 计算并最多展开 8 周；更远目标只在 overall_direction 中表达，不生成虚假的远期细节。
 
-- 任务 1~3 个；
-- source_ids 只能来自 Tool 结果；
-- 不允许自行改变用户 goal_type；
-- replan 不得删除已完成事实；
-- 不输出 SQL、命令或业务写入指令；
-- Pydantic 解析失败最多修复一次。
+## Tool Calling 行为
+
+1. 模型只能看到 `available_tools` 中的定义；
+2. Tool 参数必须通过 Pydantic 校验；
+3. 相同 `tool_name + args_hash` 在同一 Run 中复用；
+4. Tool 结果以 `<evidence>` 边界回填，不具有指令权限；
+5. 达到 Tool 预算后，下一轮只允许返回最终 `PlanCandidate`；
+6. 模型返回自由文本、未知 Tool 或混合“Tool Call + Final”时视为结构错误。
+
+## 业务不变量
+
+- `weekly_focus` 覆盖规划窗口，week_index 连续且不重复；
+- 所有 Task 的 `scheduled_date == plan_date`；
+- 当天任务 1~3 个，总时长不超过用户每日预算；
+- `evidence_refs` 只能引用本 Run evidence_catalog 中的 Memory/ExperienceAtom/SearchSource；
+- 不允许自行改变用户 `goal_type`；
+- create_plan 不得假装存在历史执行事实；
+- `replan_mode=continue` 应延续原方向和下一周重点，不无故推翻；
+- `replan_mode=adjust` 必须保留已完成事实并明确 `adjustment_reason`；
+- 不重复安排近期已完成的同一交付物；
+- 不输出 SQL、Shell 命令、数据库写入指令或未经证实的 URL；
+- Provider Schema 解析失败最多做一次格式修复，不重新执行 Tool。
 
 ## Prompt
 
-Prompt 代码位于 `backend/app/prompts/career_planning/`，使用显式 version。Trace 记录实际 `LLM_MODEL`，不得写死项目代号。
+Prompt 位于 `backend/app/prompts/career_planning/` 并显式版本化。System 区只放角色、边界、输出契约和 Tool 规则；用户请求、画像、记忆和搜索结果全部放在不可信数据区。
+
+Trace 必须记录：prompt_version、实际 model_id、每次 call 的 token/latency/cost、Tool round、最终 output hash，不保存 API Key 和完整敏感 Prompt。
+
+## 失败策略
+
+| 失败 | 行为 |
+|---|---|
+| Provider timeout/rate limit | 若上下文足够则模板 fallback，否则 failed |
+| Tool timeout | 写 Tool 失败结果，允许 Agent 用已有证据继续 |
+| Tool 全部失败 | 禁止编造来源，使用本地上下文或 fallback |
+| 输出 Schema 错 | 格式修复一次，仍错交给 fallback |
+| 规则校验失败 | 交给 revise_or_fallback，不在本节点无限重试 |
+
+## 测试
+
+- Stage 3 无 Tool 一次生成；
+- 5 周请求得到 5 个 weekly focus，但只产生当天 1~3 个任务；
+- 次日 continue 保持方向并推进下一步；
+- adjust replan 保留 completed facts 并解释调整；
+- 两轮 Tool 后正常输出；
+- 未知 Tool、参数越界、重复 args_hash；
+- Tool 预算耗尽后仍请求 Tool；
+- evidence id 伪造；
+- horizon/plan_date 不匹配；
+- 模型超时、Schema 错和取消。

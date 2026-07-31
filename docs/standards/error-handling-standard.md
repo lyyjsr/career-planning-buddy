@@ -18,25 +18,50 @@
 
 Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-runs` 的 202 响应，而是收敛到数据库状态和 SSE 终态：
 
-- `completed`：正常结果；
-- `degraded`：存在可用但质量受限的计划/模板结果，必须带 `fallback_reason`；
-- `failed`：没有可用结果；
-- `cancelled`：用户或系统取消。
+- `completed`：正常 Plan 已持久化，result_kind=plan；
+- `degraded`：存在可用但受限的结果，必须有 result_kind 和 fallback_reason；结果可以是模板 Plan、Clarification 或 Safe Response；
+- `failed`：没有可用结果，必须有 error_code；
+- `cancelled`：用户取消，必须有 error_code=RUN_CANCELLED。
 
-持久化失败不能标记 degraded，因为用户没有可读取的结果。
+持久化失败不能标记 degraded，因为用户没有可读取的结果。每个 Run 只能由 AgentRunFinalizer 写一个 terminal event；persist 通过 finalize_plan 进入同一终态事务。
 
-## 3. 重试
+## 3. 错误分类
 
-- LLM 结构化输出失败：最多修复 1 次；
-- 网络连接错误：只对幂等调用有限重试，使用短退避；
-- Tool 超时：不无限重试，记录错误后按节点规则跳过或降级；
-- 数据库事务失败：事务整体回滚，由 API 层决定是否安全重试；
-- 副作用写入不得由 Agent 自由重试。
+| code | 典型处理 |
+|---|---|
+| PROVIDER_TIMEOUT | 有模板则 degraded，否则 failed |
+| PROVIDER_RATE_LIMITED | 有模板则 degraded，否则 failed |
+| STRUCTURED_OUTPUT_INVALID | 格式修复一次 |
+| PLAN_RULE_VALIDATION_FAILED | 专用 repair 一次 |
+| TOOL_ARGUMENT_INVALID | 不重试，Agent 可继续或 fallback |
+| TOOL_TIMEOUT | 不无限重试，Agent 可继续或 fallback |
+| TOOL_PROVIDER_UNAVAILABLE | 不编造证据 |
+| BUDGET_EXCEEDED | 停止外部调用，模板或 failed |
+| AGENT_DEADLINE_EXCEEDED | failed |
+| RUN_CANCELLED | cancelled |
+| PROCESS_INTERRUPTED | failed |
+| PERSISTENCE_FAILED | 回滚并 failed |
 
-## 4. 预算错误
+## 4. 重试与修复
 
-超过 LLM 次数、Tool 轮次、Token 或 Run deadline 时，抛出明确预算异常，停止后续调用并写事件。能生成合规模板时标记 degraded，否则 failed。
+- LLM Schema 格式失败：最多格式修复 1 次；
+- 计划业务规则失败：最多专用 repair 1 次，关闭 Tool；
+- 网络连接错误：仅对幂等 Provider 调用有限重试，使用短退避且受 Deadline 限制；
+- Tool 参数错误不重试；
+- Tool 超时不无限重试；
+- 数据库事务失败整体回滚；
+- 业务副作用不得由 Agent 自由重试。
 
-## 5. 日志与 Trace
+格式修复和业务修复是两类不同动作，均计入全局 LLM 预算。
 
-每个异常至少记录 request_id/run_id、错误 code、节点、Provider、重试次数和脱敏摘要。不得记录 JWT、API key、完整敏感输入和外部页面全文。
+## 5. 预算错误
+
+超过 LLM 次数、Tool 轮次/数量或 Run deadline 时，停止后续外部调用。能生成合规模板 Plan 时 degraded，否则 failed。Deadline 到期不继续执行 companion/persist，除非模板已在剩余时间内完成并能原子提交。
+
+## 6. 取消
+
+取消接口先持久化 `cancel_requested_at`，再取消进程内 Task。节点、模型和 Tool 调用前后检查取消。取消后禁止继续下一个节点；最终通过 Finalizer 写 cancelled 和唯一 `run.cancelled`。
+
+## 7. 日志与 Trace
+
+每个异常至少记录 request_id/run_id、错误 code、节点、Provider、重试/修复次数和脱敏摘要。不得记录 JWT、API key、完整敏感输入和外部页面全文。

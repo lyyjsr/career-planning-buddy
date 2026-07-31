@@ -17,7 +17,7 @@
 2. 当前阶段任务书 `docs/implementation/stage-*.md`
 3. 相关 `docs/model-design/api-spec/*.md`
 4. 相关 `docs/model-design/data-models/*.md`
-5. 相关状态机和节点 spec
+5. 相关 Agent Runtime、Tool、状态机和节点 spec
 
 不要先扫描全部 100 多份文档后自行拼接结论。
 
@@ -28,6 +28,8 @@
 - 不得擅自增加 Redis、Celery、MCP、多 Agent、对象存储或微服务。
 - Router 只处理 HTTP；业务规则放 Service；数据库访问放 Repository。
 - Agent 节点不得直接写 ORM，所有业务写入必须经 Service。
+- Stage 2~4 必须遵守 `agent-runtime` 的预算、快照、取消、终态唯一和结果类型契约。
+- Tool 只读、显式白名单、参数/结果 Schema、超时、用户隔离和 Replay fixture 缺一不可。
 - 所有外部模型调用只通过 Provider Protocol。
 - API Request 不接受 `user_id`，用户身份只从 JWT 获取。
 - 写接口必须处理幂等或乐观锁。

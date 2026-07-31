@@ -32,7 +32,7 @@
 ```text
 用户建档
   → 发起规划请求
-  → Agent 生成结构化计划与 1~3 个今日任务
+  → Agent 生成中期方向、每周重点与 1~3 个今日任务
   → 用户开始 / 完成 / 放弃任务
   → 用户提交每日复盘
   → 系统判断是否需要重规划
@@ -44,7 +44,7 @@ MVP 必须完成：
 1. Guest JWT 登录与用户隔离；
 2. 用户画像；
 3. Agent Run + SSE；
-4. 计划和今日任务；
+4. 中期方向、每周重点和今日任务；
 5. 任务状态机；
 6. 复盘和重规划；
 7. 基础记忆；
@@ -75,7 +75,7 @@ MVP 暂不引入 Redis、Celery、Kafka、MCP、多 Agent、Kubernetes 和对象
 1. [`docs/implementation/project-baseline.md`](./docs/implementation/project-baseline.md)
 2. [`docs/architecture/tdd.md`](./docs/architecture/tdd.md)
 3. [`docs/architecture/api-and-data-contracts.md`](./docs/architecture/api-and-data-contracts.md)
-4. [`docs/model-design/`](./docs/model-design/README.md) 下的端点、表和节点 spec
+4. [`docs/model-design/`](./docs/model-design/README.md) 下的 Runtime、Tool、端点、表和节点 spec
 5. [`docs/overview/product-overview.md`](./docs/overview/product-overview.md)
 6. `docs/design-input/` 仅供追溯，不作为实现依据
 
@@ -86,7 +86,7 @@ MVP 暂不引入 Redis、Celery、Kafka、MCP、多 Agent、Kubernetes 和对象
 ```text
 1. 从仓库根目录启动 Codex，让其读取 `AGENTS.md`
 2. 再读 `AGENTS.zh-CN.md` 与 `docs/implementation/project-baseline.md`
-3. 只读当前阶段任务书
+3. 只读当前阶段任务书；Stage 2~4 额外阅读 Agent Runtime 与 Tool spec
 4. 先输出文件清单和实现计划
 5. 再生成代码与测试
 6. 本地执行验收命令
@@ -95,6 +95,12 @@ MVP 暂不引入 Redis、Celery、Kafka、MCP、多 Agent、Kubernetes 和对象
 
 各阶段可直接复制的任务说明位于 [`docs/implementation/`](./docs/implementation/README.md)。
 更具体的 Codex 使用方法见 [`CODEX-CODING-GUIDE.md`](./CODEX-CODING-GUIDE.md)。
+
+Agent 编码的三个关键施工入口：
+
+- [`Agent Runtime`](./docs/model-design/agent-runtime/README.md)：Graph、State、预算、快照、取消和终态；
+- [`Agent Tool`](./docs/model-design/tools/README.md)：白名单、Schema、超时、证据和 Replay fixture；
+- [`Runtime Prompt 清单`](./docs/standards/prompts/runtime-prompt-matrix.md)：哪些节点使用模型、输入输出和修复边界。
 
 ## 计划中的仓库结构
 

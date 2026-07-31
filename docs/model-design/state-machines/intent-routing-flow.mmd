@@ -3,13 +3,13 @@
 ```mermaid
 flowchart TD
     A[User message] --> R[risk_gate]
-    R -->|high risk| S[safe_response]
+    R -->|high risk| S[safe_response + degraded]
     R -->|safe| I[intent_router]
-    I -->|profile incomplete| C[clarification.requested + degraded]
-    I -->|create_plan| P[planning graph]
-    I -->|replan| P
-    I -->|query_plan| Q[read-only plan summary]
-    I -->|unsupported| F[template fallback]
+    I -->|profile incomplete| C[clarification + degraded]
+    I -->|create_plan| P[planning graph: initial]
+    I -->|replan + continue| N[planning graph: continue]
+    I -->|replan + adjust| J[planning graph: adjust]
+    I -->|unsupported or query-only| U[clarification with resource-page guidance]
 ```
 
-`hint_intent` 只是前端提示。最终意图由服务端规则和模型共同判定并写入 `resolved_intent`。
+`hint_intent` 只允许 create_plan/replan，是前端提示。`replan_mode` 由服务端结合用户措辞、source plan 和 source review 推导为 continue/adjust；`start-next-plan` 创建的 mode 不能被客户端伪造。已有计划查询使用 `/plans`、`/tasks` 资源接口，不进入生成 Graph。最终路由写入 `resolved_intent/replan_mode`。

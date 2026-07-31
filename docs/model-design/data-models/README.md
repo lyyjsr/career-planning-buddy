@@ -9,7 +9,7 @@
 | 身份与画像 | `users`, `user_profiles` |
 | 规划闭环 | `plans`, `tasks`, `reviews`, `companion_messages` |
 | 记忆与证据 | `memories`, `memory_candidates`, `search_sources`, `experience_atoms` |
-| Agent Runtime | `agent_runs`, `agent_steps`, `tool_calls`, `agent_events` |
+| Agent Runtime | `agent_runs`, `agent_steps`, `tool_calls`, `agent_events`（含输入/配置快照与终态结果） |
 
 Eval 固定数据集第一版保存在 `backend/evals/datasets/*.jsonl`，不阻塞业务迁移。
 

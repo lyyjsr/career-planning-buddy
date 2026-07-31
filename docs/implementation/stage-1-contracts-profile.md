@@ -6,7 +6,7 @@
 
 ## 实现范围
 
-1. 枚举：GoalType、CareerStage、SkillLevel、RunStatus、PlanStatus、TaskStatus；
+1. 枚举：GoalType、CareerStage、SkillLevel、RunStatus、RunResultKind、PlanStatus、TaskStatus；
 2. 表：users、user_profiles；
 3. Guest 登录：`POST /api/v1/auth/guest`；
 4. 当前用户摘要：`GET /api/v1/me`；

@@ -16,7 +16,7 @@
 | 全局架构 | `architecture/adr.md`, `architecture/tdd.md` |
 | API | `architecture/api-and-data-contracts.md`, 对应 `model-design/api-spec/` |
 | 数据表 | 对应 `model-design/data-models/` 与状态机 |
-| Agent Graph | `model-design/end-to-end-runtime-flow.md` 与对应 node spec |
+| Agent Runtime/Graph | `model-design/agent-runtime/README.md`、`model-design/tools/README.md`、端到端流程与对应 node spec |
 | Prompt/LLM | `standards/prompts/`, `third-party-integration/llm-provider.md` |
 | 安全 | `standards/security-and-compliance.md`, `agent-nodes/risk_gate.spec.md` |
 | 测试/Eval | `standards/testing-and-tdd.md`, `model-design/harness/` |

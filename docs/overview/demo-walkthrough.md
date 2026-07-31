@@ -86,7 +86,7 @@ Agent 不是随意写库或自由发挥，而是被限制在单核心 Agent + �
 
 ```text
 这里不是一次 LLM 调用直接返回答案。
-后端会创建 agent_run，经过 risk_gate、intent_router、context_builder、career_planning_agent、rule_validator、quality_reviewer、persist 等节点。
+后端会创建 agent_run，经过 risk_gate、intent_router、context_builder、career_planning_agent、rule_validator、一次受控修复、companion_response、persist 等节点。quality_reviewer 默认只在 Stage 5 的 Eval/Replay 中离线 shadow 评测，不向线上 Run 追加事件。
 前端通过 SSE 展示中间状态，最后拿到可保存、可追踪的计划和任务。
 ```
 
@@ -121,7 +121,7 @@ Agent 不是随意写库或自由发挥，而是被限制在单核心 Agent + �
 
 | 情况 | 行为 |
 |---|---|
-| 不需要调整 | 保存复盘，进入次日续上 |
+| 不需要明显调整 | 保存复盘，用户点击后以 continue 生成明日行动批次 |
 | 需要调整 | 生成 suggested_replan，用户确认后创建 replan run |
 
 要讲清楚：

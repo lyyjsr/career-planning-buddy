@@ -26,17 +26,30 @@
   "abandoned_count": 1,
   "suggested_replan": true,
   "replan_reason": "时间预算下降且存在持续阻塞",
+  "next_plan_action": "adjust",
   "companion_message": "今天已经推进了接口，明天先把部署拆小。"
 }
 ```
+
+`next_plan_action`：
+
+- `continue`：方向不变，生成下一 planning_date 的行动批次；
+- `adjust`：根据 blocker/时间/用户指令调整周重点和下一批任务。
 
 ## GET /api/v1/reviews
 
 Query：plan_id、date_from、date_to、cursor、limit。
 
-## POST /api/v1/reviews/{review_id}/accept-replan
+## POST /api/v1/reviews/{review_id}/start-next-plan
 
-需要 `Idempotency-Key`。只在 `suggested_replan=true` 且尚未接受时可调用。
+需要 `Idempotency-Key`。每个 Review 最多成功创建一个 next Plan Run。
+
+这个端点不要求 `suggested_replan=true`：
+
+- false 时创建 `hint_intent=replan, replan_mode=continue`；
+- true 或用户有 adjustment_request 时创建 `replan_mode=adjust`；
+- source_plan_id 固定使用 review.plan_id，source_review_id 使用当前 review；planning_date 由服务端设为 `max(local_today, review_date+1)`；
+- 只有用户点击后才创建，不后台静默生成。
 
 Response 202：
 
@@ -44,8 +57,9 @@ Response 202：
 {
   "run_id": "...",
   "status": "pending",
+  "replan_mode": "adjust",
   "events_url": "/api/v1/agent-runs/.../events"
 }
 ```
 
-该端点等价于服务端创建 `hint_intent=replan`、`source_plan_id=review.plan_id` 的新 Run。它不立即归档原计划，只有新计划成功持久化后才归档。
+该端点不立即归档原计划。只有“归档来源计划 + 插入新计划 + Run 终态”的事务整体成功后，来源计划才变为 archived；新 Run 失败时原计划保持原状态。

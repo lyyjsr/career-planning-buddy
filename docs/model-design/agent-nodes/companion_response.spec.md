@@ -1,30 +1,31 @@
 # companion_response — 陪伴话术
 
-## 策略
+## 定位
 
-模板优先，只有复杂复盘场景才可调用轻量模型。这样降低成本和不稳定性。
+MVP 中是确定性模板节点，不计入 LLM 预算。它根据已验证计划或 fallback 结果生成简短、具体、不施压的用户提示。
 
 ## trigger_tag
 
 - plan_ready
-- first_task_started
-- task_completed
-- task_abandoned
 - review_saved
 - replan_suggested
-- next_day
+
+任务开始、完成、放弃等实时话术由 Task/Review Service 使用同一模板库生成，不进入计划 Agent Graph。
 
 ## Output
 
 ```python
-CompanionMessageCandidate(trigger_tag: str, message: str, template_version: str | None)
+class CompanionMessageCandidate(BaseModel):
+    trigger_tag: str
+    message: str = Field(min_length=1, max_length=500)
+    template_version: str
 ```
 
 ## 规则
 
-- 引用具体完成内容，不泛泛夸奖；
-- 放弃时不评判；
+- 引用具体任务或调整，不泛泛夸奖；
+- 放弃时不评判、不制造羞耻感；
 - 连续完成不自动加量；
 - 情绪低落时共情但不诊断；
-- 最长 500 字；
-- 任务 PATCH 的常见话术用模板，不为每次状态更新调用 LLM。
+- high risk 不使用本节点，直接走 safe_response；
+- 模板缺失属于配置错误，计划仍可持久化，但 Run 标记 degraded 并使用通用兜底模板。

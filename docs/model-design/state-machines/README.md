@@ -7,4 +7,4 @@
 - [Task 状态](./task-state.mmd)
 - [意图路由](./intent-routing-flow.mmd)
 
-所有枚举以 [API 与数据契约](../../architecture/api-and-data-contracts.md) 为准。
+所有枚举以 [API 与数据契约](../../architecture/api-and-data-contracts.md) 为准。Run 终态还必须满足 result_kind 和唯一 terminal event 约束。

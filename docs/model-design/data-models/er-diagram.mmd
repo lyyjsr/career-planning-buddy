@@ -17,6 +17,7 @@ erDiagram
 
     tasks ||--o{ companion_messages : triggers
     reviews ||--o{ companion_messages : triggers
+    reviews o|--o| agent_runs : starts_next_plan
 
     agent_runs ||--o{ agent_steps : has
     agent_runs ||--o{ agent_events : emits

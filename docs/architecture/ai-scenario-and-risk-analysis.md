@@ -29,7 +29,7 @@ Career Planning Buddy 适合使用 AI 的部分是“开放语义理解、上下
 
 | 场景 | 是否适合 AI | 方式 | 说明 |
 |---|---|---|---|
-| 用户意图识别 | 适合 | LLM 单次分类 + 置信度 | 输出 create_plan/replan/query_plan 和缺槽 |
+| 用户意图识别 | 适合 | LLM 单次分类 + 置信度 | 输出 create_plan/replan/unsupported 和缺槽；查询走资源 API |
 | 缺槽追问 | 适合部分 AI | 规则 + 模板/LLM | 问题数量和字段受控 |
 | 上下文摘要 | 适合 | 程序拼接 + LLM 摘要可选 | 必须限长和脱敏 |
 | 计划生成 | 适合 | CareerPlanningAgent | 唯一真 Agent，自主调只读工具 |
@@ -121,9 +121,9 @@ Career Planning Buddy 适合使用 AI 的部分是“开放语义理解、上下
 | 风险 | 约束 |
 |---|---|
 | Agent 越权调用工具 | ToolWhitelistGuard |
-| Agent 循环不收敛 | max_rounds=2、max_tool_calls_total=8 |
+| Agent 循环不收敛 | max_tool_rounds=2、max_tool_calls_total=4、Stage 2/3/4 的 max_llm_calls=5/7、deadline 优先 |
 | Agent 写库 | 禁止；写入只在 persist 节点 |
-| Agent 输出半成品 | rule_validator + quality_reviewer |
+| Agent 输出半成品 | rule_validator + 一次受控 repair；quality_reviewer 默认离线 shadow |
 | Agent 失败不可解释 | agent_steps/tool_calls Trace |
 
 ## 9. 评测要求

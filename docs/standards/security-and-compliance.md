@@ -5,7 +5,9 @@
 - API 只信任服务端解析出的 `user_id`；
 - Repository 查询必须带用户范围；
 - Guest token 使用高强度 `JWT_SECRET`，生产环境必须轮换；
-- 日志、Trace 和 Eval 数据集不得保存 token、密钥、完整简历或其他不必要隐私。
+- 日志、Trace、Snapshot、Tool Fixture 和 Eval 数据集不得保存 token、密钥、完整简历或其他不必要隐私；
+- input/config snapshot 只保存 Replay 所需的最小字段，采用字段级脱敏和保留期；
+- tool_calls.result_json 最大 32KB，只保存清洗后的结构化结果。
 
 ## 2. Agent 输入安全
 
@@ -15,7 +17,8 @@
 
 - 限制输入长度和附件类型；
 - 对 Tool 参数做 Pydantic/JSON Schema 校验；
-- 对检索内容加来源和截断；
+- 对检索内容加来源、类型和截断；
+- evidence_ref 必须能解析到当前 Run/用户允许的真实资源；
 - 禁止把网页中的“忽略之前规则”当成指令执行。
 
 ## 3. 高风险分流
@@ -45,7 +48,8 @@ risk_gate → safe_response → END
 - 密钥不入库、不入日志、不入前端；
 - 外部调用有 HTTPS、超时、重试上限和响应大小限制；
 - Provider 失败时按 `error-handling-standard.md` 降级；
-- Trace 记录实际 provider/model id，不记录密钥。
+- Trace 记录实际 provider/model id，不记录密钥；
+- Replay 默认使用保存 fixture，缺 fixture 不静默访问真实网络。
 
 ## 6. 内容边界
 

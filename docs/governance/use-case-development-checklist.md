@@ -19,8 +19,10 @@
 
 - [ ] 确定性逻辑优先使用规则节点；
 - [ ] LLM 输出有 Schema；
-- [ ] Tool 有超时、参数校验和结果上限；
-- [ ] 调用次数、Token 和总截止时间有预算；
+- [ ] Tool 只读/白名单，具有参数与结果 Schema、超时、结果上限、用户隔离和 fixture；
+- [ ] LLM/Tool 次数、Token 和总截止时间有统一预算；
+- [ ] Graph State 可序列化，input/config snapshot 明确；
+- [ ] completed/degraded 的 result_kind 和唯一 terminal event 明确；
 - [ ] 降级结果明确标注，不伪装为正常成功。
 
 ## 安全

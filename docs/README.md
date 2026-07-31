@@ -46,6 +46,8 @@
 - [API 与数据契约](./architecture/api-and-data-contracts.md)
 - [数据模型](./model-design/data-models/README.md)
 - [API 端点](./model-design/api-spec/README.md)
+- [Agent Runtime](./model-design/agent-runtime/README.md)
 - [Agent 节点](./model-design/agent-nodes/README.md)
+- [Agent Tool](./model-design/tools/README.md)
 - [端到端运行链路](./model-design/end-to-end-runtime-flow.md)
 - [本轮审查报告](./review/revision-report.md)

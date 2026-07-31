@@ -1,73 +1,63 @@
 # Prompt 版本化规范
 
-状态：设计基线。
+## 1. 文件命名
 
-English summary: File naming, semantic version rules, and Replay dependency. R-Prompt1/2 fallback.
-
-## 1. 文件命名（强制 R-Prompt1）
-
-格式：`backend/app/prompts/{goal_type_or_node}/<purpose>_v<n>.py`
+格式：`backend/app/prompts/{node_or_domain}/<purpose>_v<n>.py`
 
 | 例子 | 含义 |
 |---|---|
-| `prompts/intent_router/system_v1.py` | intent_router 节点的 system prompt v1 |
-| `prompts/intent_router/system_v2.py` | 改版后 |
-| `prompts/career_planning_agent/task_v1.py` | CareerPlanningAgent 的 task prompt |
-| `prompts/companion/empathetic_v1.py` | companion 的共情话术基础版 |
+| `prompts/intent_router/system_v1.py` | intent_router 初始版本 |
+| `prompts/intent_router/system_v2.py` | 经过评测的新版本 |
+| `prompts/career_planning/business_repair_v1.py` | 业务修复 Prompt |
 
-## 2. 版本号语义
+版本号只表示不可变修订顺序，不表示灰度/生产状态。是否默认启用由 PromptRegistry 配置决定。
 
-| 版本号 | 严格意义（scribe-style） |
-|---|---|
-| `_v1.py` | 灰度版（Eval 测试中，未默认启用） |
-| `_v2.py` | 正式 rollout 版（替换 v1 为生产默认） |
-| `_v3.py`+ | 进一步迭代 |
+## 2. 不可变规则
 
-## 3. 修改规则（强制 R-Prompt2）
+Prompt 一旦被任何已保存 Run 的 `config_snapshot_json` 引用，就不得原地修改。后续改动新建 `_v2.py`、`_v3.py`。
 
-**永远新增版本文件，不改已发布文件**。
+尚未提交、未产生任何持久 Run 的开发版本可修改，但合并前应冻结。
 
-| 是否允许 | 场景 |
-|---|---|
-| ✅ 修改 `_v1.py` | v1 从未上线过（feature flag off） |
-| ❌ 修改 `_v1.py` | v1 已上线（Trace 已记录 `prompt_version=v1`） |
-| ✅ 新建 `_v2.py` | 任何上线后的改动 |
+## 3. Registry
 
-## 4. 版本亲和性
-
-Trace 表 `agent_steps.prompt_version` 记录实际调用版本。Replay 重跑需：
-
-| 输入 | Replay 用哪个版本 |
-|---|---|
-| 同 run_id + 同 trace | 用 trace 记录的版本（默认 v1 → pytest 用 v1） |
-| 新 run_id 做对比 | 切到 v2 跑 |
-
-## 5. Eval 中的版本对比
-
-阶段 2 起 CI 跑 Eval。Prompt PR 评审需带：
-
-| 报告项 | 要求 |
-|---|---|
-| v_old vs v_new 通过率 diff | 不能下降 ≥5 分点 |
-| 失败 case 对比 | 失败 case 清单 |
-| Token 用量变化 | 增加 < 30% |
-
-## 6. 默认版本热切换
-
-`core/config.py` 维护 `default_prompt_version` 映射：
+`backend/app/prompts/registry.py` 维护 prompt key 到 version 的映射：
 
 ```python
 DEFAULT_PROMPT_VERSIONS = {
-    "intent_router": "v1",
-    "career_planning_agent": "v1",
-    ...
+    "risk_classifier.system": "v1",
+    "intent_router.system": "v1",
+    "career_planning.system": "v1",
+    "career_planning.task": "v1",
+    "career_planning.format_repair": "v1",
+    "career_planning.business_repair": "v1",
+    "quality_reviewer.system": "v1",
 }
 ```
 
-切换默认版本 = 改 config + 跑 Eval 对比 + 进灰度。
+Run 创建时将实际映射冻结到 `config_snapshot_json`。agent_steps 记录调用点的 prompt key/version。
 
-## 7. 引用
+## 4. Replay
 
-- AGENTS.md R-Prompt1/2
-- 节点 spec §6 Prompt 模板版本字段：[model-design/agent-nodes/](../../model-design/agent-nodes/)
-- Trace 表 prompt_version 字段：[data-models/trace-tables.md](../../model-design/data-models/trace-tables.md)
+- 默认 Replay 使用原 config snapshot 的版本；
+- 对比实验可显式覆盖一个或多个 prompt key；
+- 不得因默认版本已升级而让历史 Replay 悄悄使用新 Prompt；
+- 原版本文件缺失时 Replay 失败并报告 `PROMPT_VERSION_NOT_FOUND`。
+
+## 5. 版本发布
+
+Prompt 变更 PR 至少提供：
+
+- 变更目标；
+- 旧/新版本 Eval 通过率；
+- 失败 Case 差异；
+- Token/成本变化；
+- 是否改变 Tool 使用或输出 Schema。
+
+默认版本切换必须修改 Registry 配置并跑 Eval。不得自动根据一次线上失败篡改 Prompt。
+
+## 6. 引用
+
+- [Runtime Prompt 清单](./runtime-prompt-matrix.md)
+- [Prompt 格式规范](./prompt-format-standard.md)
+- [Agent Runtime](../../model-design/agent-runtime/README.md)
+- [Trace 表](../../model-design/data-models/trace-tables.md)

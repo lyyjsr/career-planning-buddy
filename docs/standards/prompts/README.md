@@ -1,23 +1,14 @@
-# prompts/ 规范子目录
+# Prompt 规范
 
-状态：设计基线。
-
-English summary: Prompt-as-code standards — versioning, format, and review checklist. Agent 项目独有规范（普通 Web 项目没有）。
-
-## 定位
-
-Agent 项目里 Prompt 是版本化 first-class 工件（[AGENTS.md R-Prompt1/2](../../../AGENTS.md)）。本目录统一规范。
+Prompt 是 Agent 项目的版本化工程工件，但只有确实需要模型判断或生成的节点才应拥有 Prompt。
 
 ## 文件清单
 
-| # | 文件 | 覆盖 |
-|---|---|---|
-| 1 | [prompt-format-standard.md](./prompt-format-standard.md) | 消息数组结构、System/Task/User 分层、few-shot 写法 |
-| 2 | [prompt-versioning-standard.md](./prompt-versioning-standard.md) | 文件命名、版本机制、Replay 对比的依赖 |
-| 3 | [prompt-review-checklist.md](./prompt-review-checklist.md) | Prompt PR 评审检查表 |
+| 文件 | 覆盖 |
+|---|---|
+| [runtime-prompt-matrix.md](./runtime-prompt-matrix.md) | 允许的 Prompt、模型别名、Schema 和调用条件 |
+| [prompt-format-standard.md](./prompt-format-standard.md) | System/User/Evidence 分层与结构化输出 |
+| [prompt-versioning-standard.md](./prompt-versioning-standard.md) | 不可变版本、Registry、Snapshot 和 Replay |
+| [prompt-review-checklist.md](./prompt-review-checklist.md) | Prompt PR 评审检查表 |
 
-## 引用
-
-- AGENTS.md R-Prompt1/2/3
-- 节点 spec §6 Prompt 引用：[model-design/agent-nodes/](../../model-design/agent-nodes/)
-- 代码位置：`backend/app/prompts/{goal_type}/<purpose>_v<n>.py`
+代码位置：`backend/app/prompts/{node_or_domain}/<purpose>_v<n>.py`。

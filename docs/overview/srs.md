@@ -29,17 +29,20 @@
 - 同用户同时最多一个活动 Run；
 - 创建接口幂等；
 - 用户可取消；
-- Run 必须进入明确终态；
-- 事件先持久化再通过 SSE 推送；
+- Run 必须进入明确终态且只有一个 terminal event；
+- completed/degraded 必须返回明确 result_kind；
+- 创建时冻结 config snapshot，context_builder 后冻结 input snapshot；
+- 事件先持久化再通过 SSE 推送，heartbeat 除外；
 - 支持 Last-Event-ID 回放。
 
 ### FR-04 计划生成
 
-- 计划包含 summary、rationale 和 1~3 个任务；
+- 计划包含 1~8 周方向、weekly_focus、summary、rationale 和当天 1~3 个任务；
 - 任务总时长不超过时间预算；
 - 动态来源必须可追踪；
-- 模型结构化输出失败最多修复一次；
-- 规则失败修复一次后走模板降级。
+- 模型结构化格式失败最多修复一次；
+- 规则失败使用关闭 Tool 的专用 repair 一次，仍失败走模板降级；
+- Agent Tool 只读、白名单、最多 2 轮/4 次。
 
 ### FR-05 任务执行
 
@@ -54,8 +57,8 @@
 - 用户可提交每日复盘；
 - 完成/放弃统计由服务端计算；
 - 系统可建议重规划；
-- 用户确认后才创建重规划 Run；
-- 新计划成功后才归档旧计划。
+- 用户确认后才创建 next plan Run；无明显偏差走 continue，有调整需求走 adjust；
+- 只有归档来源计划与创建新计划的同一事务成功提交后，来源计划才归档。
 
 ### FR-07 记忆
 
@@ -67,9 +70,10 @@
 ### FR-08 Trace 与 Eval
 
 - Developer 可查看 Run/Step/Tool/Event；
-- Trace 应包含模型、Prompt 版本、Token、耗时、错误；
+- Trace 应包含 graph/config/input snapshot、模型、Prompt 版本、Token、耗时、错误；
 - 不得暴露 API Key 和未脱敏敏感内容；
-- 系统应支持固定 JSONL Eval Case。
+- 系统应支持固定 JSONL Eval Case；
+- Replay 默认使用原 input/config snapshot 和 Tool fixture。
 
 ### FR-09 风险分流
 

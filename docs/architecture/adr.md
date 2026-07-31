@@ -11,6 +11,7 @@
 | 007 | Agent Run 单 Worker 进程内执行，事件持久化后 SSE | Accepted with limitation |
 | 008 | LangGraph 负责编排，确定性规则不交给 LLM | Accepted |
 | 009 | Spec 驱动但以可运行纵切优先，禁止无限补文档 | Accepted |
+| 010 | Agent Run 冻结输入/配置快照并使用唯一终态 Finalizer | Accepted |
 
 ## ADR-001：独立单体架构
 
@@ -59,7 +60,7 @@ API → Service → Repository
 - API 不直接访问 ORM；
 - Agent 节点不直接写数据库；
 - Provider 不暴露厂商 SDK 对象；
-- Harness 负责事件、Trace、预算和评测。
+- Harness 负责事件、Trace、预算、Snapshot、Finalizer 和评测。
 
 ## ADR-004：PostgreSQL + pgvector
 
@@ -122,7 +123,7 @@ Cache 和 ObjectStorage 不设空壳 Protocol。需要时再通过 ADR 增加。
 
 ## ADR-008：LangGraph 编排
 
-LangGraph 用于：条件路由、状态传递、Tool Calling 循环和节点 Trace。
+LangGraph 用于：固定条件路由、可序列化状态传递和 Tool Calling 循环。节点 Trace、预算、快照和终态由 Runtime/Harness 包装，不依赖节点自觉实现。
 
 不用 LangGraph 处理：数据库事务、权限、幂等、业务状态机和定时任务。
 
@@ -137,3 +138,8 @@ LangGraph 用于：条件路由、状态传递、Tool Calling 循环和节点 Tr
 3. 发现错误先改权威 spec；
 4. 同步代码和测试；
 5. 通过验收后进入下一阶段。
+
+
+## ADR-010：输入/配置快照与唯一终态
+
+Run 创建时冻结 graph/config snapshot，context_builder 后冻结 input snapshot。Replay 默认使用快照而不是读取当前用户数据。所有 completed/degraded/failed/cancelled 都由 AgentRunFinalizer 写入；persist 通过 finalize_plan 调用，每个 Run 只允许一个 terminal event。

@@ -47,7 +47,7 @@
 | GET | `/tasks` | 日期/计划/状态过滤任务 |
 | PATCH | `/tasks/{id}` | 更新任务状态 |
 | POST/GET | `/reviews` | 提交/查询复盘 |
-| POST | `/reviews/{id}/accept-replan` | 接受重规划建议 |
+| POST | `/reviews/{id}/start-next-plan` | 生成次日续接或调整计划 |
 | GET | `/memories` | 查询记忆 |
 | PATCH/DELETE | `/memories/{id}` | 关闭、恢复或删除记忆 |
 | GET | `/memory-candidates` | 查询记忆候选 |
@@ -71,6 +71,10 @@
 ### RunStatus
 
 `pending / running / completed / degraded / failed / cancelled`
+
+### RunResultKind
+
+`plan / clarification / safe_response`。failed/cancelled 无结果。
 
 ### PlanStatus
 
@@ -104,11 +108,16 @@ PlanDetail 是 Service 拼装视图，不等同数据库单表：
   "plan_id": "c91f8734-2839-4f55-9db1-1c39b8a410f2",
   "status": "generated",
   "version": 1,
-  "summary": "未来一周优先补齐 Agent 项目的可演示闭环",
+  "plan_date": "2026-07-31",
+  "horizon_start": "2026-07-31",
+  "horizon_end": "2026-09-03",
+  "overall_direction": "五周内完成 Agent 项目闭环并进入模拟面试阶段",
+  "weekly_focus": [{"week_index":1,"focus":"补齐可演示闭环","success_signal":"可演示完整 Run"}],
+  "summary": "今天先补齐 Agent Run Trace",
   "rationale": "基于目标岗位、截止时间和当前能力",
   "adjustment_reason": null,
   "tasks": [],
-  "sources": [],
+  "sources": [{"kind":"search_source","id":"...","title":"...","url":"...","reliability":0.8}],
   "companion_message": "先从今天能完成的一步开始。",
   "created_at": "2026-07-31T02:00:00Z"
 }
@@ -143,7 +152,7 @@ PlanDetail 是 Service 拼装视图，不等同数据库单表：
 }
 ```
 
-服务端注入：user_id、profile、近期任务、复盘、记忆、预算和 deadline。
+服务端注入：user_id、profile、近期任务、复盘、记忆、预算和 deadline。Agent Run 只接受 create_plan/replan；replan 可细分为 continue/adjust。未显式给 source_plan_id 时优先使用当前 generated/active Plan，否则使用最近 completed Plan；已有计划查询使用资源 API。Run 创建时冻结 config snapshot，context_builder 后冻结 input snapshot。
 
 ## 9. SSE 事件
 
@@ -164,9 +173,9 @@ PlanDetail 是 Service 拼装视图，不等同数据库单表：
 | `run.failed` | 执行失败 |
 | `run.cancelled` | 用户取消 |
 | `run.completed` | 正常完成 |
-| `heartbeat` | 保持连接 |
+| `heartbeat` | 保持连接；不持久化且不占 sequence |
 
-事件 data 必须包含 `run_id` 和 `sequence`。SSE `id` 使用 sequence 字符串。
+除 heartbeat 外，事件 data 必须包含 `run_id` 和 `sequence`，SSE `id` 使用 sequence 字符串。每个 Run 只能有一个 terminal event，且它是最后一个持久事件。
 
 ## 10. 状态转移
 
@@ -188,13 +197,15 @@ PlanDetail 是 Service 拼装视图，不等同数据库单表：
 
 - pending→running；
 - running→completed/degraded/failed；
+- completed 必须 result_kind=plan；
+- degraded 必须 result_kind=plan/clarification/safe_response；
 - pending/running→cancelled。
 
 ## 11. 幂等
 
 - POST agent-runs：`(user_id, idempotency_key)` 唯一，重复请求返回原 Run；
 - POST reviews：同上；
-- accept-replan：同一 review 只能成功一次；
+- start-next-plan：同一 review 只能成功创建一个 next Plan Run；
 - PATCH 资源：version 乐观锁，不额外要求 Idempotency-Key。
 
 ## 12. 分页

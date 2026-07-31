@@ -17,7 +17,7 @@ Codex 可以直接读取、修改文件并运行命令，因此任务描述应�
 1. AGENTS.zh-CN.md
 2. docs/implementation/project-baseline.md
 3. docs/implementation/stage-{N}-*.md
-4. 当前任务涉及的 API、data-model、state-machine、agent-node spec
+4. 当前任务涉及的 API、data-model、state-machine、agent-runtime、tool、agent-node spec
 
 项目是独立的新项目，不以 ClawAgent 为底座，不允许导入或假设任何 ClawAgent 模块。
 
@@ -49,9 +49,10 @@ Codex 可以直接读取、修改文件并运行命令，因此任务描述应�
 3. 查看迁移：字段、索引、唯一约束是否与 data-model spec 一致；
 4. 查看 Router：是否把业务逻辑塞进接口层；
 5. 查看 Service：状态机和事务是否完整；
-6. 查看 Agent：是否直接操作 ORM；
-7. 查看测试：是否真的覆盖越权、冲突、超时和失败；
-8. 实际运行验收命令，不接受“理论上可通过”。
+6. 查看 Agent：是否遵守 Runtime 预算、快照、终态唯一，是否直接操作 ORM；
+7. 查看 Tool：是否只读、白名单、Schema、超时、用户隔离与 fixture；
+8. 查看测试：是否真的覆盖越权、冲突、超时和失败；
+9. 实际运行验收命令，不接受“理论上可通过”。
 
 ## 失败时的处理
 
