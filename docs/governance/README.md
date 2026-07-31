@@ -1,38 +1,22 @@
 # governance/ 目录入口
 
-状态：本轮实现。
+本目录定义人和编码助手如何在仓库中工作。它只描述流程，不覆盖产品、架构或接口事实。
 
-English summary: How AI and humans operate in this repo — reading guide, dev workflow, spec-driven workflow, verification, checklists, gates.
+## 文档地图
 
-## 定位
-
-指导 AI / 开发者 **如何在本仓库行动**：什么时候按什么顺序读哪些规范、如何按 spec-driven 实施、如何运行门禁、如何完成验证评审。
-
-## 与相邻目录的边界
-
-本目录**不承接**业务规则（在 `overview/` / `architecture/`）、代码规则（在 `standards/`）或特性 spec（在 `model-design/`）；它定义流程和约束如何被强制。
-
-## 文档
-
-阅读与流程：
-
-- [AI 渐进式加载指南](./ai-reading-guide.md)
-- AGENTS（双语根入口）：[../../AGENTS.md](../../AGENTS.md) · [../../AGENTS.zh-CN.md](../../AGENTS.zh-CN.md)
-- [AI 协作宪章（释义版）](./AGENTS.md)
+- [AI 阅读指南](./ai-reading-guide.md)
 - [开发流程](./development-workflow.md)
-- [本地开发与调试手册](./local-development-guide.md)
-- [新增用例开发 Checklist](./use-case-development-checklist.md)
+- [本地开发指南](./local-development-guide.md)
+- [Spec-Driven 工作流](./spec-driven-workflow.md)
+- [阶段交付定义](./stage-delivery-definition.md)
+- [新增用例检查表](./use-case-development-checklist.md)
 - [验证与评审](./verification-and-review.md)
-
-Spec-Driven：
-
-- [Spec-Driven 工作流（澄清→计划→任务）](./spec-driven-workflow.md)
-
-门禁与阶段：
-
 - [门禁脚本规范](./check-scripts-spec.md)
-- [阶段化交付定义](./stage-delivery-definition.md)
 
-## 读取建议
+## 工作原则
 
-第一次进入本仓库：先读 `AGENTS.md`，再读 `ai-reading-guide.md`，然后按当前任务的路由表加载。
+1. 先确认业务用例，再改代码。
+2. 接口、表结构、状态机变更必须先更新对应 spec。
+3. 一次只执行一个实现阶段，不让编码助手整仓生成。
+4. 每个阶段必须有可运行验收，不以“文件已生成”作为完成。
+5. 文档冲突时，以根 README 中的权威顺序为准。

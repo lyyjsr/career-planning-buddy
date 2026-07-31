@@ -1,6 +1,6 @@
 # Prompt 版本化规范
 
-状态：本轮实现。
+状态：设计基线。
 
 English summary: File naming, semantic version rules, and Replay dependency. R-Prompt1/2 fallback.
 

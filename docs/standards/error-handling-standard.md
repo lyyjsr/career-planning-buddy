@@ -1,86 +1,42 @@
 # 错误处理与降级规范
 
-状态：本轮实现。
+## 1. HTTP 错误
 
-English summary: Error classification, fallback chaining, fallback_reason naming, hard-fail-vs-degrade decision rules. Spec for Router error mapping + node error boundary.
+| 类型 | HTTP | 示例 code |
+|---|---:|---|
+| 身份无效 | 401 | AUTH_INVALID_TOKEN |
+| 无权限 | 403 | AUTH_FORBIDDEN |
+| 资源不存在 | 404 | NOT_FOUND_TASK |
+| 幂等/状态冲突 | 409 | STATE_TASK_TRANSITION_INVALID |
+| 参数或业务校验 | 422 | VALIDATION_PROFILE_INVALID |
+| 限流 | 429 | RATE_LIMITED |
+| 外部依赖暂不可用 | 503 | PROVIDER_UNAVAILABLE |
 
-## 1. 错误分类
+响应结构遵守 `contract-standard.md`，生产响应不暴露堆栈和密钥。
 
-| 类型 | 例子 | 处理原则 |
-|---|---|---|
-| **业务校验错**（VALIDATION_*） | 用户输入字段不合法 | 422 直接返回，不入 Agent |
-| **状态机违规**（STATE_*） | task 不能从 completed 转 abandoned | 409 直接返回 |
-| **资源不存在**（NOT_FOUND_*） | task_id 不存在 | 404 直接返回 |
-| **鉴权**（AUTH_*） | token 过期 / 跨用户访问 | 401/403 直接返回 |
-| **限流**（RATE_LIMITED_*） | 单用户 >5 runs/min | 429 直接返回 |
-| **Agent 执行错**（AGENT_*） | LangGraph 抛未知异常 | 503，trace 记 ERROR |
-| **降级**（FALLBACK_*） | LLM 超时 / schema 不符 / 超预算 | 200，body 带 `fallback_reason` |
+## 2. Agent Run 终态
 
-## 2. 降级 vs Fail 判定（关键）
+Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-runs` 的 202 响应，而是收敛到数据库状态和 SSE 终态：
 
-**判别原则**：能不能给用户一个**可接受的用户体验**？
+- `completed`：正常结果；
+- `degraded`：存在可用但质量受限的计划/模板结果，必须带 `fallback_reason`；
+- `failed`：没有可用结果；
+- `cancelled`：用户或系统取消。
 
-| 能 | 处理 | HTTP |
-|---|---|---|
-| ✅ 给用户合理可用结果（即使降级） | degraded + fallback_reason | **200** |
-| ❌ 无法给用户任何结果 | failed + UNKNOWN_ERROR | 503 |
+持久化失败不能标记 degraded，因为用户没有可读取的结果。
 
-例：
-- intent_router timeout → 降级 query_plan，**仍能给用户最近计划**，HTTP 200 + fallback_reason
-- persist 节点事务回滚 → 用户看不到结果，HTTP 503
+## 3. 重试
 
-## 3. fallback_reason 命名规范
+- LLM 结构化输出失败：最多修复 1 次；
+- 网络连接错误：只对幂等调用有限重试，使用短退避；
+- Tool 超时：不无限重试，记录错误后按节点规则跳过或降级；
+- 数据库事务失败：事务整体回滚，由 API 层决定是否安全重试；
+- 副作用写入不得由 Agent 自由重试。
 
-格式：`FALLBACK_<NODE>_<CAUSE>`。完整列表参 [model-design/api-spec/errors.md](../model-design/api-spec/errors.md) §fallback_reason 命名规则。新增 fallback_reason **必须**同时更新 errors.md 和对应节点 spec §4。
+## 4. 预算错误
 
-## 4. 强制不变量
+超过 LLM 次数、Tool 轮次、Token 或 Run deadline 时，抛出明确预算异常，停止后续调用并写事件。能生成合规模板时标记 degraded，否则 failed。
 
-| ID | 不变量 | 守护 |
-|---|---|---|
-| E-1 | 任何 except 块不得空（无 `except: pass`） | ruff rule B902 + review |
-| E-2 | 降级必须带 `fallback_reason` 字段（不可 null） | Pydantic validator |
-| E-3 | 5xx 响应不得泄露内部异常 stack | Router error mapper |
-| E-4 | Trace 必须记录 fallback_reason 或 error_class | Service 强制写 |
-| E-5 | 一行 trace 必须对应一次节点执行（成功或失败） | harness 守 |
+## 5. 日志与 Trace
 
-## 5. 重试策略（harness 内）
-
-| 错误类型 | 重试次数 | 退避 |
-|---|---|---|
-| `ValidationError`（LLM schema 不符） | 1 | immediate |
-| `asyncio.TimeoutError`（LLM） | 0 | 降级 |
-| `asyncio.TimeoutError`（web_search） | 0 | 跳过该块 |
-| `asyncio.TimeoutError`（DB） | 1 | 200ms |
-| `AgentBudgetExceeded` | 0 | 立即降级 |
-
-## 6. 异常 → HTTP 映射（Router 层）
-
-```python
-# 每个自定义异常基类带 code + http_status
-class AgentError(Exception):
-    code = "AGENT_RUN_FAILED"
-    http_status = 503
-
-# Router 全局错误映射 middleware
-@app.exception_handler(AgentError)
-async def handler(e: AgentError):
-    return JSONResponse(
-        status_code=e.http_status,
-        content={"error": {"code": e.code, "message": str(e), "request_id": ctx.request_id}},
-    )
-```
-
-## 7. 告警规则（阶段 6+ 起）
-
-| 触发 | 告警级别 |
-|---|---|
-| 单节点 5 分钟内 fallback 占比 > 30% | P1（监控） |
-| Agent 整体 fail 率 > 10% | P0 |
-| Tavily 连续 3 次 timeout | P1 |
-
-## 8. 引用
-
-- [architecture/api-and-data-contracts.md §3 错误响应](../architecture/api-and-data-contracts.md)
-- [model-design/api-spec/errors.md](../model-design/api-spec/errors.md) 业务错误码表
-- [AGENTS.md R-Fail1](../../AGENTS.md)
-- [verification-and-review.md](../governance/verification-and-review.md) 评审清单
+每个异常至少记录 request_id/run_id、错误 code、节点、Provider、重试次数和脱敏摘要。不得记录 JWT、API key、完整敏感输入和外部页面全文。

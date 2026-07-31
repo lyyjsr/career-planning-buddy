@@ -1,29 +1,15 @@
-# intent-routing-flow.mmd — 意图路由分支
-
-> intent_router 节点本身的 4 路下游分支（[intent_router.spec.md §5](../agent-nodes/intent_router.spec.md)）
+# 意图路由
 
 ```mermaid
-flowchart LR
-    IN[intent_router] -->|intent=create_plan<br/>槽位齐全| CB[context_builder]
-    IN -->|intent=create_plan<br/>槽位缺失| CLR[clarification]
-    IN -->|intent=replan| CB
-    IN -->|intent=query_plan| SVC[services.plan.read<br/>不走 Agent]
-    IN -->|intent=high_risk| SR[safe_response]
+flowchart TD
+    A[User message] --> R[risk_gate]
+    R -->|high risk| S[safe_response]
+    R -->|safe| I[intent_router]
+    I -->|profile incomplete| C[clarification.requested + degraded]
+    I -->|create_plan| P[planning graph]
+    I -->|replan| P
+    I -->|query_plan| Q[read-only plan summary]
+    I -->|unsupported| F[template fallback]
 ```
 
-## 分支条件矩阵
-
-| intent | needs_clarification | missing_slots | 路由目标 |
-|---|---|---|---|
-| create_plan | false | [] | context_builder |
-| create_plan | true | 非空 | clarification |
-| replan | false | [] | context_builder |
-| query_plan | false | [] | services.plan.read |
-| high_risk | false | [] | safe_response |
-
-校验：4 路分支互斥，不可同时触发两个下游（节点输出 INV 守护）。
-
-## 引用
-
-- 节点：[intent_router.spec.md](../agent-nodes/intent_router.spec.md)
-- 表：[trace-tables.md #intent_result](../data-models/trace-tables.md)
+`hint_intent` 只是前端提示。最终意图由服务端规则和模型共同判定并写入 `resolved_intent`。

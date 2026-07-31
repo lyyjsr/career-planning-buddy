@@ -1,30 +1,27 @@
-# agent-nodes/ 节点 spec 入口
+# Agent 节点施工索引
 
-状态：本轮实现。
+项目共 10 个核心节点和 2 个增强节点。只有 `career_planning_agent` 是真 Agent。
 
-English summary: One *.spec.md per Agent node. Per `standards/spec-writing-guide.md` seven elements: Input Schema, Output Schema, Invariants, Error Boundary, State Machine, Dependencies/Side Effects, Trace Fields. Authoritative design basis for AI writing node code.
+## 核心节点
 
-## 节点 spec 列表（共 11 份）
+| 节点 | 类型 | Stage |
+|---|---|---:|
+| [risk_gate](./risk_gate.spec.md) | 程序规则 + 可选分类模型 | 2 |
+| [safe_response](./safe_response.spec.md) | 固定安全响应 | 2 |
+| [intent_router](./intent_router.spec.md) | 规则 + 单次结构化分类 | 2 |
+| [clarification](./clarification.spec.md) | 程序节点 | 2 |
+| [context_builder](./context_builder.spec.md) | 程序节点 | 2 |
+| [career_planning_agent](./career_planning_agent.spec.md) | 唯一真 Agent | 2/3 |
+| [rule_validator](./rule_validator.spec.md) | 确定性规则 | 2 |
+| [revise_or_fallback](./revise_or_fallback.spec.md) | 路由/一次修复 | 2/3 |
+| [companion_response](./companion_response.spec.md) | 模板优先，可选 LLM | 2/3 |
+| [persist](./persist.spec.md) | Service 事务适配节点 | 2 |
 
-| 节点 | 类型 | 复杂度 | spec 文件 |
-|---|---|---|---|
-| intent_router | LLM 单次分类 | 低 | [intent_router.spec.md](./intent_router.spec.md) |
-| risk_gate | 规则节点 | 极低 | [risk_gate.spec.md](./risk_gate.spec.md) |
-| clarification | 程序节点 | 低 | [clarification.spec.md](./clarification.spec.md) |
-| context_builder | 程序节点 | 中 | [context_builder.spec.md](./context_builder.spec.md) |
-| **career_planning_agent** | **真 Agent** | **高** | [career_planning_agent.spec.md](./career_planning_agent.spec.md) |
-| distill_evidence | 程序节点 | 中 | [distill_evidence.spec.md](./distill_evidence.spec.md) |
-| rule_validator | 程序节点 | 中 | [rule_validator.spec.md](./rule_validator.spec.md) |
-| quality_reviewer | LLM Judge | 中 | [quality_reviewer.spec.md](./quality_reviewer.spec.md) |
-| revise_or_fallback | 路由节点 | 低 | [revise_or_fallback.spec.md](./revise_or_fallback.spec.md) |
-| companion_response | LLM 单次调用 | 低 | [companion_response.spec.md](./companion_response.spec.md) |
-| persist | 事务节点 | 中 | [persist.spec.md](./persist.spec.md) |
-| safe_response | 程序节点（安全兜底） | 极低 | [safe_response.spec.md](./safe_response.spec.md) |
+## 增强节点
 
-## 写作规则（七要素）
+| 节点 | 类型 | Stage |
+|---|---|---:|
+| [distill_evidence](./distill_evidence.spec.md) | 搜索证据整理 | 4 |
+| [quality_reviewer](./quality_reviewer.spec.md) | LLM Judge | 5 |
 
-参 [standards/spec-writing-guide.md](../../standards/spec-writing-guide.md) §七要素。
-
-## 命名约束（R-Agent2）
-
-只有 `career_planning_agent` 是 Agent。其他节点命名严禁后缀 `Agent`。
+所有节点输入输出必须可序列化，不允许把 ORM Session 或厂商 Client 放进 Graph State。

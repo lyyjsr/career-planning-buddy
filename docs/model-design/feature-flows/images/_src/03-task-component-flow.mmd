@@ -1,9 +1,0 @@
-flowchart LR
-    A[PATCH /tasks endpoint] --> SVC[services.task.update_state]
-    SVC --> TS[Tasks 表 UPDATE]
-    SVC --> PS[services.plan 副作用 → Plans 表 UPDATE]
-    SVC --> STATS[读近 N 天统计 判断 T2/T3 触发条件]
-    STATS -->|T2 或 T3 命中| COMP[同步调用 companion_response 节点]
-    COMP --> LLM[DeepSeekSmallProvider.complete]
-    LLM --> CM[companion_messages 表 INSERT]
-    SVC --> RES[UpdateTaskResponse]

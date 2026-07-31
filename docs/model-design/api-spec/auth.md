@@ -1,58 +1,59 @@
-# auth.md — 鉴权与当前用户端点
+# Auth API
 
-状态：本轮实现。
+## POST /api/v1/auth/guest
 
-> MVP 简化版：无 OAuth、无刷新 token；Bearer JWT 唯一。生产演进路径见 ADR-001 / 阶段 7。
+创建或复用 Guest 用户并签发 JWT。
 
-## 端点：POST /auth/login
+### Request
 
-**请求 Schema** `app.schemas.auth.LoginRequest`：
-| 字段 | 类型 | 必填 | 约束 |
-|---|---|---|---|
-| `token` | `str` | ✅ | OAuth state 或临时 guest token |
-
-**成功响应 200** `LoginResponse`：
-| 字段 | 类型 |
-|---|---|
-| `access_token` | `str`（JWT） |
-| `token_type` | `Literal["bearer"]` |
-| `expires_in` | `int`（秒，默认 86400） |
-| `user_id` | `str` |
-
-**错误**：
-| HTTP | code | 触发 |
-|---|---|---|
-| 401 | AUTH_INVALID_TOKEN | token 无效 |
-| 429 | RATE_LIMITED_AUTH | 同 IP > 10 次/分钟 |
-
-**示例**：
-```http
-POST /auth/login
-{"token":"guest-7c3e2f1a"}
-```
 ```json
 {
-  "access_token": "eyJhb...",
-  "token_type": "bearer",
-  "expires_in": 86400,
-  "user_id": "u-7c3e2f1a"
+  "device_id": "browser-generated-random-id"
 }
 ```
 
-## 端点：GET /api/v1/me
+- `device_id` 可选，长度 16~128；
+- 服务端只保存 SHA-256 hash；
+- 缺失时创建一次性 Guest 用户。
 
-读当前 token 对应的用户（**使用 /me 路径，不信任前端传入 user_id**）。
+### Response 200/201
 
-**成功响应** `UserProfile`（参 [profile.md](./profile.md) §`MeResponse`）。
+```json
+{
+  "access_token": "...",
+  "token_type": "bearer",
+  "expires_in": 86400,
+  "user": {
+    "id": "3f42b5fa-16b8-45d4-a095-3c2d5dc1a35b",
+    "display_name": null,
+    "role": "user"
+  }
+}
+```
 
-**错误**：
-| HTTP | code | 触发 |
-|---|---|---|
-| 401 | AUTH_TOKEN_EXPIRED | token 过期 |
+相同有效 device_id 再次调用返回 200 并复用用户；首次创建返回 201。
 
-## 安全要求
+## GET /api/v1/me
 
-- 密码 bcrypt（如未来加 email login）
-- HTTPS 强制（Caddy 自动 HTTPS）
-- JWT secret 见 `.env.example JWT_SECRET`
-- `Authorization: Bearer <jwt>` 必填
+返回首页恢复所需摘要：
+
+```json
+{
+  "user": {"id":"...","display_name":null,"role":"user"},
+  "profile_complete": true,
+  "profile": {},
+  "active_plan": null,
+  "today_tasks": [],
+  "latest_review": null,
+  "active_run": null
+}
+```
+
+该端点只做聚合查询，不生成计划、不写业务状态。
+
+## 安全
+
+- JWT 使用 HS256 或更高强度算法，secret 仅来自环境变量；
+- 不记录原始 device_id；
+- MVP 无密码和 OAuth，不得伪造“OAuth token”流程；
+- `/dev/*` 额外校验 role=dev。

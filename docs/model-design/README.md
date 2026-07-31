@@ -1,76 +1,17 @@
-# model-design/ 目录入口
+# Model Design 施工入口
 
-状态：本轮实现。
+本目录把架构拆成可直接实现的纵切 spec。
 
-English summary: Construction-level design specs for AI to write code. Each subdir has its own format: node specs (7 elements), data models (full table + er-diagram), api-spec (per-endpoint contract), state-machines (mermaid + transition matrices).
+| 子目录/文档 | 作用 |
+|---|---|
+| [API Spec](./api-spec/README.md) | Router、Request、Response、错误 |
+| [Data Models](./data-models/README.md) | SQLAlchemy 与 Alembic 字段事实源 |
+| [State Machines](./state-machines/README.md) | Run/Plan/Task/意图状态 |
+| [Agent Nodes](./agent-nodes/README.md) | 10 核心 + 2 增强节点 |
+| [Feature Flows](./feature-flows/README.md) | 用户用例纵切 |
+| [Harness](./harness/README.md) | Trace、Event、Replay、Eval |
+| [UI Spec](./ui-spec/README.md) | 页面和状态映射 |
+| [端到端运行流程](./end-to-end-runtime-flow.md) | 全链路总览 |
+| [数据与知识来源](./data-seeding-and-sources.md) | Search、RAG、经验原子 |
 
-## 定位
-
-**施工级 spec**——给 AI 写代码直接照抄的"蓝图"，不是给人看决策层。
-
-差异：
-- `architecture/` 答"为什么这么设计" → 给人看的决策记录（ADR/TDD/API）
-- `standards/` 答"怎么写代码" → 通用规则
-- `model-design/` 答"具体某节点/某表/某接口长什么样" → 字段级施工图纸，给 AI 抄
-
-## 子目录
-
-```
-model-design/
-├── README.md                          本文件（索引）
-├── end-to-end-runtime-flow.md          端到端运行流程（启动→建档→规划→任务→复盘→记忆→安全分流）
-├── data-seeding-and-sources.md         知识库/数据设计说明（数据源、经验原子、RAG、种子数据、质量规则）
-├── agent-nodes/                       Agent 节点 spec（10 份）
-│   ├── README.md                      spec 编写规则在 standards/spec-writing-guide.md
-│   ├── intent_router.spec.md
-│   ├── risk_gate.spec.md
-│   ├── context_builder.spec.md
-│   ├── career_planning_agent.spec.md  唯一真 Agent
-│   ├── distill_evidence.spec.md
-│   ├── rule_validator.spec.md
-│   ├── quality_reviewer.spec.md
-│   ├── companion_response.spec.md
-│   ├── persist.spec.md
-│   └── safe_response.spec.md
-├── data-models/                       数据库表 spec（11 表 + ER 全图）
-├── api-spec/                          API 端点 spec（11 端点 = 7 业务 + 4 dev/harness）
-├── state-machines/                    状态机 spec（mermaid + 转移矩阵）
-├── feature-flows/                     **业务功能模块级流程文档（6 篇 P0 模块）**
-│   ├── README.md                      索引 + 全局对齐总览表（功能点→API→表→节点）
-│   ├── gap-analysis.md                对照审查报告（26 决策点 + 修复建议）
-│   ├── 01-onboarding-profile.md       首次建档 + clarification
-│   ├── 02-plan-run.md                 plan_run 11 节点链路
-│   ├── 03-task-execution.md           开始/完成/放弃
-│   ├── 04-review-replan.md            每日复盘 + 双层调整闭环
-│   ├── 05-memory-management.md        记忆查看/关闭/删除 + 敏感 candidates 确认
-│   ├── 06-risk-triage.md              高风险识别 + 12356
-│   └── images/                        mermaid 渲染的 PNG 业务流程图
-├── harness/                           Harness 反馈层 spec（Trace/Replay/Eval 总览 + 子 spec）
-│   ├── README.md                      5 分钟入门（24 模块 + mermaid 全图）
-│   ├── harness-overview.md            harness 总图（24 模块 + 四层模型 + Stage 映射）
-│   ├── implementation-structure.md    施工总图（完整目录树 + import-linter 增强 + 生命周期钩子）
-│   ├── replay.md                      Replay 机制（输入快照 / prompt 锁定 / diff）
-│   └── eval-system.md                 Eval 数据集 / grader / 报告 / Bad Case / CI 门禁
-│                                       (代码落地于 backend/app/evals/，与 harness/ 并列)
-└── ui-spec/                           前端交互 spec（页面级）
-    └── developer-trace.md             Trace / Replay / Eval / Bad Case 开发者页面
-```
-
-## 与相邻目录的边界
-
-- `architecture/tdd.md` 定义六层 + 工作流整体；`model-design/agent-nodes/` 给每个节点的字段级 spec
-- `architecture/api-and-data-contracts.md` 是 API/状态机的来源；`model-design/api-spec/` 把它拆为每端点一份（便于 AI 上下文聚焦）
-- `architecture/tdd.md §11` 列表名；`model-design/data-models/` 给每张表完整字段+索引+约束+示例行
-- `architecture/tdd.md §12` 概念性定义 Trace/Replay/Eval；`model-design/harness/` 把它们展开为字段级施工 spec（含新增表 `replay_runs` / `eval_cases` / `eval_runs` / `eval_cases_verdicts`）
-
-## 读取顺序
-
-写节点 N 的代码 → 读 `agent-nodes/N.spec.md` + 它引用的 `data-models/<表>.md` + `state-machines/<机>.mmd` + `api-spec/<资源>.md`。
-
-写 Harness 反馈层代码（Stage 5）→ 读 `harness/harness-overview.md` 再分支到 `harness/replay.md` 或 `harness/eval-system.md` + 配套 `ui-spec/developer-trace.md`。
-
-理解某业务模块的端到端全链路 → 从 `feature-flows/README.md` 的总览表定位模块后读对应 `0X-*.md`；如审查设计完善度直接读 `feature-flows/gap-analysis.md`。
-
-理解系统从启动到一次完整用户使用如何串起来 → 读 `end-to-end-runtime-flow.md`，再按需跳转到 `feature-flows/`、`api-spec/`、`agent-nodes/`、`data-models/`。
-
-理解知识库、经验原子、种子数据和 RAG 输入如何进入系统 → 读 `data-seeding-and-sources.md`，再跳转到 `data-models/experience_atoms.md` 和 `data-models/search_sources.md`。
+权威优先级：implementation baseline > architecture > 本目录。`design-input/` 不参与实现决策。

@@ -1,8 +1,0 @@
-flowchart LR
-    CPA[CareerPlanningAgent 节点 提议 MemoryCandidate] --> BUND[ValidatedBundle]
-    PERSIST[persist 节点 事务 commit]
-    BUND --> PERSIST
-    PERSIST --> MC[memory_candidates 表 INSERT status=pending, expires_at=now+7d]
-    PERSIST -.非敏感稳定偏好.-> MEM[memories 表 INSERT status=active]
-    MC --> SSE[SSE 进度 不直接展示给用户]
-    MEM -.触发 Embedding.-> EMB[EmbeddingProvider.embed 写入 memories.embedding]

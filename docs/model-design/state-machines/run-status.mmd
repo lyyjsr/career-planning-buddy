@@ -1,45 +1,19 @@
-# run-status.mmd — plan_run 状态机
+# Agent Run 状态机
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending
-    pending --> running: worker picked
-    pending --> cancelled: user cancel
-    running --> completed: persist commit + all required nodes success
-    running --> degraded: fallback result persisted
-    running --> failed: hard failure + rollback
-    running --> cancelled: user cancel / timeout cancel
+    [*] --> pending: POST /agent-runs
+    pending --> running: executor starts
+    pending --> cancelled: user cancels
+    pending --> failed: startup recovery / scheduling error
+    running --> completed: plan persisted
+    running --> degraded: safe fallback result
+    running --> failed: unhandled error / deadline
+    running --> cancelled: user cancels
     completed --> [*]
     degraded --> [*]
     failed --> [*]
     cancelled --> [*]
 ```
 
-## 合法转移矩阵
-
-| From | To | 触发条件 | 副作用 |
-|---|---|---|---|
-| pending | running | Worker / Service 接管 run 并启动 LangGraph | run.started_at 写入 |
-| pending | cancelled | 用户在执行前取消 | run.finished_at 写入 |
-| running | completed | persist 节点 commit + 全部必要节点 success | run.finished_at 写入；final_plan_id 填充 |
-| running | degraded | 降级结果已持久化（如 agent max_rounds_exhausted） | run.finished_at + fallback_reason |
-| running | failed | 任一 hard failure（如 plan 事务回滚） | run.finished_at + fallback_reason |
-| running | cancelled | 用户取消或服务端取消超时 run | run.finished_at + fallback_reason |
-
-## 非法转移响应
-
-| 转移尝试 | 响应 |
-|---|---|
-| completed/failed/degraded/cancelled → running | 409 STATE_RUN_ALREADY_FINISHED |
-| completed → failed | 409 STATE_RUN_ALREADY_FINISHED |
-| 任一终态 → pending | 409 |
-
-## 校验位置
-
-- Pydantic：`schemas/agent_run.py` 用 `@model_validator` 守
-- Service：`services/agent_run.py::assert_can_transition()`
-
-## 引用
-
-- 表：[trace-tables.md #agent_runs](../data-models/trace-tables.md)
-- API：[agent-runs.md](../api-spec/agent-runs.md)
+终态不可再次转移。每次终态变化必须写对应 `agent_events`。

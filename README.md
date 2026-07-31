@@ -1,144 +1,133 @@
-# Dazi — AI 求职规划搭子
+# Career Planning Buddy — AI 求职规划搭子
 
-> 面向计算机学生的 AI 求职规划 Agent：单核心 Agent（CareerPlanningAgent）+ 受控节点 + 证据驱动 + 执行反馈闭环。
+> 面向计算机专业学生的垂直 Agent 产品：根据用户画像、目标岗位和真实执行反馈，完成“规划 → 今日任务 → 执行 → 复盘 → 重规划”的闭环。
 
-| 项目 | 内容 |
+## 项目边界
+
+这是一个**从零独立开发的新项目**：
+
+- 不以 ClawAgent 为底座；
+- 不依赖或导入 ClawAgent 的代码、配置、数据库和运行时；
+- 可以借鉴通用 Agent 工程思想，但本仓库中的接口、状态机、表结构和实现必须独立落地；
+- Codex 是本项目选定的**代码生成与工程执行助手**，但不是项目运行时模型。
+
+## 技术栈
+
+| 层 | 选型 |
 |---|---|
-| 项目类型 | AI 应用开发（Python 单后端，不是 Java 业务系统）|
-| 后端 | FastAPI 单体 + LangGraph 1.x |
-| 前端 | React + TypeScript + Vite |
-| 数据库 | PostgreSQL 16 + pgvector |
-| LLM | DeepSeek V4 主选，五类 Provider Protocol 抽象 |
-| 部署 | Docker Compose（单机）|
-| 开发方式 | Spec-Driven（文档先定稿，AI 编程助手按 spec 执行） |
-| 当前阶段 | 📍 **Pre-Stage 0：SDD 文档收敛 + Provider PoC 准备** |
+| 前端 | React + TypeScript + Vite + React Router + TanStack Query |
+| 后端 | Python 3.11 + FastAPI + Pydantic v2 + SQLAlchemy 2 Async |
+| Agent 编排 | LangGraph，单核心 `CareerPlanningAgent` + 受控节点 |
+| 数据库 | PostgreSQL 16 + pgvector + Alembic |
+| 实时通信 | SSE，事件写入 PostgreSQL 后支持断线续传 |
+| 运行时模型 | OpenAI-compatible Provider，通过 `LLM_BASE_URL / LLM_API_KEY / LLM_MODEL` 配置 |
+| 搜索与向量 | SearchProvider + EmbeddingProvider，MVP 后半程接入 |
+| 测试 | pytest + pytest-asyncio + httpx + 前端 Vitest |
+| 部署 | Docker Compose，MVP 单机单 Worker |
 
----
+> 运行时模型与编码助手是两件事。团队使用 Codex 阅读规范、修改代码并运行测试；项目运行时模型仍通过 OpenAI-compatible Provider 独立配置。
 
-> ⚠️ **当前状态（2026-07-24）**
->
-> 本仓库当前**只有文档，没有代码**：`backend/` / `frontend/` / `scripts/` / `infra/` 等目录尚未创建。
-> 这是 **Spec-Driven Development 的预期状态**，不是 bug。
->
-> - 文档侧进度：核心 SDD 文档已基本就绪；Stage 0 前置 Provider PoC 待验证（见 [PoC 验证报告](./docs/architecture/poc-verification-report.md)）
-> - 下一步动作：跑 Pre-Stage 0 Provider PoC → H1/H2/H3/H4/H7 全 Go 后启动 Stage 0 工程基线
-> - **想 fork 自己启动？** 先读 [PoC 验证报告](./docs/architecture/poc-verification-report.md) + [DeepSeek 对接](./docs/third-party-integration/deepseek-api.md)，需自备 `DEEPSEEK_API_KEY`
->
-> 下面"快速开始"段是 **Stage 0 完成后**才会激活——当前 `infra/docker-compose.yml` / `backend/pyproject.toml` / `scripts/check.sh` 均未创建。
+## MVP 业务闭环
 
----
-
-## 快速开始
-
-### 前置
-- Python 3.11+、Node 20+、Docker、PostgreSQL 16（含 pgvector）或用 Docker Compose
-
-### 后端
-```bash
-cp .env.example .env          # 填入 DEEPSEEK_API_KEY 等
-docker compose -f infra/docker-compose.yml up -d postgres
-pip install -e "backend[dev]"
-uvicorn app.main:app --reload --app-dir backend
-# 访问 http://localhost:8000/health
+```text
+用户建档
+  → 发起规划请求
+  → Agent 生成结构化计划与 1~3 个今日任务
+  → 用户开始 / 完成 / 放弃任务
+  → 用户提交每日复盘
+  → 系统判断是否需要重规划
+  → 用户确认后生成新版本计划
 ```
 
-### 前端
-```bash
-cd frontend && npm install && npm run dev
-# 访问 http://localhost:5173
+MVP 必须完成：
+
+1. Guest JWT 登录与用户隔离；
+2. 用户画像；
+3. Agent Run + SSE；
+4. 计划和今日任务；
+5. 任务状态机；
+6. 复盘和重规划；
+7. 基础记忆；
+8. Trace 开发者页；
+9. Docker Compose 与固定 Eval Case。
+
+MVP 暂不引入 Redis、Celery、Kafka、MCP、多 Agent、Kubernetes 和对象存储。
+
+## 当前状态
+
+当前仓库是**实现前设计包**，尚未创建 `backend/` 和 `frontend/` 代码。下一步应直接进入 Stage 0，不需要等待某个特定模型的 PoC 才能搭工程骨架。
+
+开发顺序以 [`docs/implementation/README.md`](./docs/implementation/README.md) 为准：
+
+| 阶段 | 目标 |
+|---|---|
+| 0 | 创建前后端骨架、数据库和质量门禁 |
+| 1 | 落地契约、鉴权、用户画像和迁移 |
+| 2 | 用 Mock Provider 跑通一次完整 plan run |
+| 3 | 接入真实 LLM，完成任务、复盘和重规划 |
+| 4 | 接入记忆、搜索和 RAG |
+| 5 | 完成 Trace、Eval、部署和作品包装 |
+
+## 文档权威顺序
+
+发生冲突时按以下顺序执行：
+
+1. [`docs/implementation/project-baseline.md`](./docs/implementation/project-baseline.md)
+2. [`docs/architecture/tdd.md`](./docs/architecture/tdd.md)
+3. [`docs/architecture/api-and-data-contracts.md`](./docs/architecture/api-and-data-contracts.md)
+4. [`docs/model-design/`](./docs/model-design/README.md) 下的端点、表和节点 spec
+5. [`docs/overview/product-overview.md`](./docs/overview/product-overview.md)
+6. `docs/design-input/` 仅供追溯，不作为实现依据
+
+## 给 Codex 的使用方式
+
+不要一次让模型生成整个项目。每次只执行一个阶段任务：
+
+```text
+1. 从仓库根目录启动 Codex，让其读取 `AGENTS.md`
+2. 再读 `AGENTS.zh-CN.md` 与 `docs/implementation/project-baseline.md`
+3. 只读当前阶段任务书
+4. 先输出文件清单和实现计划
+5. 再生成代码与测试
+6. 本地执行验收命令
+7. 通过后再进入下一阶段
 ```
 
-### 门禁
-```bash
-bash scripts/check.sh         # CI 硬阻断入口（架构 / 契约 / 文档 / Eval 全检）
-pytest                         # Python 测试
+各阶段可直接复制的任务说明位于 [`docs/implementation/`](./docs/implementation/README.md)。
+更具体的 Codex 使用方法见 [`CODEX-CODING-GUIDE.md`](./CODEX-CODING-GUIDE.md)。
+
+## 计划中的仓库结构
+
+```text
+career-planning-buddy/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── schemas/
+│   │   ├── services/
+│   │   ├── repositories/
+│   │   ├── models/
+│   │   ├── agent/
+│   │   ├── tools/
+│   │   ├── providers/
+│   │   ├── harness/
+│   │   └── core/
+│   ├── alembic/
+│   └── tests/
+├── frontend/
+├── infra/
+├── scripts/
+└── docs/
 ```
 
----
+## 完成定义
 
-## 仓库结构（5 圈层）
+项目达到可投递状态，至少需要：
 
-```
-dazi/
-├── docs/                       ① 文档（8 类，spec 根据地）
-├── backend/                    ② 后端代码（FastAPI 六层 + Providers 横切）
-├── frontend/                   ② 前端代码（React + TS）
-├── scripts/                    ③ 工程门禁（check-*.sh）
-├── infra/                      ④ 部署（Docker / Caddy）
-├── .github/workflows/          ④ CI（GitHub Actions）
-├── AGENTS.md / AGENTS.zh-CN.md ⑤ AI 协作入口（双语，规则强制）
-└── README.md                   本文件
-```
-
-详见各目录 README。
-
----
-
-## 多人协作约定
-
-### 必读
-1. [AGENTS.md](./AGENTS.md)（英文）/ [AGENTS.zh-CN.md](./AGENTS.zh-CN.md)（中文）—— AI 协作宪章 + Non-Negotiable Rules
-2. [docs/README.md](./docs/README.md) —— 文档总索引
-3. [docs/governance/development-workflow.md](./docs/governance/development-workflow.md) —— 开发流程
-4. [docs/governance/spec-driven-workflow.md](./docs/governance/spec-driven-workflow.md) —— 改动前的 Clarify→Plan→Tasks
-5. [docs/governance/stage-delivery-definition.md](./docs/governance/stage-delivery-definition.md) —— 阶段编号与退出条件
-
-### Spec-Driven 强制流程
-跨模块 / 改状态机 / 新增 API / 新增表 / 新增节点的改动**必须**先在 `docs/requirements/<feature>/` 写 clarify.md + plan.md（含 mermaid 图），由 `scripts/check-plan.sh` 机器校验。
-
-### 分支与提交
-- `main` 受保护，只接 PR
-- 分支命名：`feat/<scope>` / `fix/<scope>` / `docs/<scope>`
-- PR 必须 CI 全绿 (`scripts/check.sh`) + 至少 1 个 reviewer
-- 提交前自查：[use-case-development-checklist](./docs/governance/use-case-development-checklist.md)
-
-### 任务认领
-按根 README 的当前状态和 [stage-delivery-definition](./docs/governance/stage-delivery-definition.md) 的阶段退出条件认领任务，退出条件不达标不进下一阶段。
-
----
-
-## 核心架构决策（9 条，详见 [docs/architecture/adr.md](./docs/architecture/adr.md)）
-
-| ADR | 主题 | 结论 |
-|---|---|---|
-| 001 | 整体架构 | FastAPI 单后端 + React + PostgreSQL |
-| 002 | Agent 编排 | 单核心 Agent + 受控节点（非多 Agent）|
-| 003 | 分层架构 | 六层（Types→Config→Repo→Service→Runtime→API）+ Providers 横切 |
-| 004 | 数据存储 | PostgreSQL + pgvector（不引入 Redis）|
-| 005 | LLM 与 Provider | DeepSeek V4 + 五类 Provider Protocol（待 spike）|
-| 006 | 记忆系统 | 五类分层 + 敏感内容用户确认 |
-| 007 | 并发 | FastAPI async + SSE + Background Tasks |
-| 008 | 工程治理 | Spec-Driven + 阶段化交付 + 门禁脚本 |
-| 009 | Agent 编排器 | LangGraph 1.x |
-
----
-
-## 当前进度
-
-📍 **Pre-Stage 0：SDD 文档收敛 + Provider PoC 准备**（spec 已就绪 / 代码未启动）
-
-下一步关键路径（按依赖顺序）：
-
-| # | 动作 | 文档依据 | 前置 |
-|---|---|---|---|
-| 1 | 跑 Pre-Stage 0 Provider PoC（脚本验证 7 项假设） | [PoC 验证报告 §4 执行计划](./docs/architecture/poc-verification-report.md) | 取得 `DEEPSEEK_API_KEY` |
-| 2 | spike 全部 Go（H1-H4 + H7 通过） → ADR-005 升号 "Accepted（已验证）" | 同上 §6 Go/No-Go 矩阵 | 1 |
-| 3 | 启动 **Stage 0 工程基线**：FastAPI `/health` + Docker + Alembic + `scripts/check.sh` | [stage-delivery-definition.md §阶段 0](./docs/governance/stage-delivery-definition.md) | 2 |
-| 4 | Stage 1 契约冻结：Pydantic + Alembic 迁移 + Provider Protocol + 状态机枚举 | 同上 §阶段 1 | 3 |
-| 5 | Stage 2 纵切 Mock 跑通：LangGraph + 11 节点 Mock + Trace 表有数据 | 同上 §阶段 2 | 4 |
-
-> **重要**：在 Provider PoC 全 Go 之前，任何 `backend/` 业务代码不应启动。否则地基不稳。
-
-Harness 分阶段落地：
-- Stage 1：冻结 Trace / Replay / Eval 的 schema 与协议。
-- Stage 2：Mock 纵切写入最小 Trace。
-- Stage 3：真实模型接入后补 Provider trace、Budget、Guard。
-- Stage 5：Replay / Eval / Bad Case 闭环完整化。
-
----
-
-## 许可与贡献
-
-- 代码私有（秋招作品）
-- 协作流程： Fork → PR → CI → Review
-- 改文档：先看 [docs/README.md §写作约定](./docs/README.md)
+- 新用户可完成建档并生成计划；
+- 一次 Agent Run 可稳定通过 SSE 展示进度；
+- 任务状态、复盘和重规划形成真实数据库闭环；
+- 失败、超时和取消能收敛到明确状态；
+- 至少 30 条固定 Eval Case 可重复运行；
+- Docker Compose 一键启动；
+- README 中有真实截图、Demo 和实测指标。

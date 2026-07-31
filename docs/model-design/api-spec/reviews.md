@@ -1,82 +1,51 @@
-# reviews.md — 复盘端点
+# Reviews API
 
-状态：本轮实现。
+## POST /api/v1/reviews
 
-## 端点：POST /api/v1/reviews
+需要 `Idempotency-Key`。
 
-用户提交复盘。**必填 Idempotency-Key**。
-
-**请求 Schema** `CreateReviewRequest`：
-| 字段 | 类型 | 必填 | 约束 |
-|---|---|---|---|
-| `plan_id` | `str` | ✅ | UUID |
-| `mood` | `int` | ✅ | 1-5 |
-| `blockers` | `str \| null` | ❌ | max 500 |
-| `completed_task_ids` | `list[str]` | ✅ | UUID 数组 |
-| `abandoned_task_ids` | `list[str]` | ✅ | UUID 数组 |
-| `adjustment_request` | `str \| null` | ❌ | max 300；用户主动提出的"调整请求"（PRD §8.1 复盘 4 项之一） |
-| `free_text` | `str \| null` | ❌ | max 1000（自由复盘，与 adjustment_request 区分：调整请求是显式指令，自由文本是叙述） |
-| `trigger_replan` | `bool` | ❌ | 默认由服务端按双层规则判（见 PRD §8） |
-
-**成功响应 200** `ReviewResult`：
-| 字段 | 类型 |
-|---|---|
-| `review_id` | `str` |
-| `companion_message` | `str`（由 companion_response 节点生成） |
-| `suggested_replan` | `bool` |
-| `next_plan_id` | `str \| null`（如服务端自动触发 replan 则填；否则 null，需用户走 [POST /reviews/{id}/accept-replan](#endpostapiv1reviewsreview_idaccept-replan) 端点确认） |
-
-**错误**：
-| HTTP | code | 触发 |
-|---|---|---|
-| 422 | VALIDATION_REVIEW_INVALID | 字段校验失败 |
-| 409 | STATE_PLAN_NOT_REVIEWABLE | plan 状态不属于 {active, adopted}（如已完成、已归档） |
-| 404 | NOT_FOUND_PLAN | —— |
-
-### 端点：POST /api/v1/reviews/{review_id}/accept-replan
-
-用户在前端确认接受建议的 replan。先决条件：上游 review 返 `suggested_replan=true` 且 `next_plan_id=null`。**必填 Idempotency-Key**。
-
-**成功响应 202** `ReplanAcceptedResponse`：
-| 字段 | 类型 |
-|---|---|
-| `run_id` | `str`（新建的 plan_run） |
-| `status` | `Literal["pending"]` |
-| `events_url` | `str` |
-
-**错误**：
-| HTTP | code | 触发 |
-|---|---|---|
-| 404 | NOT_FOUND_REVIEW | —— |
-| 409 | STATE_REVIEW_NO_SUGGESTED_REPLAN | 原 review.suggested_replan=false |
-| 429 | RATE_LIMITED_RUN_PER_USER | 同用户已有 pending/running run |
-
-> 路径形如 `/api/v1/reviews/r-3b4f-.../accept-replan`，行为等同 POST /agent-runs + hint_intent=replan + 上游 plan_id 注入。
-
-## 副作用
-
-提交后 service 异步触发：
-1. 计算 consecutive_abandoned / consecutive_completed（更新 reviews）
-2. 路由到 companion_response 节点生成话术
-3. 按 PRD §8 双层规则判定是否建议 replan
-4. 若建议 replan，可选自动触发新的 plan_run（需用户在前端确认）
-
-## 示例
-
-```http
-POST /api/v1/reviews
-Idempotency-Key: idem-7d4e
+```json
 {
-  "plan_id": "p-9e2a",
+  "plan_id": "c91f8734-2839-4f55-9db1-1c39b8a410f2",
+  "review_date": "2026-07-31",
   "mood": 2,
-  "blockers": "太累了",
-  "completed_task_ids": ["t-1a8b"],
-  "abandoned_task_ids": ["t-2c9d"]
+  "blockers": "部署环境一直报错",
+  "adjustment_request": "明天任务少一点",
+  "free_text": "今天把接口跑通了，但没有完成部署"
 }
 ```
 
-## 关联
+客户端不提交 completed_task_ids 和 abandoned_task_ids。Service 根据该日期的 tasks 计算数量，避免事实冲突。
 
-- 表：[reviews.md](../data-models/reviews.md)
-- 节点：[companion_response.spec.md](../agent-nodes/companion_response.spec.md)
-- 产品规则：[PRD §8 双层调整规则](../../overview/product-overview.md)
+### Response 201
+
+```json
+{
+  "review_id": "71f6b355-d6a8-480c-890d-684d8bcb2785",
+  "completed_count": 1,
+  "abandoned_count": 1,
+  "suggested_replan": true,
+  "replan_reason": "时间预算下降且存在持续阻塞",
+  "companion_message": "今天已经推进了接口，明天先把部署拆小。"
+}
+```
+
+## GET /api/v1/reviews
+
+Query：plan_id、date_from、date_to、cursor、limit。
+
+## POST /api/v1/reviews/{review_id}/accept-replan
+
+需要 `Idempotency-Key`。只在 `suggested_replan=true` 且尚未接受时可调用。
+
+Response 202：
+
+```json
+{
+  "run_id": "...",
+  "status": "pending",
+  "events_url": "/api/v1/agent-runs/.../events"
+}
+```
+
+该端点等价于服务端创建 `hint_intent=replan`、`source_plan_id=review.plan_id` 的新 Run。它不立即归档原计划，只有新计划成功持久化后才归档。

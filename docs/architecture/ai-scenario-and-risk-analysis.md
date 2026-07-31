@@ -3,17 +3,17 @@
 | 项目 | 内容 |
 |---|---|
 | 版本 | v1.0 |
-| 状态 | 本轮实现 |
+| 状态 | 设计基线 |
 | 面向对象 | 架构师、AI 工程师、产品负责人、评审者 |
-| 定位 | 判断 Dazi 哪些场景适合 AI，哪些必须规则化或分流，并定义数据、知识库、模型、Prompt、RAG、Agent 的风险边界 |
+| 定位 | 判断 Career Planning Buddy 哪些场景适合 AI，哪些必须规则化或分流，并定义数据、知识库、模型、Prompt、RAG、Agent 的风险边界 |
 
-English summary: AI scenario and risk analysis for Dazi. It identifies suitable AI use cases, non-AI boundaries, model/data risks, safety triage, and mitigation controls.
+English summary: AI scenario and risk analysis for Career Planning Buddy. It identifies suitable AI use cases, non-AI boundaries, model/data risks, safety triage, and mitigation controls.
 
 ---
 
 ## 1. 分析结论
 
-Dazi 适合使用 AI 的部分是“开放语义理解、上下文整合、候选计划生成、陪伴话术和质量评审”；不适合完全交给 AI 的部分是“业务写入、状态转移、权限、长期记忆落库、高风险处理、成本控制”。
+Career Planning Buddy 适合使用 AI 的部分是“开放语义理解、上下文整合、候选计划生成、陪伴话术和质量评审”；不适合完全交给 AI 的部分是“业务写入、状态转移、权限、长期记忆落库、高风险处理、成本控制”。
 
 核心原则：
 
@@ -74,7 +74,7 @@ Dazi 适合使用 AI 的部分是“开放语义理解、上下文整合、候�
 | 敏感记忆误存 | 用户透露隐私 | 合规风险 | candidate 池 + 用户确认 |
 | 数据过期 | 岗位信息变化 | 建议不准 | 来源时间、搜索 provider、经验原子版本 |
 | Mock 混入真实统计 | demo 数据污染 Eval | 指标失真 | `data_origin="mock"` |
-| Provider 不稳定 | DeepSeek/Search 超时 | run 失败 | timeout、fallback_reason、降级链 |
+| Provider 不稳定 | LLM/Search Provider 超时 | run 失败 | timeout、fallback_reason、降级链 |
 
 ## 5. 高风险分流边界
 

@@ -1,114 +1,31 @@
-# er-diagram.mmd — 全局 ER 图
+# 全局 ER 图
 
 ```mermaid
 erDiagram
     users ||--o| user_profiles : has
     users ||--o{ plans : owns
     users ||--o{ tasks : owns
-    users ||--o{ reviews : owns
+    users ||--o{ reviews : writes
     users ||--o{ memories : owns
-    users ||--o{ memory_candidates : owns
-    users ||--o{ agent_runs : owns
+    users ||--o{ memory_candidates : confirms
+    users ||--o{ agent_runs : starts
 
     plans ||--o{ tasks : contains
-    plans }o--|| reviews : reviewed_by
+    plans ||--o{ reviews : reviewed_by
+    plans ||--o{ companion_messages : has
+    plans ||--o{ plans : replanned_from
+
+    tasks ||--o{ companion_messages : triggers
+    reviews ||--o{ companion_messages : triggers
 
     agent_runs ||--o{ agent_steps : has
-    agent_steps ||--o{ tool_calls : triggered
+    agent_runs ||--o{ agent_events : emits
+    agent_runs ||--o{ tool_calls : records
+    agent_steps ||--o{ tool_calls : invokes
+    agent_runs ||--o{ search_sources : collects
+    agent_runs ||--o| plans : produces
 
-    plans ||--o{ companion_messages : themed_by
-    reviews ||--o{ companion_messages : themed_by
-    tasks ||--o{ companion_messages : themed_by
-
-    search_sources }o--o{ experience_atoms : distilled_into
-
-    users {
-        uuid id PK
-        string brief_login_type
-        timestamptz created_at
-    }
-    user_profiles {
-        uuid user_id PK_FK
-        goal_type enum
-        stage enum
-        text skill_summary
-    }
-    plans {
-        uuid id PK
-        uuid user_id FK
-        int version "optimistic lock"
-        enum status
-        jsonb content_json
-    }
-    tasks {
-        uuid id PK
-        uuid plan_id FK
-        uuid user_id FK
-        enum state
-        text starter_action
-        text deliverable
-        int estimated_minutes
-    }
-    reviews {
-        uuid id PK
-        uuid user_id FK
-        uuid plan_id FK
-        int mood
-        text blockers
-    }
-    memories {
-        uuid id PK
-        uuid user_id FK
-        enum memory_type
-        text content
-        vector embedding "pgvector 1024"
-        enum sensitivity
-        date expires_at
-    }
-    memory_candidates {
-        uuid id PK
-        uuid user_id FK
-        enum memory_type
-        text content
-        enum sensitivity
-        enum status "pending/confirmed/rejected"
-    }
-    search_sources {
-        uuid id PK
-        text url
-        text snippet
-        enum source_type
-        float reliability
-        timestamptz retrieved_at
-    }
-    experience_atoms {
-        uuid id PK
-        enum goal_type
-        text body
-        text source_url FK
-        vector embedding "pgvector 1024"
-    }
-    agent_runs {
-        uuid id PK
-        uuid user_id FK
-        enum status
-        float cost_cny
-        jsonb trace_summary
-    }
-    agent_steps {
-        uuid id PK
-        uuid run_id FK
-        text node_name
-        int latency_ms
-        float cost_cny
-        jsonb trace_data
-    }
-    tool_calls {
-        uuid id PK
-        uuid step_id FK
-        text tool_name
-        text args_hash
-        text result_hash
-        int latency_ms
-    }
+    memory_candidates o|--o| memories : activates
 ```
+
+字段以同目录各表 spec 为准，图只表达关系，不重复字段细节。

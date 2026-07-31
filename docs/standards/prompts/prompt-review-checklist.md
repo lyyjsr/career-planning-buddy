@@ -1,6 +1,6 @@
 # Prompt 评审检查表
 
-状态：本轮实现。
+状态：设计基线。
 
 English summary: PR review checklist for prompt changes. Enforced via manual review + CI eval regression.
 

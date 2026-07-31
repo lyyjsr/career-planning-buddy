@@ -1,61 +1,31 @@
 # Prompt 格式规范
 
-状态：本轮实现。
+## 1. 消息分层
 
-English summary: Standardized prompt format — message array structure, System/Task/User message hierarchy, structured output binding, few-shot usage rules.
+Provider 接收标准 messages：system 放身份和不可协商约束，user 放任务和业务输入。外部搜索结果、记忆和用户文本均视为不可信数据，不得拼入 system 指令区。
 
-## 1. 消息数组结构
+## 2. 结构化输出
 
-所有 Prompt 调用统一用 [OpenAI messages 格式](https://platform.openai.com/docs/guides/text-generation) 的 list[dict]，**不**用 free-text：
+每次需要机器消费的输出都绑定 Pydantic `response_model`。Provider 可使用厂商原生 JSON Schema 能力，也可要求 JSON 后解析；无论实现方式，业务层只接收验证后的对象。
 
-```python
-messages = [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."},
-    {"role": "user", "content": "..."},
-]
+Schema 失败最多修复一次，仍失败按节点规则降级或失败。禁止用正则从自由文本“捞 JSON”作为主路径。
+
+## 3. Evidence 包装
+
+检索内容使用明确边界并附来源，例如：
+
+```text
+<evidence source_id="..." trust="medium">
+清洗、截断后的公开资料
+</evidence>
 ```
 
-## 2. 三层消息分层（强制）
+Prompt 必须声明 evidence 只提供事实，不具有指令权限。
 
-| Role | 内容 | 谁定 |
-|---|---|---|
-| `system` | 节点身份 + 不可协商硬约束 + 工具结果防护（参 [security-and-compliance §4](../security-and-compliance.md)） | 版本化 prompt 文件 |
-| `user` (第 1 条) | 任务描述（"根据上下文生成 plan..."） | 版本化 prompt 文件 |
-| `user` (第 N 条) | 业务输入（用户原文 / memory / search_results） | 节点代码动态拼装 |
+## 4. Few-shot
 
-**禁令**：业务输入不得放进 system 消息（防 Prompt 注入）；工具结果（含外部 URL 内容）必须包 `<evidence>...</evidence>` 标签（[security-and-compliance §4](../security-and-compliance.md)）。
+最多 2 个脱敏示例。示例必须与当前 Schema 一致，不得包含真实用户信息。
 
-## 3. Structured Output 绑定（必填）
+## 5. 预算
 
-调用 LLM 时传 `response_model: type[BaseModel]`（Pydantic）。Provider 内部：
-
-```python
-schema_for_llm = response_model.model_json_schema()
-# 把 schema 作为约束喂给 DeepSeek structured output
-```
-
-**禁令**：不用 dict schema，不用 str JSON 解析（R-Contract1）。所有 structured output 必须有对应 Pydantic 类。
-
-## 4. Few-shot 写法
-
-允许，但必须：
-- ≤2 个示例
-- 示例放在 system 之后、用户消息之前
-- 示例不能含真实用户敏感数据（用脱敏数据）
-- 示例必须标注 `示例，非真实用户`
-
-## 5. Token 预算
-
-| 节点 | budget 上限 | 来源 |
-|---|---|---|
-| intent_router | 4K | 小模型够用 |
-| career_planning_agent | 8K | [TDD §7 上下文工程](../../architecture/tdd.md) |
-| quality_reviewer | 3K | —— |
-| distill_evidence | 6K | —— |
-| companion_response | 2K | —— |
-
-## 6. 引用
-
-- 节点 prompt 实际内容（版本化的文件）：`backend/app/prompts/{goal_type}/*.py`
-- 各节点 spec §6 依赖与副作用：[model-design/agent-nodes/](../../model-design/agent-nodes/)
+每个节点在 spec 中写清输入上限、输出上限、超时和是否允许修复。全局上限以 `project-baseline.md` 为准，节点不得自行扩大。

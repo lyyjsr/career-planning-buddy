@@ -3,11 +3,11 @@
 | 项目 | 内容 |
 |---|---|
 | 版本 | v1.0 |
-| 状态 | 本轮实现 |
+| 状态 | 设计基线 |
 | 面向对象 | 项目展示者、面试官、评审者 |
-| 定位 | 用 3-5 分钟说明 Dazi 的用户价值、核心链路、工程亮点和后续优化方向 |
+| 定位 | 用 3-5 分钟说明 Career Planning Buddy 的用户价值、核心链路、工程亮点和后续优化方向 |
 
-English summary: Demo walkthrough script for Dazi. It provides a short product and engineering demo flow for interviews, portfolio review, and project presentations.
+English summary: Demo walkthrough script for Career Planning Buddy. It provides a short product and engineering demo flow for interviews, portfolio review, and project presentations.
 
 ---
 
@@ -26,17 +26,17 @@ English summary: Demo walkthrough script for Dazi. It provides a short product a
 
 | 时间 | 内容 | 目标 |
 |---|---|---|
-| 0:00-0:30 | 项目定位 | 说明 Dazi 是 AI 求职规划搭子，不是普通聊天机器人 |
+| 0:00-0:30 | 项目定位 | 说明 Career Planning Buddy 是 AI 求职规划搭子，不是普通聊天机器人 |
 | 0:30-1:20 | 首次建档 | 展示目标方向、阶段、每日可用时间 |
 | 1:20-2:20 | 生成规划 | 展示规划对话、SSE 进度、今日任务 |
 | 2:20-3:00 | 任务执行与复盘 | 展示开始/完成/放弃、每日复盘、重规划 |
 | 3:00-4:10 | 工程 Trace | 展示 run、节点、tool call、cost、fallback |
-| 4:10-5:00 | 总结亮点 | 说明单 Agent、六层 Harness、Eval、数据与安全 |
+| 4:10-5:00 | 总结亮点 | 说明单 Agent、Trace/Eval、状态闭环与安全 |
 
 ## 3. 开场话术
 
 ```text
-Dazi 是一个面向计算机学生的 AI 求职规划搭子。
+Career Planning Buddy 是一个面向计算机学生的 AI 求职规划搭子。
 它解决的问题不是“给我一堆泛泛建议”，而是每天根据用户目标、当前阶段、可用时间和执行反馈，生成 1-3 个能马上开始的任务，并通过复盘持续调整。
 
 工程上，它采用 FastAPI + React + PostgreSQL + LangGraph。
@@ -126,7 +126,7 @@ Agent 不是随意写库或自由发挥，而是被限制在单核心 Agent + �
 
 要讲清楚：
 
-- Dazi 的闭环是“规划 → 执行 → 复盘 → 调整”；
+- Career Planning Buddy 的闭环是“规划 → 执行 → 复盘 → 调整”；
 - 重规划基于真实执行反馈，不是每天重新拍脑袋；
 - 用户确认后才进入重规划。
 
@@ -157,7 +157,7 @@ Agent 不是随意写库或自由发挥，而是被限制在单核心 Agent + �
 | 内容 | 说明 |
 |---|---|
 | run 列表 | 每次规划都有 run |
-| step 时间线 | 看到 11 个节点如何执行 |
+| step 时间线 | 查看本次实际执行的核心与增强节点 |
 | tool calls | 看到 Agent 调用了哪些只读工具 |
 | cost/latency | 成本和耗时可观察 |
 | fallback_reason | 降级原因显式化 |

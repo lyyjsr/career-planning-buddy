@@ -1,6 +1,6 @@
 # prompts/ 规范子目录
 
-状态：本轮实现。
+状态：设计基线。
 
 English summary: Prompt-as-code standards — versioning, format, and review checklist. Agent 项目独有规范（普通 Web 项目没有）。
 

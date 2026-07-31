@@ -1,25 +1,25 @@
-# Dazi 用户使用说明书
+# Career Planning Buddy 用户使用说明书
 
 | 项目 | 内容 |
 |---|---|
 | 版本 | v1.0 |
-| 状态 | 本轮实现 |
+| 状态 | 设计基线 |
 | 面向对象 | 最终用户、产品演示者、面试官 |
-| 定位 | 用用户能理解的语言说明 Dazi 从首次建档到每日执行、复盘、调整、记忆管理的完整使用链路 |
+| 定位 | 用用户能理解的语言说明 Career Planning Buddy 从首次建档到每日执行、复盘、调整、记忆管理的完整使用链路 |
 
-English summary: User-facing manual for Dazi. It explains what users do first, how the product moves through planning, tasks, reviews, replanning, memories, and safety states.
+English summary: User-facing manual for Career Planning Buddy. It explains what users do first, how the product moves through planning, tasks, reviews, replanning, memories, and safety states.
 
 ---
 
-## 1. Dazi 是什么
+## 1. Career Planning Buddy 是什么
 
-Dazi 是一个面向计算机学生的 AI 求职规划搭子。它不是普通聊天机器人，而是围绕你的求职目标、当前阶段、每天可投入时间和历史执行情况，帮你生成可执行的求职计划，并在每天执行后根据复盘继续调整。
+Career Planning Buddy 是一个面向计算机学生的 AI 求职规划搭子。它不是普通聊天机器人，而是围绕你的求职目标、当前阶段、每天可投入时间和历史执行情况，帮你生成可执行的求职计划，并在每天执行后根据复盘继续调整。
 
 MVP 聚焦一个主场景：计算机学生准备 AI 应用开发、后端开发、Agent 应用等方向的求职。
 
 ## 2. 第一次使用：完成建档
 
-第一次打开 Dazi 时，系统会先判断你是否已经有档案。
+第一次打开 Career Planning Buddy 时，系统会先判断你是否已经有档案。
 
 如果没有档案，你需要先补齐最少信息：
 
@@ -29,11 +29,11 @@ MVP 聚焦一个主场景：计算机学生准备 AI 应用开发、后端开发
 | 当前阶段 | 例如刚开始准备、有项目但缺复盘、准备投递、准备面试等 |
 | 每日可用时间 | 例如每天 1 小时、2 小时、半天 |
 
-如果信息不足，Dazi 会先追问，而不是直接生成模糊计划。
+如果信息不足，Career Planning Buddy 会先追问，而不是直接生成模糊计划。
 
 ```mermaid
 flowchart TD
-    A[首次打开 Dazi] --> B{是否已有档案}
+    A[首次打开 Career Planning Buddy] --> B{是否已有档案}
     B -->|没有| C[填写目标方向/当前阶段/每日可用时间]
     B -->|已有| D[进入今日任务]
     C --> E{关键信息是否足够}
@@ -45,7 +45,7 @@ flowchart TD
 
 ## 3. 生成第一份求职规划
 
-建档完成后，你可以向 Dazi 发起规划请求，例如：
+建档完成后，你可以向 Career Planning Buddy 发起规划请求，例如：
 
 ```text
 帮我制定 5 周后的 Agent 应用开发秋招计划。
@@ -100,7 +100,7 @@ stateDiagram-v2
 
 ## 5. 每日复盘
 
-每日复盘用于告诉 Dazi 今天真实发生了什么。复盘不是写长篇日记，而是补充对明天计划有用的信息。
+每日复盘用于告诉 Career Planning Buddy 今天真实发生了什么。复盘不是写长篇日记，而是补充对明天计划有用的信息。
 
 复盘建议包含：
 
@@ -123,9 +123,9 @@ flowchart TD
 
 ## 6. AI 如何根据复盘调整计划
 
-如果复盘显示计划还能继续，Dazi 会保留原计划并给出次日续接建议。
+如果复盘显示计划还能继续，Career Planning Buddy 会保留原计划并给出次日续接建议。
 
-如果复盘显示明显偏离，比如任务连续未完成、时间变少、目标方向变化，Dazi 会进入重规划链路。
+如果复盘显示明显偏离，比如任务连续未完成、时间变少、目标方向变化，Career Planning Buddy 会进入重规划链路。
 
 重规划不是推翻一切，而是在已有档案、计划、任务、复盘和记忆基础上调整。
 
@@ -141,7 +141,7 @@ flowchart TD
 
 ## 7. 记忆管理
 
-Dazi 会把对长期规划有帮助的信息整理成记忆，例如目标方向、偏好、限制条件、长期项目背景等。
+Career Planning Buddy 会把对长期规划有帮助的信息整理成记忆，例如目标方向、偏好、限制条件、长期项目背景等。
 
 敏感信息不会直接进入长期记忆，系统应先生成候选记忆，由用户确认。
 
@@ -157,7 +157,7 @@ Dazi 会把对长期规划有帮助的信息整理成记忆，例如目标方向
 
 ## 8. 安全分流
 
-如果用户输入涉及高风险内容，Dazi 不会继续普通求职规划链路，也不会把高风险内容写入长期记忆。
+如果用户输入涉及高风险内容，Career Planning Buddy 不会继续普通求职规划链路，也不会把高风险内容写入长期记忆。
 
 系统会：
 
@@ -188,7 +188,7 @@ Dazi 会把对长期规划有帮助的信息整理成记忆，例如目标方向
 
 ```mermaid
 flowchart TD
-    A[打开 Dazi] --> B{是否有今日任务}
+    A[打开 Career Planning Buddy] --> B{是否有今日任务}
     B -->|没有| C[发起规划或次日续上]
     B -->|有| D[查看今日任务]
     C --> D
@@ -208,7 +208,7 @@ flowchart TD
 
 ## 11. 常见问题
 
-### 为什么 Dazi 有时会先追问？
+### 为什么 Career Planning Buddy 有时会先追问？
 
 因为缺少目标方向、当前阶段或可用时间时，直接生成计划容易变成泛泛建议。追问是为了让计划更具体。
 
@@ -222,7 +222,7 @@ MVP 强调可执行，而不是堆很多看起来完整的任务。任务必须�
 
 ### 为什么高风险内容不会进入普通规划？
 
-Dazi 是求职规划产品，不是心理、法律或金融咨询服务。遇到高风险内容时，系统优先保证安全，进入固定分流流程。
+Career Planning Buddy 是求职规划产品，不是心理、法律或金融咨询服务。遇到高风险内容时，系统优先保证安全，进入固定分流流程。
 
 ### 我可以删除系统记住的信息吗？
 
