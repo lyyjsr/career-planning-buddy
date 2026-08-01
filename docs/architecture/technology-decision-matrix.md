@@ -4,7 +4,7 @@
 
 | 领域 | 决策 | 原因 |
 |---|---|---|
-| 后端 | FastAPI + Python 3.11 | 异步模型调用和快速开发 |
+| 后端 | FastAPI + Python 3.12 | 异步模型调用和快速开发 |
 | ORM | SQLAlchemy 2 Async + asyncpg | 类型清晰、支持事务与异步 |
 | 数据库 | PostgreSQL 16 | 业务、Trace 和事件统一存储 |
 | 向量 | pgvector | 个人项目规模足够，减少组件 |

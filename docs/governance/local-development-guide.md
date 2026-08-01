@@ -2,7 +2,7 @@
 
 ## 1. 目标环境
 
-- Python 3.11
+- Python 3.12
 - Node.js 20+
 - Docker Desktop / Docker Engine
 - PostgreSQL 16 + pgvector（由 Docker Compose 启动）

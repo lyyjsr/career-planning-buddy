@@ -86,7 +86,7 @@
 
 | ID | 要求 |
 |---|---|
-| NFR-01 | Python 3.11、FastAPI、SQLAlchemy Async |
+| NFR-01 | Python 3.12、FastAPI、SQLAlchemy Async |
 | NFR-02 | PostgreSQL 是业务和事件事实源 |
 | NFR-03 | MVP 单 Worker 部署，限制必须公开 |
 | NFR-04 | 请求、日志和 Trace 具备 request_id/run_id |

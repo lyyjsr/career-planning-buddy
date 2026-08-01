@@ -2,7 +2,7 @@
 
 ## 1. 基线
 
-- Python 3.11；
+- Python 3.12；
 - FastAPI、Pydantic v2、SQLAlchemy 2 Async；
 - 全量类型标注；
 - ruff、mypy、pytest 作为门禁；

@@ -1,0 +1,92 @@
+"""Shared Stage 1 PostgreSQL and API fixtures."""
+
+import os
+from collections.abc import AsyncIterator
+from uuid import UUID
+
+import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.agent.executor import AgentRunExecutor
+from app.api.dependencies import get_agent_run_executor
+from app.core.config import get_settings
+from app.core.database import get_db_session
+from app.main import create_app
+
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("LLM_PROVIDER", "mock")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://career_buddy:career_buddy_local@localhost:5432/career_buddy",
+)
+os.environ.setdefault("JWT_SECRET", "pytest-only-secret-with-at-least-32-characters")
+
+get_settings.cache_clear()
+
+
+class StubAgentRunExecutor(AgentRunExecutor):
+    """API-test scheduler that records submission without leaving the test transaction."""
+
+    def __init__(self) -> None:
+        self.submitted: list[UUID] = []
+        self.cancelled: list[UUID] = []
+
+    def submit(self, run_id: UUID) -> None:
+        self.submitted.append(run_id)
+
+    async def request_cancel(self, run_id: UUID) -> None:
+        self.cancelled.append(run_id)
+
+
+@pytest_asyncio.fixture
+async def db_connection() -> AsyncIterator[AsyncConnection]:
+    engine = create_async_engine(get_settings().database_url)
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            yield connection
+        finally:
+            await transaction.rollback()
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSession]:
+    session_factory = async_sessionmaker(
+        bind=db_connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    async with session_factory() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
+async def api_application(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
+    application = create_app()
+    executor = StubAgentRunExecutor()
+
+    async def override_db_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    application.dependency_overrides[get_db_session] = override_db_session
+    application.dependency_overrides[get_agent_run_executor] = lambda: executor
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def api_client(api_application: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=api_application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client

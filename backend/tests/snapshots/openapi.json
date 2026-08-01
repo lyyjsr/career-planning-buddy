@@ -1,0 +1,5044 @@
+{
+  "components": {
+    "schemas": {
+      "AbandonedReason": {
+        "enum": [
+          "too_hard",
+          "too_easy",
+          "no_time",
+          "lost_interest",
+          "blocked",
+          "other"
+        ],
+        "title": "AbandonedReason",
+        "type": "string"
+      },
+      "ActivePlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustment_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Reason"
+          },
+          "adopted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adopted At"
+          },
+          "companion_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Companion Message"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "horizon_end": {
+            "format": "date",
+            "title": "Horizon End",
+            "type": "string"
+          },
+          "horizon_start": {
+            "format": "date",
+            "title": "Horizon Start",
+            "type": "string"
+          },
+          "overall_direction": {
+            "title": "Overall Direction",
+            "type": "string"
+          },
+          "plan_date": {
+            "format": "date",
+            "title": "Plan Date",
+            "type": "string"
+          },
+          "plan_id": {
+            "format": "uuid",
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/PlanSourceResponse"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "weekly_focus": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyFocusCandidate"
+            },
+            "title": "Weekly Focus",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan_id",
+          "status",
+          "plan_date",
+          "horizon_start",
+          "horizon_end",
+          "overall_direction",
+          "weekly_focus",
+          "summary",
+          "rationale",
+          "adjustment_reason",
+          "tasks",
+          "companion_message",
+          "version",
+          "adopted_at",
+          "created_at"
+        ],
+        "title": "ActivePlanResponse",
+        "type": "object"
+      },
+      "AgentRunCancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "default": "user_abort",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "AgentRunCancelRequest",
+        "type": "object"
+      },
+      "AgentRunCancelResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "cancel_requested"
+        ],
+        "title": "AgentRunCancelResponse",
+        "type": "object"
+      },
+      "AgentRunCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "goal_type_override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hint_intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "create_plan",
+                  "replan"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Intent"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "source_plan_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Plan Id"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AgentRunCreateRequest",
+        "type": "object"
+      },
+      "AgentRunCreatedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "events_url"
+        ],
+        "title": "AgentRunCreatedResponse",
+        "type": "object"
+      },
+      "AgentRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
+          "final_plan_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Plan Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "replan_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplanMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolved_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanResultSummary"
+              },
+              {
+                "$ref": "#/components/schemas/ClarificationRequest"
+              },
+              {
+                "$ref": "#/components/schemas/SafeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "result_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResultKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "risk_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Category"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "total_cost_cny": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Cost Cny",
+            "type": "string"
+          },
+          "total_latency_ms": {
+            "minimum": 0.0,
+            "title": "Total Latency Ms",
+            "type": "integer"
+          },
+          "total_tokens_in": {
+            "minimum": 0.0,
+            "title": "Total Tokens In",
+            "type": "integer"
+          },
+          "total_tokens_out": {
+            "minimum": 0.0,
+            "title": "Total Tokens Out",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "resolved_intent",
+          "replan_mode",
+          "result_kind",
+          "result",
+          "final_plan_id",
+          "fallback_reason",
+          "error_code",
+          "risk_category",
+          "total_tokens_in",
+          "total_tokens_out",
+          "total_cost_cny",
+          "total_latency_ms",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AgentRunResponse",
+        "type": "object"
+      },
+      "CareerStage": {
+        "enum": [
+          "exploring",
+          "preparing",
+          "applying",
+          "interviewing"
+        ],
+        "title": "CareerStage",
+        "type": "string"
+      },
+      "ClarificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hint_options": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Hint Options",
+            "type": "object"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "profile_incomplete",
+              "unsupported_intent",
+              "intent_uncertain"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "slot_names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Slot Names",
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions",
+          "slot_names",
+          "hint_options",
+          "reason"
+        ],
+        "title": "ClarificationRequest",
+        "type": "object"
+      },
+      "DevEventTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "payload": {
+            "title": "Payload"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "event_type",
+          "payload",
+          "created_at"
+        ],
+        "title": "DevEventTrace",
+        "type": "object"
+      },
+      "DevRunDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "config_snapshot": {
+            "$ref": "#/components/schemas/DevSnapshot"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DevEventTrace"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "input_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DevSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_text": {
+            "title": "Request Text",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "run": {
+            "$ref": "#/components/schemas/DevRunSummary"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/DevStepTrace"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "terminal_invariant": {
+            "$ref": "#/components/schemas/TerminalInvariant"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/DevToolTrace"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run",
+          "request_text",
+          "input_snapshot",
+          "config_snapshot",
+          "result",
+          "steps",
+          "tools",
+          "events",
+          "terminal_invariant"
+        ],
+        "title": "DevRunDetail",
+        "type": "object"
+      },
+      "DevRunListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DevRunSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "DevRunListResponse",
+        "type": "object"
+      },
+      "DevRunSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "graph_version": {
+            "title": "Graph Version",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "replay_of_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Of Run Id"
+          },
+          "resolved_intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Intent"
+          },
+          "result_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Kind"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_cost_cny": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Cost Cny",
+            "type": "string"
+          },
+          "total_latency_ms": {
+            "title": "Total Latency Ms",
+            "type": "integer"
+          },
+          "total_tokens_in": {
+            "title": "Total Tokens In",
+            "type": "integer"
+          },
+          "total_tokens_out": {
+            "title": "Total Tokens Out",
+            "type": "integer"
+          },
+          "user_ref": {
+            "title": "User Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "replay_of_run_id",
+          "user_ref",
+          "status",
+          "result_kind",
+          "resolved_intent",
+          "graph_version",
+          "model_id",
+          "total_tokens_in",
+          "total_tokens_out",
+          "total_cost_cny",
+          "total_latency_ms",
+          "fallback_reason",
+          "error_code",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "DevRunSummary",
+        "type": "object"
+      },
+      "DevSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "title": "Data"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "sha256"
+        ],
+        "title": "DevSnapshot",
+        "type": "object"
+      },
+      "DevStepTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "input_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Hash"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "node_name": {
+            "title": "Node Name",
+            "type": "string"
+          },
+          "output_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Hash"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tokens_in": {
+            "title": "Tokens In",
+            "type": "integer"
+          },
+          "tokens_out": {
+            "title": "Tokens Out",
+            "type": "integer"
+          },
+          "trace_data": {
+            "title": "Trace Data"
+          }
+        },
+        "required": [
+          "sequence",
+          "node_name",
+          "attempt",
+          "status",
+          "prompt_version",
+          "model_id",
+          "tokens_in",
+          "tokens_out",
+          "latency_ms",
+          "input_hash",
+          "output_hash",
+          "trace_data",
+          "error_code"
+        ],
+        "title": "DevStepTrace",
+        "type": "object"
+      },
+      "DevToolTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "title": "Args"
+          },
+          "args_hash": {
+            "title": "Args Hash",
+            "type": "string"
+          },
+          "contract_version": {
+            "title": "Contract Version",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "result_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Hash"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "step_id": {
+            "format": "uuid",
+            "title": "Step Id",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "tool_call_id": {
+            "format": "uuid",
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_call_id",
+          "step_id",
+          "tool_name",
+          "contract_version",
+          "round",
+          "args",
+          "args_hash",
+          "result",
+          "result_hash",
+          "provider",
+          "latency_ms",
+          "success",
+          "error_code"
+        ],
+        "title": "DevToolTrace",
+        "type": "object"
+      },
+      "ErrorBody": {
+        "additionalProperties": false,
+        "description": "Details contained in the top-level error envelope.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "description": "Stable API error envelope.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EvalDatasetListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalDatasetSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EvalDatasetListResponse",
+        "type": "object"
+      },
+      "EvalDatasetSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "case_count": {
+            "minimum": 1.0,
+            "title": "Case Count",
+            "type": "integer"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "case_count",
+          "description"
+        ],
+        "title": "EvalDatasetSummary",
+        "type": "object"
+      },
+      "EvalExperimentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "report": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "not_found"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "report"
+        ],
+        "title": "EvalExperimentResponse",
+        "type": "object"
+      },
+      "EvalStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "case_limit": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Limit"
+          },
+          "dataset_id": {
+            "default": "stage5-v1",
+            "title": "Dataset Id",
+            "type": "string"
+          }
+        },
+        "title": "EvalStartRequest",
+        "type": "object"
+      },
+      "EvalStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "completed",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status"
+        ],
+        "title": "EvalStartResponse",
+        "type": "object"
+      },
+      "GoalType": {
+        "enum": [
+          "ai_backend",
+          "agent_app",
+          "backend_java",
+          "data_engineer",
+          "fullstack",
+          "other"
+        ],
+        "title": "GoalType",
+        "type": "string"
+      },
+      "GuestLoginRequest": {
+        "additionalProperties": false,
+        "description": "Optional stable browser device identifier for Guest reuse.",
+        "properties": {
+          "device_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          }
+        },
+        "title": "GuestLoginRequest",
+        "type": "object"
+      },
+      "GuestLoginResponse": {
+        "additionalProperties": false,
+        "description": "Bearer token returned by Guest authentication.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "minimum": 1.0,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "const": "bearer",
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserSummary"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in",
+          "user"
+        ],
+        "title": "GuestLoginResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "Stable response returned by the infrastructure health probe.",
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "JsonValue": {},
+      "MeResponse": {
+        "additionalProperties": false,
+        "description": "Stage 1 home restoration aggregate.",
+        "properties": {
+          "active_plan": {
+            "title": "Active Plan",
+            "type": "null"
+          },
+          "active_run": {
+            "title": "Active Run",
+            "type": "null"
+          },
+          "latest_review": {
+            "title": "Latest Review",
+            "type": "null"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile_complete": {
+            "title": "Profile Complete",
+            "type": "boolean"
+          },
+          "today_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Today Tasks",
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserSummary"
+          }
+        },
+        "required": [
+          "user",
+          "profile_complete",
+          "profile"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
+      "MemoryCandidateDecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/MemoryCandidateResponse"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "candidate"
+        ],
+        "title": "MemoryCandidateDecisionResponse",
+        "type": "object"
+      },
+      "MemoryCandidateListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryCandidateResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryCandidateListResponse",
+        "type": "object"
+      },
+      "MemoryCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activated_memory_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated Memory Id"
+          },
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "memory_type": {
+            "enum": [
+              "profile_fact",
+              "stable_preference",
+              "execution_pattern"
+            ],
+            "title": "Memory Type",
+            "type": "string"
+          },
+          "proposed_by_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed By Run Id"
+          },
+          "sensitivity": {
+            "enum": [
+              "sensitive",
+              "highly_sensitive"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "confirmed",
+              "rejected",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "memory_type",
+          "summary",
+          "content",
+          "sensitivity",
+          "status",
+          "proposed_by_run_id",
+          "activated_memory_id",
+          "expires_at",
+          "created_at",
+          "decided_at"
+        ],
+        "title": "MemoryCandidateResponse",
+        "type": "object"
+      },
+      "MemoryListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemoryPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "active",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "version"
+        ],
+        "title": "MemoryPatchRequest",
+        "type": "object"
+      },
+      "MemoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "memory_id": {
+            "format": "uuid",
+            "title": "Memory Id",
+            "type": "string"
+          },
+          "memory_type": {
+            "enum": [
+              "profile_fact",
+              "stable_preference",
+              "execution_pattern"
+            ],
+            "title": "Memory Type",
+            "type": "string"
+          },
+          "sensitivity": {
+            "enum": [
+              "normal",
+              "sensitive"
+            ],
+            "title": "Sensitivity",
+            "type": "string"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "memory_id",
+          "memory_type",
+          "summary",
+          "content",
+          "sensitivity",
+          "status",
+          "source_run_id",
+          "version",
+          "last_used_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "MemoryResponse",
+        "type": "object"
+      },
+      "NextPlanAction": {
+        "enum": [
+          "continue",
+          "adjust"
+        ],
+        "title": "NextPlanAction",
+        "type": "string"
+      },
+      "PlanListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActivePlanResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "PlanListResponse",
+        "type": "object"
+      },
+      "PlanResultSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "horizon_end": {
+            "format": "date",
+            "title": "Horizon End",
+            "type": "string"
+          },
+          "plan_date": {
+            "format": "date",
+            "title": "Plan Date",
+            "type": "string"
+          },
+          "plan_id": {
+            "format": "uuid",
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "generated",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_count": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Task Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "plan_id",
+          "status",
+          "plan_date",
+          "horizon_end",
+          "summary",
+          "task_count"
+        ],
+        "title": "PlanResultSummary",
+        "type": "object"
+      },
+      "PlanSourceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "memory",
+              "experience_atom",
+              "search_source"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "available"
+        ],
+        "title": "PlanSourceResponse",
+        "type": "object"
+      },
+      "PlanSourcesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanSourceResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PlanSourcesResponse",
+        "type": "object"
+      },
+      "PlanStatus": {
+        "enum": [
+          "generated",
+          "active",
+          "completed",
+          "archived"
+        ],
+        "title": "PlanStatus",
+        "type": "string"
+      },
+      "ProfilePatchRequest": {
+        "additionalProperties": false,
+        "description": "Versioned partial profile update.",
+        "properties": {
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "goal_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferences": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfilePreferences"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skill_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skill_summary": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Summary"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CareerStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "time_budget_minutes": {
+            "anyOf": [
+              {
+                "maximum": 480.0,
+                "minimum": 15.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Budget Minutes"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ProfilePatchRequest",
+        "type": "object"
+      },
+      "ProfilePreferences": {
+        "additionalProperties": false,
+        "description": "Strictly bounded first-version profile preferences.",
+        "properties": {
+          "preferred_time_slot": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Time Slot"
+          },
+          "target_companies": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Target Companies",
+            "type": "array"
+          },
+          "weekly_available_days": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "title": "Weekly Available Days",
+            "type": "array"
+          }
+        },
+        "title": "ProfilePreferences",
+        "type": "object"
+      },
+      "ProfilePutRequest": {
+        "additionalProperties": false,
+        "description": "Complete profile creation or replacement.",
+        "properties": {
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "goal_type": {
+            "$ref": "#/components/schemas/GoalType"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/ProfilePreferences"
+          },
+          "skill_level": {
+            "$ref": "#/components/schemas/SkillLevel"
+          },
+          "skill_summary": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Summary"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/CareerStage"
+          },
+          "time_budget_minutes": {
+            "maximum": 480.0,
+            "minimum": 15.0,
+            "title": "Time Budget Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "goal_type",
+          "stage",
+          "time_budget_minutes",
+          "skill_level"
+        ],
+        "title": "ProfilePutRequest",
+        "type": "object"
+      },
+      "ProfileResponse": {
+        "additionalProperties": false,
+        "description": "Complete persisted profile.",
+        "properties": {
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "goal_type": {
+            "$ref": "#/components/schemas/GoalType"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/ProfilePreferences"
+          },
+          "skill_level": {
+            "$ref": "#/components/schemas/SkillLevel"
+          },
+          "skill_summary": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Summary"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/CareerStage"
+          },
+          "time_budget_minutes": {
+            "maximum": 480.0,
+            "minimum": 15.0,
+            "title": "Time Budget Minutes",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "goal_type",
+          "stage",
+          "time_budget_minutes",
+          "skill_level",
+          "version"
+        ],
+        "title": "ProfileResponse",
+        "type": "object"
+      },
+      "ReplanMode": {
+        "enum": [
+          "initial",
+          "continue",
+          "adjust"
+        ],
+        "title": "ReplanMode",
+        "type": "string"
+      },
+      "ReplayRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "tool_mode": {
+            "default": "fixture",
+            "enum": [
+              "fixture",
+              "live"
+            ],
+            "title": "Tool Mode",
+            "type": "string"
+          }
+        },
+        "title": "ReplayRequest",
+        "type": "object"
+      },
+      "ReplayResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deterministic": {
+            "title": "Deterministic",
+            "type": "boolean"
+          },
+          "replay_of_run_id": {
+            "format": "uuid",
+            "title": "Replay Of Run Id",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "replay_of_run_id",
+          "status",
+          "deterministic"
+        ],
+        "title": "ReplayResponse",
+        "type": "object"
+      },
+      "ReviewCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustment_request": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Request"
+          },
+          "blockers": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "free_text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Text"
+          },
+          "mood": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Mood",
+            "type": "integer"
+          },
+          "plan_id": {
+            "format": "uuid",
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "review_date": {
+            "format": "date",
+            "title": "Review Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id",
+          "review_date",
+          "mood"
+        ],
+        "title": "ReviewCreateRequest",
+        "type": "object"
+      },
+      "ReviewListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ReviewListResponse",
+        "type": "object"
+      },
+      "ReviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "abandoned_count": {
+            "minimum": 0.0,
+            "title": "Abandoned Count",
+            "type": "integer"
+          },
+          "adjustment_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Request"
+          },
+          "blockers": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "companion_message": {
+            "title": "Companion Message",
+            "type": "string"
+          },
+          "completed_count": {
+            "minimum": 0.0,
+            "title": "Completed Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "free_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Text"
+          },
+          "mood": {
+            "title": "Mood",
+            "type": "integer"
+          },
+          "next_plan_action": {
+            "$ref": "#/components/schemas/NextPlanAction"
+          },
+          "next_plan_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Plan Run Id"
+          },
+          "plan_id": {
+            "format": "uuid",
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "replan_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replan Reason"
+          },
+          "review_date": {
+            "format": "date",
+            "title": "Review Date",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "suggested_replan": {
+            "title": "Suggested Replan",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "review_id",
+          "plan_id",
+          "review_date",
+          "mood",
+          "blockers",
+          "adjustment_request",
+          "free_text",
+          "completed_count",
+          "abandoned_count",
+          "suggested_replan",
+          "replan_reason",
+          "next_plan_action",
+          "companion_message",
+          "next_plan_run_id",
+          "created_at"
+        ],
+        "title": "ReviewResponse",
+        "type": "object"
+      },
+      "RunIntent": {
+        "enum": [
+          "create_plan",
+          "replan",
+          "unsupported"
+        ],
+        "title": "RunIntent",
+        "type": "string"
+      },
+      "RunResultKind": {
+        "enum": [
+          "plan",
+          "clarification",
+          "safe_response"
+        ],
+        "title": "RunResultKind",
+        "type": "string"
+      },
+      "RunStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "degraded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "SafeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "disclaimer": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "resource_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Resource Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message",
+          "disclaimer"
+        ],
+        "title": "SafeResponse",
+        "type": "object"
+      },
+      "SkillLevel": {
+        "enum": [
+          "beginner",
+          "intermediate",
+          "advanced"
+        ],
+        "title": "SkillLevel",
+        "type": "string"
+      },
+      "StartNextPlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "replan_mode": {
+            "$ref": "#/components/schemas/ReplanMode"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "replan_mode",
+          "events_url"
+        ],
+        "title": "StartNextPlanResponse",
+        "type": "object"
+      },
+      "TaskListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TaskListResponse",
+        "type": "object"
+      },
+      "TaskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "abandoned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abandoned At"
+          },
+          "abandoned_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AbandonedReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "abandoned_reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abandoned Reason Text"
+          },
+          "actual_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Minutes"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deliverable": {
+            "title": "Deliverable",
+            "type": "string"
+          },
+          "estimated_minutes": {
+            "title": "Estimated Minutes",
+            "type": "integer"
+          },
+          "order_index": {
+            "minimum": 0.0,
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "plan_id": {
+            "format": "uuid",
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "scheduled_date": {
+            "format": "date",
+            "title": "Scheduled Date",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "starter_action": {
+            "title": "Starter Action",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "task_type": {
+            "$ref": "#/components/schemas/TaskType"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_id",
+          "plan_id",
+          "title",
+          "task_type",
+          "scheduled_date",
+          "order_index",
+          "state",
+          "starter_action",
+          "deliverable",
+          "rationale",
+          "estimated_minutes",
+          "actual_minutes",
+          "abandoned_reason",
+          "abandoned_reason_text",
+          "version",
+          "started_at",
+          "completed_at",
+          "abandoned_at",
+          "created_at"
+        ],
+        "title": "TaskResponse",
+        "type": "object"
+      },
+      "TaskStatus": {
+        "enum": [
+          "pending",
+          "in_progress",
+          "completed",
+          "abandoned",
+          "expired"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TaskType": {
+        "enum": [
+          "learning",
+          "project",
+          "interview",
+          "application",
+          "resume",
+          "other"
+        ],
+        "title": "TaskType",
+        "type": "string"
+      },
+      "TaskUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "abandoned_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AbandonedReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "abandoned_reason_text": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abandoned Reason Text"
+          },
+          "actual_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Minutes"
+          },
+          "state": {
+            "enum": [
+              "in_progress",
+              "completed",
+              "abandoned"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "version"
+        ],
+        "title": "TaskUpdateRequest",
+        "type": "object"
+      },
+      "TaskUpdateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "companion_message": {
+            "title": "Companion Message",
+            "type": "string"
+          },
+          "plan_status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskResponse"
+          }
+        },
+        "required": [
+          "task",
+          "plan_status",
+          "companion_message"
+        ],
+        "title": "TaskUpdateResponse",
+        "type": "object"
+      },
+      "TerminalInvariant": {
+        "additionalProperties": false,
+        "properties": {
+          "terminal_count": {
+            "title": "Terminal Count",
+            "type": "integer"
+          },
+          "terminal_is_last": {
+            "title": "Terminal Is Last",
+            "type": "boolean"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "terminal_count",
+          "terminal_is_last",
+          "valid"
+        ],
+        "title": "TerminalInvariant",
+        "type": "object"
+      },
+      "UserSummary": {
+        "additionalProperties": false,
+        "description": "Public user fields safe for client identity restoration.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "dev"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "role"
+        ],
+        "title": "UserSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WeeklyFocusCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "focus": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Focus",
+            "type": "string"
+          },
+          "success_signal": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Success Signal",
+            "type": "string"
+          },
+          "week_index": {
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Week Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "week_index",
+          "focus",
+          "success_signal"
+        ],
+        "title": "WeeklyFocusCandidate",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Career Planning Buddy",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/agent-runs": {
+      "post": {
+        "operationId": "create_agent_run_api_v1_agent_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunCreatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Agent Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/api/v1/agent-runs/{run_id}": {
+      "get": {
+        "operationId": "get_agent_run_api_v1_agent_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agent Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/api/v1/agent-runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_agent_run_api_v1_agent_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRunCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Agent Run",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/api/v1/agent-runs/{run_id}/events": {
+      "get": {
+        "operationId": "stream_agent_run_events_api_v1_agent_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stream Agent Run Events",
+        "tags": [
+          "agent-runs"
+        ]
+      }
+    },
+    "/api/v1/auth/guest": {
+      "post": {
+        "operationId": "guest_login_api_v1_auth_guest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestLoginResponse"
+                }
+              }
+            },
+            "description": "Existing Guest reused"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestLoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Guest Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/dev/evals/datasets": {
+      "get": {
+        "operationId": "list_eval_datasets_api_v1_dev_evals_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalDatasetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Eval Datasets",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/evals/experiments": {
+      "post": {
+        "operationId": "start_eval_api_v1_dev_evals_experiments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Eval",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/evals/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_eval_api_v1_dev_evals_experiments__experiment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalExperimentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Eval",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/runs": {
+      "get": {
+        "operationId": "list_runs_api_v1_dev_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "result_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Runs",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_dev_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevRunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Run",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/runs/{run_id}/replay": {
+      "post": {
+        "operationId": "replay_run_api_v1_dev_runs__run_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Replay Run",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "get_me_api_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid token"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/memories": {
+      "get": {
+        "operationId": "list_memories_api_v1_memories_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "profile_fact",
+                    "stable_preference",
+                    "execution_pattern"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "enum": [
+                "active",
+                "closed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_sensitive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Sensitive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Memories",
+        "tags": [
+          "memories"
+        ]
+      }
+    },
+    "/api/v1/memories/{memory_id}": {
+      "delete": {
+        "operationId": "delete_memory_api_v1_memories__memory_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Memory Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Memory",
+        "tags": [
+          "memories"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_memory_api_v1_memories__memory_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Memory Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Memory",
+        "tags": [
+          "memories"
+        ]
+      }
+    },
+    "/api/v1/memory-candidates": {
+      "get": {
+        "operationId": "list_memory_candidates_api_v1_memory_candidates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "enum": [
+                "pending",
+                "confirmed",
+                "rejected",
+                "expired"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCandidateListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Memory Candidates",
+        "tags": [
+          "memories"
+        ]
+      }
+    },
+    "/api/v1/memory-candidates/{candidate_id}/confirm": {
+      "post": {
+        "operationId": "confirm_memory_candidate_api_v1_memory_candidates__candidate_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCandidateDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Memory Candidate",
+        "tags": [
+          "memories"
+        ]
+      }
+    },
+    "/api/v1/memory-candidates/{candidate_id}/reject": {
+      "post": {
+        "operationId": "reject_memory_candidate_api_v1_memory_candidates__candidate_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCandidateDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Memory Candidate",
+        "tags": [
+          "memories"
+        ]
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "operationId": "list_plans_api_v1_plans_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PlanStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Plans",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/plans/active": {
+      "get": {
+        "operationId": "get_active_plan_api_v1_plans_active_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivePlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Active Plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_id}": {
+      "get": {
+        "operationId": "get_plan_api_v1_plans__plan_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivePlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_id}/sources": {
+      "get": {
+        "operationId": "get_plan_sources_api_v1_plans__plan_id__sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanSourcesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Plan Sources",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/profile": {
+      "get": {
+        "operationId": "get_profile_api_v1_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Profile not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Profile",
+        "tags": [
+          "profile"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_profile_api_v1_profile_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid profile"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Profile",
+        "tags": [
+          "profile"
+        ]
+      },
+      "put": {
+        "operationId": "put_profile_api_v1_profile_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Version conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid profile"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Profile",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "operationId": "list_reviews_api_v1_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "plan_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plan Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Reviews",
+        "tags": [
+          "reviews"
+        ]
+      },
+      "post": {
+        "operationId": "create_review_api_v1_reviews_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Review",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/start-next-plan": {
+      "post": {
+        "operationId": "start_next_plan_api_v1_reviews__review_id__start_next_plan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartNextPlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Next Plan",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "operationId": "list_tasks_api_v1_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plan_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plan Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tasks",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "patch": {
+        "operationId": "update_task_api_v1_tasks__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Task",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Report that the HTTP application is available.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}

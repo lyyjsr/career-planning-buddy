@@ -39,7 +39,7 @@
 
 ## 4. 技术约束
 
-- Python 3.11；FastAPI；Pydantic v2；SQLAlchemy 2 Async。
+- Python 3.12；FastAPI；Pydantic v2；SQLAlchemy 2 Async。
 - PostgreSQL 16；Alembic；MVP 单 Worker。
 - 后端不得使用同步数据库驱动。
 - 前端使用 TypeScript strict，不使用 `any` 绕过契约。

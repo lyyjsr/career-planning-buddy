@@ -1,0 +1,73 @@
+"""Immutable config and input snapshot helpers."""
+
+from uuid import UUID
+
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import Settings
+from app.models.agent_run import AgentRun
+from app.schemas.agent_runs import RunInputSnapshot, RuntimeConfigSnapshot
+
+NODE_TIMEOUTS: dict[str, float] = {
+    "risk_gate": 6,
+    "intent_router": 6,
+    "clarification": 2,
+    "safe_response": 2,
+    "context_builder": 5,
+    "career_planning_agent": 30,
+    "rule_validator": 2,
+    "revise_or_fallback": 12,
+    "companion_response": 2,
+    "persist": 8,
+}
+
+
+class SnapshotService:
+    @staticmethod
+    def build_config(settings: Settings) -> RuntimeConfigSnapshot:
+        is_real = settings.llm_provider == "openai_compatible"
+        return RuntimeConfigSnapshot(
+            graph_version=settings.agent_graph_version,
+            feature_stage=settings.agent_feature_stage,
+            available_tools=["memory_lookup", "rag_retrieve", "web_search"],
+            provider=settings.llm_provider,
+            model_alias=(
+                settings.llm_model
+                if is_real and settings.llm_model is not None
+                else "mock-career-planner-v1"
+            ),
+            prompt_versions={
+                "career_planning": (
+                    "openai_compatible_plan_stage4_v1"
+                    if is_real
+                    else "mock_plan_stage4_v1"
+                ),
+                "format_repair": (
+                    "openai_compatible_format_repair_v1" if is_real else "mock_format_repair_v1"
+                ),
+                "business_repair": (
+                    "openai_compatible_business_repair_v1" if is_real else "mock_business_repair_v1"
+                ),
+            },
+            max_llm_calls=settings.agent_max_llm_calls,
+            max_tool_rounds=settings.agent_max_tool_rounds,
+            max_tool_calls=settings.agent_max_tool_calls,
+            max_total_tokens=settings.agent_max_total_tokens,
+            max_input_tokens_per_call=settings.agent_max_input_tokens_per_call,
+            max_output_tokens_per_call=settings.agent_max_output_tokens_per_call,
+            deadline_seconds=settings.agent_deadline_seconds,
+            node_timeouts_seconds=NODE_TIMEOUTS,
+        )
+
+    @staticmethod
+    async def write_input_once(
+        session: AsyncSession, run_id: UUID, snapshot: RunInputSnapshot
+    ) -> bool:
+        result = await session.execute(
+            update(AgentRun)
+            .where(AgentRun.id == run_id, AgentRun.input_snapshot_json.is_(None))
+            .values(input_snapshot_json=snapshot.model_dump(mode="json"))
+            .returning(AgentRun.id)
+        )
+        return result.scalar_one_or_none() is not None

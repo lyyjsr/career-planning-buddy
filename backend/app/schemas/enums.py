@@ -1,0 +1,90 @@
+"""Shared API and state-machine enumerations."""
+
+from enum import StrEnum
+
+
+class GoalType(StrEnum):
+    AI_BACKEND = "ai_backend"
+    AGENT_APP = "agent_app"
+    BACKEND_JAVA = "backend_java"
+    DATA_ENGINEER = "data_engineer"
+    FULLSTACK = "fullstack"
+    OTHER = "other"
+
+
+class CareerStage(StrEnum):
+    EXPLORING = "exploring"
+    PREPARING = "preparing"
+    APPLYING = "applying"
+    INTERVIEWING = "interviewing"
+
+
+class SkillLevel(StrEnum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class RunStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RunResultKind(StrEnum):
+    PLAN = "plan"
+    CLARIFICATION = "clarification"
+    SAFE_RESPONSE = "safe_response"
+
+
+class PlanStatus(StrEnum):
+    GENERATED = "generated"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class TaskStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+    EXPIRED = "expired"
+
+
+class TaskType(StrEnum):
+    LEARNING = "learning"
+    PROJECT = "project"
+    INTERVIEW = "interview"
+    APPLICATION = "application"
+    RESUME = "resume"
+    OTHER = "other"
+
+
+class AbandonedReason(StrEnum):
+    TOO_HARD = "too_hard"
+    TOO_EASY = "too_easy"
+    NO_TIME = "no_time"
+    LOST_INTEREST = "lost_interest"
+    BLOCKED = "blocked"
+    OTHER = "other"
+
+
+class NextPlanAction(StrEnum):
+    CONTINUE = "continue"
+    ADJUST = "adjust"
+
+
+class RunIntent(StrEnum):
+    CREATE_PLAN = "create_plan"
+    REPLAN = "replan"
+    UNSUPPORTED = "unsupported"
+
+
+class ReplanMode(StrEnum):
+    INITIAL = "initial"
+    CONTINUE = "continue"
+    ADJUST = "adjust"

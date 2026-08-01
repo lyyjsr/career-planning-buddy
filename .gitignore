@@ -220,3 +220,26 @@ __marimo__/
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Node.js and frontend tooling
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+.vite/
+test-results/
+pytest-cache-files-*/
+backend/evals/artifacts/*.json
+backend/evals/bad_cases/*.jsonl
+
+# Local toolchains and temporary test output
+.python/
+.tools/
+.tmp/
+tmp/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

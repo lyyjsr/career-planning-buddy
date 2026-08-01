@@ -1,0 +1,137 @@
+"""Persistence operations for user-owned memories and consent candidates."""
+
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import Select, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.evidence import Memory, MemoryCandidate
+
+
+class MemoryRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_memories(
+        self,
+        *,
+        user_id: UUID,
+        memory_type: str | None,
+        status: str,
+        include_sensitive: bool,
+        cursor: UUID | None,
+        limit: int,
+    ) -> list[Memory]:
+        statement: Select[tuple[Memory]] = select(Memory).where(
+            Memory.user_id == user_id,
+            Memory.status == status,
+        )
+        if memory_type is not None:
+            statement = statement.where(Memory.memory_type == memory_type)
+        if not include_sensitive:
+            statement = statement.where(Memory.sensitivity == "normal")
+        if cursor is not None:
+            statement = statement.where(Memory.id > cursor)
+        rows = await self._session.scalars(statement.order_by(Memory.id).limit(limit))
+        return list(rows)
+
+    async def get_memory(
+        self, memory_id: UUID, user_id: UUID, *, for_update: bool = False
+    ) -> Memory | None:
+        statement = select(Memory).where(Memory.id == memory_id, Memory.user_id == user_id)
+        if for_update:
+            statement = statement.with_for_update()
+        memory = await self._session.scalar(statement)
+        return memory if isinstance(memory, Memory) else None
+
+    async def delete_memory(self, memory: Memory) -> None:
+        await self._session.delete(memory)
+        await self._session.flush()
+
+    async def list_candidates(
+        self,
+        *,
+        user_id: UUID,
+        status: str,
+        cursor: UUID | None,
+        limit: int,
+    ) -> list[MemoryCandidate]:
+        statement = select(MemoryCandidate).where(
+            MemoryCandidate.user_id == user_id,
+            MemoryCandidate.status == status,
+        )
+        if cursor is not None:
+            statement = statement.where(MemoryCandidate.id > cursor)
+        rows = await self._session.scalars(statement.order_by(MemoryCandidate.id).limit(limit))
+        return list(rows)
+
+    async def get_candidate(
+        self, candidate_id: UUID, user_id: UUID, *, for_update: bool = False
+    ) -> MemoryCandidate | None:
+        statement = select(MemoryCandidate).where(
+            MemoryCandidate.id == candidate_id,
+            MemoryCandidate.user_id == user_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        candidate = await self._session.scalar(statement)
+        return candidate if isinstance(candidate, MemoryCandidate) else None
+
+    async def create_memory(
+        self,
+        *,
+        user_id: UUID,
+        memory_type: str,
+        summary: str,
+        content_json: dict[str, object],
+        sensitivity: str,
+        embedding: list[float] | None,
+        source_run_id: UUID | None,
+    ) -> Memory:
+        memory = Memory(
+            user_id=user_id,
+            memory_type=memory_type,
+            summary=summary,
+            content_json=content_json,
+            sensitivity=sensitivity,
+            status="active",
+            embedding=embedding,
+            source_run_id=source_run_id,
+        )
+        self._session.add(memory)
+        await self._session.flush()
+        await self._session.refresh(memory)
+        return memory
+
+    async def create_candidate(
+        self,
+        *,
+        user_id: UUID,
+        memory_type: str,
+        summary: str,
+        content_json: dict[str, object],
+        sensitivity: str,
+        proposed_by_run_id: UUID | None,
+        expires_at: datetime,
+    ) -> MemoryCandidate:
+        candidate = MemoryCandidate(
+            user_id=user_id,
+            memory_type=memory_type,
+            summary=summary,
+            content_json=content_json,
+            sensitivity=sensitivity,
+            status="pending",
+            proposed_by_run_id=proposed_by_run_id,
+            expires_at=expires_at,
+        )
+        self._session.add(candidate)
+        await self._session.flush()
+        await self._session.refresh(candidate)
+        return candidate
+
+    @staticmethod
+    def expire_if_needed(candidate: MemoryCandidate) -> None:
+        if candidate.status == "pending" and candidate.expires_at <= datetime.now(UTC):
+            candidate.status = "expired"
+            candidate.decided_at = datetime.now(UTC)

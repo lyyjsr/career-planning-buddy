@@ -12,7 +12,7 @@ Implement one stage or vertical slice at a time. First provide the intended file
 
 Core constraints:
 
-- Python 3.11, FastAPI, Pydantic v2, SQLAlchemy 2 Async, PostgreSQL 16.
+- Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 Async, PostgreSQL 16.
 - Runtime LLM access goes through Provider protocols; the coding assistant is not the runtime model.
 - No Redis, Celery, MCP, multi-agent framework, object storage, or microservices in the MVP unless the baseline is explicitly revised.
 - Routers handle HTTP only; Services own use cases and state transitions; Repositories own persistence.

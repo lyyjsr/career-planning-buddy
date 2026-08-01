@@ -1,139 +1,167 @@
-# Career Planning Buddy — AI 求职规划搭子
+# Career Planning Buddy
 
-> 面向计算机专业学生的垂直 Agent 产品：根据用户画像、目标岗位和真实执行反馈，完成“规划 → 今日任务 → 执行 → 复盘 → 重规划”的闭环。
+Career Planning Buddy is a single-user-facing career-planning Agent MVP. It turns a
+profile and execution feedback into a versioned plan with startable daily tasks,
+reviews, replanning, consent-based memory, and cited local RAG evidence.
 
-## 项目边界
+The repository now implements Stages 0–5. Codex is used for engineering only; runtime
+model access always goes through the project Provider protocols.
 
-这是一个**从零独立开发的新项目**：
+## Stack and boundaries
 
-- 不以 ClawAgent 为底座；
-- 不依赖或导入 ClawAgent 的代码、配置、数据库和运行时；
-- 可以借鉴通用 Agent 工程思想，但本仓库中的接口、状态机、表结构和实现必须独立落地；
-- Codex 是本项目选定的**代码生成与工程执行助手**，但不是项目运行时模型。
+- Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 Async, Alembic
+- PostgreSQL 16 with pgvector
+- React, TypeScript strict, Vite, React Router, TanStack Query
+- one controlled LangGraph runtime and one backend worker
+- DeepSeek through the OpenAI-compatible Provider, or deterministic Mock
+- local BGE embeddings (1024 dimensions), or deterministic Mock
+- MockSearchProvider only; no real search API
+- no Redis, Celery, MCP, multi-agent framework, microservices, or paid CI calls
 
-## 技术栈
+## Quick start with Docker
 
-| 层 | 选型 |
-|---|---|
-| 前端 | React + TypeScript + Vite + React Router + TanStack Query |
-| 后端 | Python 3.11 + FastAPI + Pydantic v2 + SQLAlchemy 2 Async |
-| Agent 编排 | LangGraph，单核心 `CareerPlanningAgent` + 受控节点 |
-| 数据库 | PostgreSQL 16 + pgvector + Alembic |
-| 实时通信 | SSE，事件写入 PostgreSQL 后支持断线续传 |
-| 运行时模型 | OpenAI-compatible Provider，通过 `LLM_BASE_URL / LLM_API_KEY / LLM_MODEL` 配置 |
-| 搜索与向量 | SearchProvider + EmbeddingProvider，MVP 后半程接入 |
-| 测试 | pytest + pytest-asyncio + httpx + 前端 Vitest |
-| 部署 | Docker Compose，MVP 单机单 Worker |
-
-> 运行时模型与编码助手是两件事。团队使用 Codex 阅读规范、修改代码并运行测试；项目运行时模型仍通过 OpenAI-compatible Provider 独立配置。
-
-## MVP 业务闭环
-
-```text
-用户建档
-  → 发起规划请求
-  → Agent 生成中期方向、每周重点与 1~3 个今日任务
-  → 用户开始 / 完成 / 放弃任务
-  → 用户提交每日复盘
-  → 系统判断是否需要重规划
-  → 用户确认后生成新版本计划
+```bash
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+curl http://localhost:8000/health
 ```
 
-MVP 必须完成：
+Open `http://localhost:5173`. Compose deliberately uses Mock LLM and Mock embeddings by
+default so the complete stack starts without secrets or host model mounts. PostgreSQL
+data is kept in the named `postgres_data` volume. The backend runs exactly one Uvicorn
+worker, as required by the in-process Stage 5 executor.
 
-1. Guest JWT 登录与用户隔离；
-2. 用户画像；
-3. Agent Run + SSE；
-4. 中期方向、每周重点和今日任务；
-5. 任务状态机；
-6. 复盘和重规划；
-7. 基础记忆；
-8. Trace 开发者页；
-9. Docker Compose 与固定 Eval Case。
+Compose reads only the separately named `COMPOSE_LLM_*` variables. This prevents a
+host-only real Provider credential from being copied into the default Mock container.
 
-MVP 暂不引入 Redis、Celery、Kafka、MCP、多 Agent、Kubernetes 和对象存储。
+Apply migrations independently with:
 
-## 当前状态
-
-当前仓库是**实现前设计包**，尚未创建 `backend/` 和 `frontend/` 代码。下一步应直接进入 Stage 0，不需要等待某个特定模型的 PoC 才能搭工程骨架。
-
-开发顺序以 [`docs/implementation/README.md`](./docs/implementation/README.md) 为准：
-
-| 阶段 | 目标 |
-|---|---|
-| 0 | 创建前后端骨架、数据库和质量门禁 |
-| 1 | 落地契约、鉴权、用户画像和迁移 |
-| 2 | 用 Mock Provider 跑通一次完整 plan run |
-| 3 | 接入真实 LLM，完成任务、复盘和重规划 |
-| 4 | 接入记忆、搜索和 RAG |
-| 5 | 完成 Trace、Eval、部署和作品包装 |
-
-## 文档权威顺序
-
-发生冲突时按以下顺序执行：
-
-1. [`docs/implementation/project-baseline.md`](./docs/implementation/project-baseline.md)
-2. [`docs/architecture/tdd.md`](./docs/architecture/tdd.md)
-3. [`docs/architecture/api-and-data-contracts.md`](./docs/architecture/api-and-data-contracts.md)
-4. [`docs/model-design/`](./docs/model-design/README.md) 下的 Runtime、Tool、端点、表和节点 spec
-5. [`docs/overview/product-overview.md`](./docs/overview/product-overview.md)
-6. `docs/design-input/` 仅供追溯，不作为实现依据
-
-## 给 Codex 的使用方式
-
-不要一次让模型生成整个项目。每次只执行一个阶段任务：
-
-```text
-1. 从仓库根目录启动 Codex，让其读取 `AGENTS.md`
-2. 再读 `AGENTS.zh-CN.md` 与 `docs/implementation/project-baseline.md`
-3. 只读当前阶段任务书；Stage 2~4 额外阅读 Agent Runtime 与 Tool spec
-4. 先输出文件清单和实现计划
-5. 再生成代码与测试
-6. 本地执行验收命令
-7. 通过后再进入下一阶段
+```bash
+cd backend
+python -m alembic upgrade head
 ```
 
-各阶段可直接复制的任务说明位于 [`docs/implementation/`](./docs/implementation/README.md)。
-更具体的 Codex 使用方法见 [`CODEX-CODING-GUIDE.md`](./CODEX-CODING-GUIDE.md)。
+## Local development
 
-Agent 编码的三个关键施工入口：
+Requirements: Python 3.12, Node.js 20, npm, and Docker.
 
-- [`Agent Runtime`](./docs/model-design/agent-runtime/README.md)：Graph、State、预算、快照、取消和终态；
-- [`Agent Tool`](./docs/model-design/tools/README.md)：白名单、Schema、超时、证据和 Replay fixture；
-- [`Runtime Prompt 清单`](./docs/standards/prompts/runtime-prompt-matrix.md)：哪些节点使用模型、输入输出和修复边界。
-
-## 计划中的仓库结构
-
-```text
-career-planning-buddy/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── schemas/
-│   │   ├── services/
-│   │   ├── repositories/
-│   │   ├── models/
-│   │   ├── agent/
-│   │   ├── tools/
-│   │   ├── providers/
-│   │   ├── harness/
-│   │   └── core/
-│   ├── alembic/
-│   └── tests/
-├── frontend/
-├── infra/
-├── scripts/
-└── docs/
+```bash
+docker compose up -d postgres
+cd backend
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.lock   # Windows
+.venv/Scripts/python -m pip install --no-deps -e .
+.venv/Scripts/python -m alembic upgrade head
+.venv/Scripts/python -m uvicorn app.main:app --reload
 ```
 
-## 完成定义
+On Linux/macOS, use `.venv/bin/python`. In another terminal:
 
-项目达到可投递状态，至少需要：
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-- 新用户可完成建档并生成计划；
-- 一次 Agent Run 可稳定通过 SSE 展示进度；
-- 任务状态、复盘和重规划形成真实数据库闭环；
-- 失败、超时和取消能收敛到明确状态；
-- 至少 30 条固定 Eval Case 可重复运行；
-- Docker Compose 一键启动；
-- README 中有真实截图、Demo 和实测指标。
+Copy `.env.example` to `.env`. Never commit `.env` or an API key. Browser-visible
+`VITE_` variables must never contain secrets.
+
+### Real DeepSeek and local BGE
+
+Set these only in the ignored root `.env`:
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_API_KEY=
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL_PATH=
+EMBEDDING_MODEL_NAME=BAAI/bge-large-zh-v1.5
+EMBEDDING_DIM=1024
+SEARCH_PROVIDER=mock
+```
+
+`EMBEDDING_MODEL_PATH` must point to an already downloaded local model. The application
+does not auto-download weights. Missing or invalid real Provider configuration fails
+explicitly; it never silently falls back to Mock.
+
+## Product and developer flows
+
+The API flow is:
+
+1. `POST /api/v1/auth/guest`
+2. `PUT /api/v1/profile`
+3. `POST /api/v1/agent-runs`, then consume persisted SSE events
+4. query the generated Plan and update Task state
+5. `POST /api/v1/reviews`
+6. `POST /api/v1/reviews/{id}/start-next-plan`
+7. confirm Memory candidates and retrieve local RAG evidence
+
+The developer console is at `http://localhost:5173/dev/runs`. It requires a JWT for a
+local user whose persisted role is `dev`. It displays redacted snapshots and hashes,
+steps, Tool calls, durable events, costs/latency, Replay lineage, and the exactly-one,
+terminal-last invariant. `POST /api/v1/dev/runs/{id}/replay` defaults to fixture-only
+Mock replay and never mutates the source Run or Plan.
+
+## Eval, Replay, and Bad Cases
+
+Run all 30 fixed cases offline:
+
+```bash
+cd backend
+python -m scripts.run_eval
+```
+
+The runner executes the real deterministic risk, routing, Mock structured-output,
+format-repair, business-rule validation/repair, and fallback code paths. It reports 12
+graders and writes reports to `backend/evals/artifacts/`; failed cases are written as
+JSONL to `backend/evals/bad_cases/`. Generated artifacts are ignored by Git. Replay and
+CI never call DeepSeek, external embeddings, or search.
+
+Latest verified Stage 5 baseline (2026-08-01): 30/30 cases passed; 21 completed and 9
+contractually degraded (four clarification, three safety, two controlled fallbacks).
+All 12 grader pass rates were 1.0. These numbers come from `python -m scripts.run_eval`,
+not from hand-authored results.
+
+Run the full HTTP + database + configured Provider demonstration while a backend is
+running:
+
+```bash
+cd backend
+python -m scripts.e2e_demo --base-url http://127.0.0.1:8000
+```
+
+The verified real run used `deepseek-v4-flash` and `BAAI/bge-large-zh-v1.5`: create
+plan produced a Schema-valid degraded fallback in 25.329 seconds (7,503 input / 1,361
+output tokens), replan completed in 9.811 seconds (7,274 input / 710 output tokens),
+and local RAG returned the seeded atom with cosine similarity 1.0 at 1024 dimensions.
+
+## Checks
+
+PowerShell:
+
+```powershell
+.\scripts\check.ps1
+```
+
+Git Bash, WSL, Linux, or macOS:
+
+```bash
+bash scripts/check.sh
+```
+
+Both run Ruff, Mypy, Alembic upgrade, Pytest, the offline 30-case Eval, frontend tests,
+and the production frontend build. GitHub Actions uses Python 3.12, Node.js 20,
+PostgreSQL+pgvector, locked dependencies, and Mock Providers only.
+
+## Delivery notes
+
+- API schema is available at `/docs` and `/openapi.json`.
+- Health probe: `GET /health`.
+- All timestamps and deadlines use UTC.
+- Agent events are persisted before SSE delivery; each Run has exactly one terminal
+  event and it is last.
+- Plans remain versioned; replan archives history instead of overwriting it.
+- Real Web Search remains intentionally out of scope; fixed Mock evidence is labeled.

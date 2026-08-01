@@ -1,0 +1,383 @@
+"""Plan and Task query and Stage 3 state-transition use cases."""
+
+from datetime import UTC, date, datetime
+from http import HTTPStatus
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import session_transaction
+from app.core.exceptions import AppError
+from app.models.plan import Plan, Task
+from app.repositories.evidence import EvidenceRepository
+from app.repositories.plans import PlanRepository
+from app.schemas.agent_runs import WeeklyFocusCandidate
+from app.schemas.enums import AbandonedReason, PlanStatus, TaskStatus, TaskType
+from app.schemas.plans import (
+    ActivePlanResponse,
+    PlanListResponse,
+    PlanSourceResponse,
+    PlanSourcesResponse,
+    TaskListResponse,
+    TaskResponse,
+    TaskUpdateRequest,
+    TaskUpdateResponse,
+)
+
+
+class PlanQueryService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._plans = PlanRepository(session)
+
+    async def get_active(self, user_id: UUID) -> ActivePlanResponse:
+        async with session_transaction(self._session):
+            plan = await self._plans.get_active_for_user(user_id)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="active Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            tasks = await self._plans.tasks_for_plan(plan.id, user_id)
+            companion = await self._plans.companion_for_plan(plan.id, user_id)
+            sources = await self._plan_sources(plan, user_id)
+            return self._plan_response(
+                plan,
+                tasks,
+                companion.message if companion else None,
+                sources,
+            )
+
+    async def get_plan(self, plan_id: UUID, user_id: UUID) -> ActivePlanResponse:
+        async with session_transaction(self._session):
+            plan = await self._plans.get_for_user(plan_id, user_id)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            tasks = await self._plans.tasks_for_plan(plan.id, user_id)
+            companion = await self._plans.companion_for_plan(plan.id, user_id)
+            sources = await self._plan_sources(plan, user_id)
+            return self._plan_response(
+                plan, tasks, companion.message if companion else None, sources
+            )
+
+    async def get_sources(self, plan_id: UUID, user_id: UUID) -> PlanSourcesResponse:
+        async with session_transaction(self._session):
+            plan = await self._plans.get_for_user(plan_id, user_id)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            return PlanSourcesResponse(items=await self._plan_sources(plan, user_id))
+
+    async def list_plans(
+        self,
+        *,
+        user_id: UUID,
+        status: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        cursor: UUID | None,
+        limit: int,
+    ) -> PlanListResponse:
+        async with session_transaction(self._session):
+            plans = await self._plans.list_plans(
+                user_id,
+                status=status,
+                date_from=date_from,
+                date_to=date_to,
+                cursor=cursor,
+                limit=limit + 1,
+            )
+            has_more = len(plans) > limit
+            selected = plans[:limit]
+            items: list[ActivePlanResponse] = []
+            for plan in selected:
+                tasks = await self._plans.tasks_for_plan(plan.id, user_id)
+                companion = await self._plans.companion_for_plan(plan.id, user_id)
+                sources = await self._plan_sources(plan, user_id)
+                items.append(
+                    self._plan_response(
+                        plan,
+                        tasks,
+                        companion.message if companion else None,
+                        sources,
+                    )
+                )
+            return PlanListResponse(
+                items=items,
+                next_cursor=selected[-1].id if has_more and selected else None,
+            )
+
+    async def list_tasks(
+        self,
+        *,
+        user_id: UUID,
+        scheduled_date: date | None,
+        state: str | None,
+        plan_id: UUID | None,
+        limit: int,
+    ) -> TaskListResponse:
+        async with session_transaction(self._session):
+            tasks = await self._plans.list_tasks(
+                user_id,
+                scheduled_date=scheduled_date or datetime.now(UTC).date(),
+                state=state,
+                plan_id=plan_id,
+                limit=limit,
+            )
+            return TaskListResponse(items=[self._task_response(task) for task in tasks])
+
+    async def update_task(
+        self,
+        *,
+        task_id: UUID,
+        user_id: UUID,
+        payload: TaskUpdateRequest,
+    ) -> TaskUpdateResponse:
+        async with session_transaction(self._session):
+            task = await self._plans.get_task_for_user(task_id, user_id, for_update=True)
+            if task is None:
+                raise AppError(
+                    code="NOT_FOUND_TASK",
+                    message="Task was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if task.version != payload.version:
+                raise AppError(
+                    code="STATE_TASK_VERSION_CONFLICT",
+                    message="Task version does not match the current version",
+                    status_code=HTTPStatus.CONFLICT,
+                    details={"current_version": task.version},
+                )
+            plan = await self._plans.get_for_user(task.plan_id, user_id, for_update=True)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if plan.status not in {"generated", "active"}:
+                raise AppError(
+                    code="STATE_PLAN_NOT_MUTABLE",
+                    message="Tasks can only be updated for a generated or active Plan",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            target = payload.state.value
+            allowed = {
+                "pending": {"in_progress", "abandoned"},
+                "in_progress": {"completed", "abandoned"},
+            }
+            if target not in allowed.get(task.state, set()):
+                raise AppError(
+                    code="STATE_TASK_TRANSITION_INVALID",
+                    message=f"Task cannot transition from {task.state} to {target}",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+
+            now = datetime.now(UTC)
+            task.state = target
+            task.version += 1
+            task.updated_at = now
+            task.actual_minutes = payload.actual_minutes
+            task.abandoned_reason = (
+                payload.abandoned_reason.value if payload.abandoned_reason is not None else None
+            )
+            task.abandoned_reason_text = payload.abandoned_reason_text
+            if target == "in_progress":
+                task.started_at = now
+                if plan.status == "generated":
+                    plan.status = "active"
+                    plan.adopted_at = now
+                    plan.updated_at = now
+                    plan.version += 1
+                companion_message = f"已经开始「{task.title}」，先完成第一个可验证动作。"
+            elif target == "completed":
+                task.completed_at = now
+                companion_message = "你已经完成了这一步，今天的推进已经成为可验证的成果。"
+                await self._plans.create_companion(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    task_id=task.id,
+                    trigger_tag="task_completed",
+                    message=companion_message,
+                    template_version="task_completed_v1",
+                )
+            else:
+                task.abandoned_at = now
+                companion_message = self._abandoned_companion(payload.abandoned_reason)
+                await self._plans.create_companion(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    task_id=task.id,
+                    trigger_tag="task_abandoned",
+                    message=companion_message,
+                    template_version="task_abandoned_v1",
+                )
+            await self._session.flush()
+
+            if target == "completed":
+                counts = await self._plans.task_state_counts(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    scheduled_date=plan.plan_date,
+                )
+                total = sum(counts.values())
+                if total > 0 and counts.get("completed", 0) == total:
+                    plan.status = "completed"
+                    plan.completed_at = now
+                    plan.updated_at = now
+                    plan.version += 1
+                    await self._session.flush()
+
+            return TaskUpdateResponse(
+                task=self._task_response(task),
+                plan_status=PlanStatus(plan.status),
+                companion_message=companion_message,
+            )
+
+    @staticmethod
+    def _abandoned_companion(reason: AbandonedReason | None) -> str:
+        if reason == AbandonedReason.NO_TIME:
+            return "时间不足不是失败，复盘时可以把下一步拆得更小。"
+        if reason == AbandonedReason.BLOCKED:
+            return "阻碍已经记录，复盘时会据此调整下一步。"
+        return "这次放弃已经记录，复盘会帮助我们选择更合适的下一步。"
+
+    @classmethod
+    def _plan_response(
+        cls,
+        plan: Plan,
+        tasks: list[Task],
+        companion_message: str | None,
+        sources: list[PlanSourceResponse],
+    ) -> ActivePlanResponse:
+        return ActivePlanResponse(
+            plan_id=plan.id,
+            status=PlanStatus(plan.status),
+            plan_date=plan.plan_date,
+            horizon_start=plan.horizon_start,
+            horizon_end=plan.horizon_end,
+            overall_direction=plan.overall_direction,
+            weekly_focus=[
+                WeeklyFocusCandidate.model_validate(item) for item in plan.weekly_focus_json
+            ],
+            summary=plan.summary,
+            rationale=plan.rationale,
+            adjustment_reason=plan.adjustment_reason,
+            sources=sources,
+            tasks=[cls._task_response(task) for task in tasks],
+            companion_message=companion_message,
+            version=plan.version,
+            adopted_at=plan.adopted_at,
+            created_at=plan.created_at,
+        )
+
+    async def _plan_sources(self, plan: Plan, user_id: UUID) -> list[PlanSourceResponse]:
+        references = plan.evidence_refs_json
+        memory_ids = [
+            UUID(str(item["id"]))
+            for item in references
+            if item.get("kind") == "memory" and item.get("id")
+        ]
+        atom_ids = [
+            UUID(str(item["id"]))
+            for item in references
+            if item.get("kind") == "experience_atom" and item.get("id")
+        ]
+        source_ids = [
+            UUID(str(item["id"]))
+            for item in references
+            if item.get("kind") == "search_source" and item.get("id")
+        ]
+        repository = EvidenceRepository(self._session)
+        memories = {
+            item.id: item for item in await repository.resolve_memories(user_id, memory_ids)
+        }
+        atoms = {item.id: item for item in await repository.resolve_atoms(atom_ids)}
+        sources = {
+            item.id: item
+            for item in await repository.resolve_sources(plan.source_run_id, source_ids)
+        }
+        result: list[PlanSourceResponse] = []
+        for reference in references:
+            kind = str(reference.get("kind"))
+            try:
+                item_id = UUID(str(reference.get("id")))
+            except ValueError:
+                continue
+            if kind == "memory":
+                memory = memories.get(item_id)
+                result.append(
+                    PlanSourceResponse(
+                        kind="memory",
+                        id=item_id,
+                        available=memory is not None and memory.status == "active",
+                        title=memory.memory_type if memory else None,
+                        snippet=memory.summary if memory and memory.status == "active" else None,
+                        reliability=0.9 if memory else None,
+                    )
+                )
+            elif kind == "experience_atom":
+                atom = atoms.get(item_id)
+                reliability = atom.evidence_json.get("reliability") if atom else None
+                result.append(
+                    PlanSourceResponse(
+                        kind="experience_atom",
+                        id=item_id,
+                        available=atom is not None and atom.is_active,
+                        title=atom.title if atom else None,
+                        snippet=atom.content if atom and atom.is_active else None,
+                        reliability=(
+                            float(reliability) if isinstance(reliability, (int, float)) else None
+                        ),
+                    )
+                )
+            elif kind == "search_source":
+                source = sources.get(item_id)
+                result.append(
+                    PlanSourceResponse(
+                        kind="search_source",
+                        id=item_id,
+                        available=source is not None,
+                        title=source.title if source else None,
+                        url=source.url if source else None,
+                        snippet=source.snippet if source else None,
+                        reliability=float(source.reliability) if source else None,
+                    )
+                )
+        return result
+
+    @staticmethod
+    def _task_response(task: Task) -> TaskResponse:
+        return TaskResponse(
+            task_id=task.id,
+            plan_id=task.plan_id,
+            title=task.title,
+            task_type=TaskType(task.task_type),
+            scheduled_date=task.scheduled_date,
+            order_index=task.order_index,
+            state=TaskStatus(task.state),
+            starter_action=task.starter_action,
+            deliverable=task.deliverable,
+            rationale=task.rationale,
+            estimated_minutes=task.estimated_minutes,
+            actual_minutes=task.actual_minutes,
+            abandoned_reason=(
+                AbandonedReason(task.abandoned_reason)
+                if task.abandoned_reason is not None
+                else None
+            ),
+            abandoned_reason_text=task.abandoned_reason_text,
+            version=task.version,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            abandoned_at=task.abandoned_at,
+            created_at=task.created_at,
+        )

@@ -1,0 +1,366 @@
+"""Strict Agent Run, runtime snapshot, and graph data contracts."""
+
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Literal, TypedDict
+from uuid import UUID
+
+from pydantic import Field, field_validator, model_validator
+
+from app.schemas.base import StrictModel
+from app.schemas.enums import (
+    CareerStage,
+    GoalType,
+    PlanStatus,
+    ReplanMode,
+    RunIntent,
+    RunResultKind,
+    RunStatus,
+    SkillLevel,
+    TaskStatus,
+    TaskType,
+)
+
+
+class AgentRunCreateRequest(StrictModel):
+    message: str = Field(min_length=1, max_length=2000)
+    hint_intent: Literal["create_plan", "replan"] | None = None
+    goal_type_override: GoalType | None = None
+    source_plan_id: UUID | None = None
+
+
+class AgentRunCreatedResponse(StrictModel):
+    run_id: UUID
+    status: RunStatus
+    events_url: str
+
+
+class AgentRunCancelRequest(StrictModel):
+    reason: str = Field(default="user_abort", min_length=1, max_length=64)
+
+
+class AgentRunCancelResponse(StrictModel):
+    run_id: UUID
+    status: RunStatus
+    cancel_requested: bool
+
+
+class PlanResultSummary(StrictModel):
+    plan_id: UUID
+    status: Literal["generated"]
+    plan_date: date
+    horizon_end: date
+    summary: str = Field(min_length=1, max_length=500)
+    task_count: int = Field(ge=1, le=3)
+
+
+class ClarificationRequest(StrictModel):
+    questions: list[str] = Field(min_length=1, max_length=3)
+    slot_names: list[str] = Field(min_length=1, max_length=3)
+    hint_options: dict[str, list[str]]
+    reason: Literal["profile_incomplete", "unsupported_intent", "intent_uncertain"]
+
+
+class SafeResponse(StrictModel):
+    message: str = Field(min_length=1, max_length=1000)
+    resource_ids: list[str] = Field(default_factory=list, max_length=10)
+    disclaimer: str = Field(min_length=1, max_length=500)
+
+
+TerminalResult = PlanResultSummary | ClarificationRequest | SafeResponse
+
+
+class AgentRunResponse(StrictModel):
+    run_id: UUID
+    status: RunStatus
+    resolved_intent: RunIntent | None
+    replan_mode: ReplanMode | None
+    result_kind: RunResultKind | None
+    result: TerminalResult | None
+    final_plan_id: UUID | None
+    fallback_reason: str | None
+    error_code: str | None
+    risk_category: str | None
+    total_tokens_in: int = Field(ge=0)
+    total_tokens_out: int = Field(ge=0)
+    total_cost_cny: Decimal = Field(ge=0)
+    total_latency_ms: int = Field(ge=0)
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class RuntimeConfigSnapshot(StrictModel):
+    graph_version: str
+    # Keep prior snapshots readable while new runs are pinned to Stage 5.
+    feature_stage: Literal[3, 4, 5] = 5
+    available_tools: list[str] = Field(default_factory=list, max_length=3)
+    provider: Literal["mock", "openai_compatible"] = "mock"
+    model_alias: str
+    prompt_versions: dict[str, str]
+    max_llm_calls: int = Field(ge=1, le=7)
+    max_tool_rounds: int = Field(ge=0, le=2)
+    max_tool_calls: int = Field(ge=0, le=4)
+    max_total_tokens: int = Field(ge=1)
+    max_input_tokens_per_call: int = Field(ge=1)
+    max_output_tokens_per_call: int = Field(ge=1)
+    deadline_seconds: int = Field(ge=1)
+    node_timeouts_seconds: dict[str, float]
+
+
+class RunRequestSnapshot(StrictModel):
+    message: str = Field(min_length=1, max_length=2000)
+    hint_intent: Literal["create_plan", "replan"] | None
+    goal_type_override: GoalType | None
+    source_plan_id: UUID | None
+    source_review_id: UUID | None = None
+
+
+class ProfileContext(StrictModel):
+    user_id: UUID
+    version: int = Field(ge=1)
+    goal_type: GoalType
+    stage: CareerStage
+    time_budget_minutes: int = Field(ge=15, le=480)
+    skill_level: SkillLevel
+    skill_summary: str | None = Field(default=None, max_length=2000)
+    deadline: date | None = None
+
+
+class PlanningWindow(StrictModel):
+    planning_date: date
+    horizon_start: date
+    horizon_end: date
+    horizon_weeks: int = Field(ge=1, le=8)
+
+
+class PlanFocusContext(StrictModel):
+    week_index: int = Field(ge=1, le=8)
+    focus: str = Field(min_length=1, max_length=160)
+    success_signal: str = Field(min_length=1, max_length=200)
+
+
+class PlanContext(StrictModel):
+    plan_id: UUID
+    version: int = Field(ge=1)
+    status: PlanStatus
+    plan_date: date
+    horizon_start: date
+    horizon_end: date
+    overall_direction: str = Field(min_length=1, max_length=500)
+    weekly_focus: list[PlanFocusContext] = Field(min_length=1, max_length=8)
+
+
+class TaskContext(StrictModel):
+    task_id: UUID
+    state: TaskStatus
+    title: str
+    deliverable: str
+    scheduled_date: date
+    abandoned_reason: str | None = None
+    abandoned_reason_text: str | None = None
+
+
+class ReviewContext(StrictModel):
+    review_id: UUID
+    review_date: date
+    blockers: str | None = None
+    adjustment_request: str | None = None
+    free_text: str | None = None
+    replan_reason: str | None = None
+
+
+class MemoryContext(StrictModel):
+    memory_id: UUID
+    version: int = Field(ge=1)
+    memory_type: str
+    summary: str = Field(min_length=1, max_length=500)
+
+
+class EvidenceCatalogItem(StrictModel):
+    kind: Literal["memory", "experience_atom", "search_source"]
+    id: UUID
+    title: str = Field(min_length=1, max_length=300)
+    content: str = Field(min_length=1, max_length=2000)
+    reliability: float = Field(ge=0, le=1)
+
+
+class PlanningContext(StrictModel):
+    profile: ProfileContext
+    planning_window: PlanningWindow
+    source_plan_id: UUID | None = None
+    source_plan_version: int | None = None
+    source_plan: PlanContext | None = None
+    source_review: ReviewContext | None = None
+    recent_tasks: list[TaskContext] = Field(default_factory=list, max_length=30)
+    recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
+    completed_facts: list[str] = Field(default_factory=list, max_length=20)
+    blockers: list[str] = Field(default_factory=list, max_length=10)
+    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=3)
+    timezone: str = "UTC"
+    time_budget_minutes: int = Field(ge=15, le=480)
+    token_estimate: int = Field(ge=0)
+
+
+class RunInputSnapshot(StrictModel):
+    profile: ProfileContext
+    planning_window: PlanningWindow
+    source_plan_id: UUID | None
+    source_plan_version: int | None
+    source_plan: PlanContext | None = None
+    source_review: ReviewContext | None = None
+    recent_tasks: list[TaskContext] = Field(default_factory=list, max_length=30)
+    recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
+    completed_facts: list[str] = Field(default_factory=list, max_length=20)
+    blockers: list[str] = Field(default_factory=list, max_length=10)
+    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=3)
+    recent_task_ids: list[UUID] = Field(default_factory=list, max_length=30)
+    recent_review_ids: list[UUID] = Field(default_factory=list, max_length=7)
+    memory_versions: dict[str, int] = Field(default_factory=dict)
+    timezone: str
+    time_budget_minutes: int = Field(ge=15, le=480)
+
+
+class RiskResult(StrictModel):
+    level: Literal["none", "high"]
+    category: Literal["self_harm", "mental_health", "legal", "financial", "other"] | None
+    method: Literal["rule", "classifier", "rule_and_classifier"]
+    matched_rule_ids: list[str]
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class IntentResult(StrictModel):
+    intent: RunIntent
+    replan_mode: ReplanMode
+    confidence: float = Field(ge=0, le=1)
+    missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]]
+    effective_goal_type: GoalType | None
+    requested_horizon_weeks: int | None = Field(default=None, ge=1, le=8)
+    requires_fresh_information: bool
+    method: Literal["rule", "model", "rule_fallback"]
+
+
+class WeeklyFocusCandidate(StrictModel):
+    week_index: int = Field(ge=1, le=8)
+    focus: str = Field(min_length=1, max_length=160)
+    success_signal: str = Field(min_length=1, max_length=200)
+
+
+class EvidenceRef(StrictModel):
+    kind: Literal["memory", "experience_atom", "search_source"]
+    id: UUID
+
+
+class TaskCandidate(StrictModel):
+    title: str = Field(min_length=1, max_length=120)
+    task_type: TaskType
+    scheduled_date: date
+    starter_action: str = Field(min_length=1, max_length=240)
+    deliverable: str = Field(min_length=1, max_length=240)
+    estimated_minutes: int = Field(ge=5, le=480)
+    rationale: str | None = Field(default=None, max_length=500)
+
+
+class PlanCandidate(StrictModel):
+    plan_date: date
+    horizon_start: date
+    horizon_end: date
+    overall_direction: str = Field(min_length=1, max_length=500)
+    weekly_focus: list[WeeklyFocusCandidate] = Field(min_length=1, max_length=8)
+    summary: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=2000)
+    adjustment_reason: str | None = Field(default=None, max_length=1000)
+    assumptions: list[str] = Field(default_factory=list, max_length=5)
+    tasks: list[TaskCandidate] = Field(min_length=1, max_length=3)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=10)
+
+    @field_validator("weekly_focus")
+    @classmethod
+    def require_contiguous_weeks(
+        cls, values: list[WeeklyFocusCandidate]
+    ) -> list[WeeklyFocusCandidate]:
+        if [item.week_index for item in values] != list(range(1, len(values) + 1)):
+            raise ValueError("weekly focus indexes must be contiguous from one")
+        return values
+
+
+class ValidationCheck(StrictModel):
+    code: str
+    passed: bool
+    message: str
+    task_index: int | None = None
+
+
+class ValidationReport(StrictModel):
+    passed: bool
+    checks: list[ValidationCheck]
+    repair_instructions: list[str]
+
+
+class CompanionMessageCandidate(StrictModel):
+    trigger_tag: Literal["plan_ready"] = "plan_ready"
+    message: str = Field(min_length=1, max_length=500)
+    template_version: str
+
+
+class ProviderUsage(StrictModel):
+    model_id: str
+    provider: Literal["mock", "openai_compatible"] = "mock"
+    request_id: str | None = None
+    raw_output_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    tokens_in: int = Field(ge=0)
+    tokens_out: int = Field(ge=0)
+    latency_ms: int = Field(ge=0)
+    cost_cny: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class ProviderPlanResponse(StrictModel):
+    candidate: PlanCandidate
+    usage: ProviderUsage
+
+
+class ProviderToolCall(StrictModel):
+    call_id: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=64)
+    arguments: dict[str, object]
+
+
+class AgentTurnResponse(StrictModel):
+    final: PlanCandidate | None = None
+    tool_calls: list[ProviderToolCall] = Field(default_factory=list, max_length=2)
+    usage: ProviderUsage
+
+    @model_validator(mode="after")
+    def exactly_one_result(self) -> "AgentTurnResponse":
+        if (self.final is None) == (not self.tool_calls):
+            raise ValueError("AgentTurn must contain exactly one of final or tool_calls")
+        return self
+
+
+class PlanningState(TypedDict, total=False):
+    run_id: UUID
+    user_id: UUID
+    request: RunRequestSnapshot
+    runtime_config: RuntimeConfigSnapshot
+    profile: ProfileContext | None
+    server_replan_mode: ReplanMode | None
+    risk: RiskResult
+    intent: IntentResult
+    planning_context: PlanningContext
+    evidence_catalog: list[EvidenceCatalogItem]
+    tool_round: int
+    tool_call_count: int
+    candidate_plan: PlanCandidate
+    validation_report: ValidationReport
+    validation_attempt: int
+    repair_count: int
+    fallback_reason: str | None
+    companion: CompanionMessageCandidate
+
+
+class AgentEventPayload(StrictModel):
+    run_id: UUID
+    sequence: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def preserve_sequence(self) -> "AgentEventPayload":
+        return self

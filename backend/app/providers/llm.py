@@ -1,0 +1,724 @@
+"""Provider protocol and deterministic Stage 4 planning adapter."""
+
+import asyncio
+import json
+from collections.abc import Mapping
+from hashlib import sha256
+from time import monotonic
+from typing import Protocol
+from urllib.parse import urlparse
+
+import httpx
+from pydantic import ValidationError
+
+from app.agent.errors import (
+    ProviderAuthenticationError,
+    ProviderConfigurationError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
+from app.core.config import Settings
+from app.prompts.career_planning import (
+    business_repair_messages,
+    format_repair_messages,
+    generation_messages,
+)
+from app.schemas.agent_runs import (
+    AgentTurnResponse,
+    EvidenceCatalogItem,
+    PlanCandidate,
+    PlanningContext,
+    ProviderPlanResponse,
+    ProviderToolCall,
+    ProviderUsage,
+    TaskCandidate,
+    WeeklyFocusCandidate,
+)
+from app.schemas.enums import ReplanMode, TaskType
+from app.tools.contracts import ModelToolSpec
+
+
+class PlanningProvider(Protocol):
+    async def generate_agent_turn(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        available_tools: list[ModelToolSpec],
+        evidence_catalog: list[EvidenceCatalogItem],
+        force_final: bool,
+    ) -> Mapping[str, object]: ...
+
+    async def generate_plan(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]: ...
+
+    async def repair_format(
+        self,
+        *,
+        raw_output: Mapping[str, object],
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]: ...
+
+    async def repair_business_rules(
+        self,
+        *,
+        candidate: PlanCandidate,
+        context: PlanningContext,
+        repair_instructions: list[str],
+        message: str,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]: ...
+
+
+class OpenAICompatiblePlanningProvider:
+    """OpenAI-compatible Chat Completions adapter with strict JSON output."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        timeout_seconds: float = 30,
+        max_output_tokens: int = 1500,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        if not api_key or not base_url or not model:
+            raise ProviderConfigurationError(
+                "openai_compatible requires API key, base URL, and model"
+            )
+        self._api_key = api_key
+        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        self._is_official_deepseek = urlparse(base_url).hostname == "api.deepseek.com"
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._max_output_tokens = max_output_tokens
+        self._transport = transport
+
+    async def generate_plan(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        return await self._generate(
+            generation_messages(
+                message=message,
+                context=context,
+                replan_mode=replan_mode,
+            )
+        )
+
+    async def generate_agent_turn(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        available_tools: list[ModelToolSpec],
+        evidence_catalog: list[EvidenceCatalogItem],
+        force_final: bool,
+    ) -> Mapping[str, object]:
+        messages = generation_messages(
+            message=message,
+            context=context,
+            replan_mode=replan_mode,
+        )
+        if evidence_catalog:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "<evidence_catalog>\n"
+                    + json.dumps(
+                        [item.model_dump(mode="json") for item in evidence_catalog],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    + "\n</evidence_catalog>",
+                }
+            )
+        request_body: dict[str, object] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": self._max_output_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        if self._is_official_deepseek:
+            request_body["thinking"] = {"type": "disabled"}
+        if available_tools and not force_final:
+            request_body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_json_schema,
+                        "strict": True,
+                    },
+                }
+                for tool in available_tools
+            ]
+            request_body["tool_choice"] = "auto"
+        response, latency_ms, response_text = await self._post(request_body)
+        body = self._response_mapping(response)
+        usage = self._usage(
+            body=body,
+            latency_ms=latency_ms,
+            request_id=response.headers.get("x-request-id"),
+            raw_output_hash=sha256(response_text.encode("utf-8")).hexdigest(),
+        )
+        message_object = self._message_mapping(body)
+        tool_calls = self._tool_calls(message_object)
+        content = message_object.get("content") if message_object is not None else None
+        has_content = isinstance(content, str) and bool(content.strip())
+        if tool_calls and has_content:
+            return {
+                "_raw_text": "mixed tool calls and final",
+                "usage": usage.model_dump(mode="json"),
+            }
+        if tool_calls:
+            return AgentTurnResponse(
+                tool_calls=tool_calls,
+                usage=usage,
+            ).model_dump(mode="json")
+        if isinstance(content, str) and content.strip():
+            try:
+                candidate_object: object = json.loads(content)
+                candidate = PlanCandidate.model_validate(candidate_object)
+            except (json.JSONDecodeError, ValidationError):
+                return {"_raw_text": content[:12000], "usage": usage.model_dump(mode="json")}
+            return AgentTurnResponse(final=candidate, usage=usage).model_dump(mode="json")
+        return {"_raw_text": response_text[:12000], "usage": usage.model_dump(mode="json")}
+
+    async def repair_format(
+        self,
+        *,
+        raw_output: Mapping[str, object],
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        return await self._generate(
+            format_repair_messages(
+                raw_output=raw_output,
+                context=context,
+                replan_mode=replan_mode,
+            )
+        )
+
+    async def repair_business_rules(
+        self,
+        *,
+        candidate: PlanCandidate,
+        context: PlanningContext,
+        repair_instructions: list[str],
+        message: str,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        return await self._generate(
+            business_repair_messages(
+                candidate=candidate,
+                context=context,
+                repair_instructions=repair_instructions,
+                message=message,
+                replan_mode=replan_mode,
+            )
+        )
+
+    async def _generate(self, messages: list[dict[str, str]]) -> Mapping[str, object]:
+        request_body: dict[str, object] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": self._max_output_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        if self._is_official_deepseek:
+            request_body["thinking"] = {"type": "disabled"}
+        response, latency_ms, response_text = await self._post(request_body)
+        raw_output_hash = sha256(response_text.encode("utf-8")).hexdigest()
+        body = self._response_mapping(response)
+        usage = self._usage(
+            body=body,
+            latency_ms=latency_ms,
+            request_id=response.headers.get("x-request-id"),
+            raw_output_hash=raw_output_hash,
+        )
+        content = self._message_content(body)
+        if content is None:
+            return {
+                "_raw_text": response_text[:12000],
+                "usage": usage.model_dump(mode="json"),
+            }
+        try:
+            candidate_object: object = json.loads(content)
+        except json.JSONDecodeError:
+            return {
+                "_raw_text": content[:12000],
+                "usage": usage.model_dump(mode="json"),
+            }
+        if not isinstance(candidate_object, Mapping):
+            return {
+                "_raw_text": content[:12000],
+                "usage": usage.model_dump(mode="json"),
+            }
+        candidate = {str(key): value for key, value in candidate_object.items()}
+        return {
+            "candidate": candidate,
+            "usage": usage.model_dump(mode="json"),
+        }
+
+    async def _post(self, request_body: dict[str, object]) -> tuple[httpx.Response, int, str]:
+        started = monotonic()
+        try:
+            async with httpx.AsyncClient(
+                transport=self._transport,
+                timeout=self._timeout_seconds,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            ) as client:
+                response = await client.post(self._endpoint, json=request_body)
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("LLM provider request timed out") from exc
+        except httpx.RequestError as exc:
+            raise ProviderUnavailableError("LLM provider could not be reached") from exc
+
+        if response.status_code in {401, 403}:
+            raise ProviderAuthenticationError("LLM provider rejected authentication")
+        if response.status_code == 429:
+            raise ProviderRateLimitError("LLM provider rate limit was reached")
+        if response.status_code >= 400:
+            raise ProviderUnavailableError(f"LLM provider returned HTTP {response.status_code}")
+
+        return response, int((monotonic() - started) * 1000), response.text
+
+    @staticmethod
+    def _response_mapping(response: httpx.Response) -> Mapping[object, object]:
+        try:
+            body: object = response.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, Mapping) else {}
+
+    @staticmethod
+    def _message_content(body: Mapping[object, object]) -> str | None:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        first = choices[0]
+        if not isinstance(first, Mapping):
+            return None
+        message = first.get("message")
+        if not isinstance(message, Mapping):
+            return None
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return None
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, Mapping):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+        return "".join(parts) or None
+
+    @staticmethod
+    def _message_mapping(body: Mapping[object, object]) -> Mapping[object, object] | None:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        first = choices[0]
+        if not isinstance(first, Mapping):
+            return None
+        message = first.get("message")
+        return message if isinstance(message, Mapping) else None
+
+    @staticmethod
+    def _tool_calls(
+        message: Mapping[object, object] | None,
+    ) -> list[ProviderToolCall]:
+        if message is None:
+            return []
+        raw_calls = message.get("tool_calls")
+        if not isinstance(raw_calls, list):
+            return []
+        calls: list[ProviderToolCall] = []
+        for index, raw_call in enumerate(raw_calls):
+            if not isinstance(raw_call, Mapping):
+                continue
+            function = raw_call.get("function")
+            if not isinstance(function, Mapping):
+                continue
+            name = function.get("name")
+            raw_arguments = function.get("arguments")
+            call_id = raw_call.get("id")
+            if not isinstance(name, str) or not isinstance(raw_arguments, str):
+                continue
+            try:
+                arguments_object: object = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                arguments_object = {}
+            if not isinstance(arguments_object, Mapping):
+                arguments_object = {}
+            calls.append(
+                ProviderToolCall(
+                    call_id=call_id if isinstance(call_id, str) else f"call-{index}",
+                    name=name,
+                    arguments={str(key): value for key, value in arguments_object.items()},
+                )
+            )
+        return calls
+
+    def _usage(
+        self,
+        *,
+        body: Mapping[object, object],
+        latency_ms: int,
+        request_id: str | None,
+        raw_output_hash: str,
+    ) -> ProviderUsage:
+        usage_object = body.get("usage")
+        usage = usage_object if isinstance(usage_object, Mapping) else {}
+        model_object = body.get("model")
+        response_id = body.get("id")
+        return ProviderUsage(
+            model_id=model_object if isinstance(model_object, str) else self._model,
+            provider="openai_compatible",
+            request_id=(
+                request_id
+                if request_id is not None
+                else response_id
+                if isinstance(response_id, str)
+                else None
+            ),
+            raw_output_hash=raw_output_hash,
+            tokens_in=self._nonnegative_int(usage.get("prompt_tokens")),
+            tokens_out=self._nonnegative_int(usage.get("completion_tokens")),
+            latency_ms=latency_ms,
+        )
+
+    @staticmethod
+    def _nonnegative_int(value: object) -> int:
+        return value if isinstance(value, int) and value >= 0 else 0
+
+
+class MockPlanningProvider:
+    """Deterministic provider whose scenarios are selected by test-safe message markers."""
+
+    model_id = "mock-career-planner-v1"
+
+    def __init__(self) -> None:
+        self.plan_calls = 0
+        self.format_repair_calls = 0
+        self.business_repair_calls = 0
+
+    async def generate_agent_turn(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        available_tools: list[ModelToolSpec],
+        evidence_catalog: list[EvidenceCatalogItem],
+        force_final: bool,
+    ) -> Mapping[str, object]:
+        self.plan_calls += 1
+        if "[mock:timeout]" in message:
+            await asyncio.sleep(60)
+        candidate = self._candidate(context, replan_mode)
+        if "[mock:invalid-schema]" in message or "[mock:invalid-schema-twice]" in message:
+            invalid_payload = candidate.model_dump(mode="json")
+            invalid_payload["tasks"] = []
+            return {
+                "candidate": invalid_payload,
+                "usage": self._usage().model_dump(mode="json"),
+                "_mock_scenario": (
+                    "invalid-schema-twice"
+                    if "[mock:invalid-schema-twice]" in message
+                    else "invalid-schema"
+                ),
+            }
+        if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
+            invalid_candidate = candidate.model_copy(
+                update={
+                    "tasks": [
+                        candidate.tasks[0].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                        candidate.tasks[1].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                    ]
+                }
+            )
+            return AgentTurnResponse(
+                final=invalid_candidate,
+                usage=self._usage(),
+            ).model_dump(mode="json")
+        requested: list[str] = []
+        if "[mock:tool-all]" in message:
+            requested = ["memory_lookup", "rag_retrieve"]
+        elif "[mock:tool-memory]" in message:
+            requested = ["memory_lookup"]
+        elif "[mock:tool-rag]" in message:
+            requested = ["rag_retrieve"]
+        elif "[mock:tool-search]" in message:
+            requested = ["web_search"]
+        elif "[mock:tool-unknown]" in message:
+            requested = ["unregistered_tool"]
+        if requested and not evidence_catalog and not force_final:
+            calls: list[ProviderToolCall] = []
+            for index, name in enumerate(requested):
+                query = (
+                    "[mock:search-timeout]"
+                    if "[mock:search-timeout]" in message
+                    else "[mock:search-error]"
+                    if "[mock:search-error]" in message
+                    else "[mock:embedding-error]"
+                    if "[mock:embedding-error]" in message
+                    else "Agent 工程求职证据"
+                )
+                arguments: dict[str, object] = {"query": query, "limit": 3}
+                if name == "rag_retrieve":
+                    arguments["goal_type"] = context.profile.goal_type.value
+                if "[mock:tool-invalid]" in message:
+                    arguments["unexpected"] = True
+                calls.append(
+                    ProviderToolCall(
+                        call_id=f"mock-call-{index + 1}",
+                        name=name,
+                        arguments=arguments,
+                    )
+                )
+            return AgentTurnResponse(
+                tool_calls=calls,
+                usage=self._usage(tokens_in=120, tokens_out=40),
+            ).model_dump(mode="json")
+        allowed_evidence = evidence_catalog[:10]
+        if allowed_evidence:
+            candidate_payload = candidate.model_dump(mode="python")
+            candidate_payload["evidence_refs"] = [
+                {"kind": item.kind, "id": item.id} for item in allowed_evidence
+            ]
+            candidate = PlanCandidate.model_validate(candidate_payload)
+        if "[mock:forged-evidence]" in message:
+            from uuid import UUID
+
+            candidate_payload = candidate.model_dump(mode="python")
+            candidate_payload["evidence_refs"] = [
+                {
+                    "kind": "memory",
+                    "id": UUID("00000000-0000-0000-0000-000000000001"),
+                }
+            ]
+            candidate = PlanCandidate.model_validate(candidate_payload)
+        return AgentTurnResponse(
+            final=PlanCandidate.model_validate(candidate),
+            usage=self._usage(),
+        ).model_dump(mode="json")
+
+    async def generate_plan(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        self.plan_calls += 1
+        if "[mock:timeout]" in message:
+            await asyncio.sleep(60)
+        candidate = self._candidate(context, replan_mode)
+        if "[mock:invalid-schema]" in message or "[mock:invalid-schema-twice]" in message:
+            invalid_payload = candidate.model_dump(mode="json")
+            invalid_payload["tasks"] = []
+            return {
+                "candidate": invalid_payload,
+                "usage": self._usage().model_dump(mode="json"),
+                "_mock_scenario": (
+                    "invalid-schema-twice"
+                    if "[mock:invalid-schema-twice]" in message
+                    else "invalid-schema"
+                ),
+            }
+        if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
+            invalid_candidate = candidate.model_copy(
+                update={
+                    "tasks": [
+                        candidate.tasks[0].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                        candidate.tasks[1].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                    ]
+                }
+            )
+            return ProviderPlanResponse(
+                candidate=invalid_candidate, usage=self._usage()
+            ).model_dump(mode="json")
+        return ProviderPlanResponse(candidate=candidate, usage=self._usage()).model_dump(
+            mode="json"
+        )
+
+    async def repair_format(
+        self,
+        *,
+        raw_output: Mapping[str, object],
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        self.format_repair_calls += 1
+        if raw_output.get("_mock_scenario") == "invalid-schema-twice":
+            return raw_output
+        return ProviderPlanResponse(
+            candidate=self._candidate(context, replan_mode),
+            usage=self._usage(tokens_in=180, tokens_out=320),
+        ).model_dump(mode="json")
+
+    async def repair_business_rules(
+        self,
+        *,
+        candidate: PlanCandidate,
+        context: PlanningContext,
+        repair_instructions: list[str],
+        message: str,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        self.business_repair_calls += 1
+        del candidate, repair_instructions
+        repaired = self._candidate(context, replan_mode)
+        if "[mock:rule-fallback]" in message:
+            repaired = repaired.model_copy(
+                update={
+                    "tasks": [
+                        repaired.tasks[0].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                        repaired.tasks[1].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes}
+                        ),
+                    ]
+                }
+            )
+        return ProviderPlanResponse(
+            candidate=repaired,
+            usage=self._usage(tokens_in=250, tokens_out=400),
+        ).model_dump(mode="json")
+
+    def _candidate(self, context: PlanningContext, replan_mode: ReplanMode) -> PlanCandidate:
+        window = context.planning_window
+        if replan_mode == ReplanMode.CONTINUE and context.source_plan is not None:
+            weekly = [
+                WeeklyFocusCandidate.model_validate(item.model_dump())
+                for item in context.source_plan.weekly_focus[: window.horizon_weeks]
+            ]
+            while len(weekly) < window.horizon_weeks:
+                index = len(weekly) + 1
+                weekly.append(
+                    WeeklyFocusCandidate(
+                        week_index=index,
+                        focus=f"第 {index} 周继续推进可验证的求职准备成果",
+                        success_signal=f"第 {index} 周产出可展示证据",
+                    )
+                )
+        else:
+            weekly = [
+                WeeklyFocusCandidate(
+                    week_index=index,
+                    focus=f"第 {index} 周完成一个可验证的求职准备增量",
+                    success_signal=f"第 {index} 周产出可展示证据",
+                )
+                for index in range(1, window.horizon_weeks + 1)
+            ]
+        first_minutes = max(5, min(30, context.time_budget_minutes // 2))
+        remaining = max(5, min(30, context.time_budget_minutes - first_minutes))
+        tasks = [
+            TaskCandidate(
+                title="梳理目标岗位能力差距",
+                task_type=TaskType.LEARNING,
+                scheduled_date=window.planning_date,
+                starter_action="打开岗位描述并标出三个高频能力词",
+                deliverable="一份包含三个能力差距的清单",
+                estimated_minutes=first_minutes,
+                rationale="先明确可验证的准备重点",
+            )
+        ]
+        if first_minutes + remaining <= context.time_budget_minutes:
+            tasks.append(
+                TaskCandidate(
+                    title="完成一个最小项目增量",
+                    task_type=TaskType.PROJECT,
+                    scheduled_date=window.planning_date,
+                    starter_action="打开项目并选择一个可以在今天闭环的小改动",
+                    deliverable="一个可运行且有测试结果的项目增量",
+                    estimated_minutes=remaining,
+                    rationale="把学习内容转成可展示证据",
+                )
+            )
+        adjustment_reason = None
+        if replan_mode == ReplanMode.ADJUST:
+            review = context.source_review
+            adjustment_reason = (
+                review.adjustment_request
+                if review and review.adjustment_request
+                else review.replan_reason
+                if review and review.replan_reason
+                else review.blockers
+                if review and review.blockers
+                else "根据当前阻碍采用更小的行动步长"
+            )
+        return PlanCandidate(
+            plan_date=window.planning_date,
+            horizon_start=window.horizon_start,
+            horizon_end=window.horizon_end,
+            overall_direction=(
+                context.source_plan.overall_direction
+                if context.source_plan is not None
+                else "在规划窗口内形成可展示项目证据并推进面试准备"
+            ),
+            weekly_focus=weekly,
+            summary="今天先完成能力差距梳理和一个可验证项目增量",
+            rationale="任务被限制在当前时间预算内，并同时覆盖方向判断与实际产出。",
+            adjustment_reason=adjustment_reason,
+            assumptions=["计划基于当前画像与每日时间预算"],
+            tasks=tasks,
+            evidence_refs=[],
+        )
+
+    def _usage(self, *, tokens_in: int = 300, tokens_out: int = 450) -> ProviderUsage:
+        return ProviderUsage(
+            model_id=self.model_id,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=5,
+        )
+
+
+def build_planning_provider(settings: Settings) -> PlanningProvider:
+    """Build exactly the configured Provider; never silently substitute Mock."""
+    if settings.llm_provider == "mock":
+        return MockPlanningProvider()
+    if settings.llm_api_key is None or settings.llm_base_url is None or settings.llm_model is None:
+        raise ProviderConfigurationError(
+            "openai_compatible requires LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL"
+        )
+    return OpenAICompatiblePlanningProvider(
+        api_key=settings.llm_api_key.get_secret_value(),
+        base_url=str(settings.llm_base_url),
+        model=settings.llm_model,
+        max_output_tokens=settings.agent_max_output_tokens_per_call,
+    )
