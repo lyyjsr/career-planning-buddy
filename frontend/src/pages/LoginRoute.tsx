@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useGuestLogin, useMe } from "@/api/auth";
-import { setAuthToken } from "@/api/client";
+import { getAuthToken, setAuthToken } from "@/api/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -22,6 +22,10 @@ export function LoginRoute(): JSX.Element {
       me.refetch();
     }
   }, [guestLogin.data, me]);
+
+  if (me.data !== undefined && me.data !== null) {
+    return <Navigate to={me.data.profile_complete ? "/today" : "/onboarding"} replace />;
+  }
 
   if (guestLogin.isError) {
     return (
@@ -80,7 +84,14 @@ export function RequireAuth({ requireProfile = false }: RequireAuthProps): JSX.E
     }
   }, [guestLogin.data, me]);
 
-  if (me.isLoading || guestLogin.isPending) {
+  const hasToken = getAuthToken() !== null || guestLogin.data?.access_token !== undefined;
+
+  // 登录失败的兜底
+  if (me.isError && me.error !== null) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (!hasToken || me.isLoading || guestLogin.isPending || me.data === undefined) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
         正在加载…
@@ -88,15 +99,26 @@ export function RequireAuth({ requireProfile = false }: RequireAuthProps): JSX.E
     );
   }
 
-  // 登录失败的兜底
-  if (me.isError && me.error !== null) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-
   // profile 是否完整决定是否能进 requireProfile 页
   if (requireProfile && me.data !== undefined && !me.data.profile_complete) {
     return <Navigate to="/onboarding" replace />;
   }
 
+  return <Outlet />;
+}
+
+export function RequireProfile(): JSX.Element {
+  const me = useMe();
+
+  if (me.isLoading || me.data === undefined || me.data === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        正在准备你的工作台…
+      </div>
+    );
+  }
+  if (!me.data.profile_complete) {
+    return <Navigate to="/onboarding" replace />;
+  }
   return <Outlet />;
 }

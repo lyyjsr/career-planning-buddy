@@ -2,6 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type { ActivePlanResponse, TaskUpdateRequest, TaskUpdateResponse } from "./types";
 
+export interface PlanListResponse {
+  items: ActivePlanResponse[];
+  next_cursor: string | null;
+}
+
 export function useActivePlan() {
   return useQuery({
     queryKey: ["plans", "active"],
@@ -15,6 +20,14 @@ export function usePlan(planId: string | undefined) {
     queryKey: ["plans", planId],
     queryFn: () => apiRequest<ActivePlanResponse>(`/api/v1/plans/${planId}`),
     enabled: planId !== undefined,
+    retry: false,
+  });
+}
+
+export function usePlans() {
+  return useQuery({
+    queryKey: ["plans"],
+    queryFn: () => apiRequest<PlanListResponse>("/api/v1/plans"),
     retry: false,
   });
 }

@@ -118,9 +118,12 @@ export interface TaskResponse {
 
 export interface PlanSourceResponse {
   kind: string;
+  id: string;
+  available: boolean;
   title: string | null;
   url?: string | null;
   snippet?: string | null;
+  reliability?: number | null;
 }
 
 export interface ActivePlanResponse {
@@ -198,9 +201,8 @@ export interface AgentRunCreateRequest {
 
 export interface UserSummary {
   id: string;
-  device_id?: string | null;
-  role: string;
-  created_at: string;
+  display_name: string | null;
+  role: "user" | "dev";
 }
 
 export interface MeResponse {
@@ -264,7 +266,8 @@ export interface TaskUpdateRequest {
 
 export interface TaskUpdateResponse {
   task: TaskResponse;
-  plan_completed: boolean;
+  plan_status: PlanStatus;
+  companion_message: string;
 }
 
 export interface MemoryResponse {
@@ -293,4 +296,9 @@ export interface MemoryCandidateResponse {
   expires_at: string;
   created_at: string;
   decided_at: string | null;
+}
+
+export interface MemoryCandidateDecisionResponse {
+  candidate: MemoryCandidateResponse;
+  memory: MemoryResponse | null;
 }

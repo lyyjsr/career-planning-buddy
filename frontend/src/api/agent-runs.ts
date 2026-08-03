@@ -48,9 +48,13 @@ export function useCancelRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (runId: string) =>
-      apiRequest<{ run_id: string; status: string }>(
+      apiRequest<{ run_id: string; status: string; cancel_requested: boolean }>(
         `/api/v1/agent-runs/${runId}/cancel`,
-        { method: "POST", body: {} }
+        {
+          method: "POST",
+          body: { reason: "user_abort" },
+          idempotencyKey: `cancel-${runId}`,
+        }
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs"] });

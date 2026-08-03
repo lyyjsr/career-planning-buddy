@@ -30,15 +30,8 @@ import type {
   AbandonedReason,
   TaskResponse,
 } from "@/api/types";
-
-const TASK_TYPE_LABEL: Record<string, string> = {
-  learning: "学习",
-  project: "项目",
-  interview: "面试",
-  application: "投递",
-  resume: "简历",
-  other: "其他",
-};
+import { toUserFacingError } from "@/lib/errors";
+import { TASK_STATUS_LABELS, TASK_TYPE_LABELS } from "@/lib/labels";
 
 const ABANDONED_REASON_LABEL: Record<AbandonedReason, string> = {
   too_hard: "太难",
@@ -49,7 +42,15 @@ const ABANDONED_REASON_LABEL: Record<AbandonedReason, string> = {
   other: "其他",
 };
 
-export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
+export function TaskCard({
+  task,
+  featured = false,
+  onFeedback,
+}: {
+  task: TaskResponse;
+  featured?: boolean;
+  onFeedback?: (message: string) => void;
+}): JSX.Element {
   const updateTask = useUpdateTask();
   const [abandonOpen, setAbandonOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -57,22 +58,17 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
   const [reason, setReason] = useState<AbandonedReason>("too_hard");
   const [reasonText, setReasonText] = useState("");
 
-  const stateLabel: Record<string, string> = {
-    pending: "未开始",
-    in_progress: "进行中",
-    completed: "已完成",
-    abandoned: "已放弃",
-    expired: "已过期",
-  };
-
   const isCompleted = task.state === "completed";
   const isAbandoned = task.state === "abandoned";
 
   function startTask(): void {
-    updateTask.mutate({
-      taskId: task.task_id,
-      payload: { state: "in_progress", version: task.version },
-    });
+    updateTask.mutate(
+      {
+        taskId: task.task_id,
+        payload: { state: "in_progress", version: task.version },
+      },
+      { onSuccess: (result) => onFeedback?.(result.companion_message) },
+    );
   }
 
   function confirmComplete(): void {
@@ -81,7 +77,12 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
         taskId: task.task_id,
         payload: { state: "completed", version: task.version, actual_minutes: actualMinutes },
       },
-      { onSettled: () => setCompleteOpen(false) }
+      {
+        onSuccess: (result) => {
+          setCompleteOpen(false);
+          onFeedback?.(result.companion_message);
+        },
+      }
     );
   }
 
@@ -96,19 +97,26 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
           abandoned_reason_text: reasonText.trim() || null,
         },
       },
-      { onSettled: () => setAbandonOpen(false) }
+      {
+        onSuccess: (result) => {
+          setAbandonOpen(false);
+          onFeedback?.(result.companion_message);
+        },
+      }
     );
   }
 
   return (
-    <Card className={isCompleted || isAbandoned ? "opacity-70" : ""}>
+    <Card
+      className={`${isCompleted || isAbandoned ? "opacity-70" : ""} ${featured ? "overflow-hidden border-primary/25 shadow-[0_22px_70px_-42px_rgba(24,122,112,0.7)]" : ""}`}
+    >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
             <CardTitle className="text-base">
               {task.title}
               <Badge variant="outline" className="ml-2 text-xs">
-                {TASK_TYPE_LABEL[task.task_type] ?? task.task_type}
+                {TASK_TYPE_LABELS[task.task_type]}
               </Badge>
             </CardTitle>
             <CardDescription className="text-xs">
@@ -126,25 +134,31 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
                     : "secondary"
             }
           >
-            {stateLabel[task.state] ?? task.state}
+            {TASK_STATUS_LABELS[task.state]}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
-        <div className="text-sm">
-          <span className="text-muted-foreground">开始动作：</span>
-          {task.starter_action}
+        <div className={featured ? "rounded-xl bg-accent/45 p-4" : "text-sm"}>
+          <span className="block text-xs font-medium text-muted-foreground">第一步</span>
+          <span className="mt-1 block text-sm font-medium leading-6">{task.starter_action}</span>
         </div>
         <div className="text-sm">
-          <span className="text-muted-foreground">交付物：</span>
+          <span className="text-muted-foreground">完成标志：</span>
           {task.deliverable}
         </div>
+
+        {updateTask.isError && (
+          <div className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
+            {toUserFacingError(updateTask.error).message}
+          </div>
+        )}
 
         {/* 状态机操作 */}
         <div className="flex flex-wrap gap-2">
           {task.state === "pending" && (
-            <Button size="sm" onClick={startTask} disabled={updateTask.isPending}>
-              开始
+              <Button size={featured ? "default" : "sm"} onClick={startTask} disabled={updateTask.isPending} className={featured ? "w-full sm:w-auto" : ""}>
+              开始这一步
             </Button>
           )}
           {task.state === "in_progress" && (
@@ -200,7 +214,7 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>放弃 {task.title}</DialogTitle>
-              <DialogDescription>选一个最贴近的真实原因，便于后续调整。</DialogDescription>
+              <DialogDescription>选一个最贴近的真实原因，搭子会据此调整后续计划。</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div className="space-y-2">
@@ -219,7 +233,7 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="reason_text">具体说明（可空）</Label>
+                <Label htmlFor="reason_text">具体说明（{reason === "other" ? "必填" : "可空"}）</Label>
                 <Input
                   id="reason_text"
                   value={reasonText}
@@ -229,8 +243,8 @@ export function TaskCard({ task }: { task: TaskResponse }): JSX.Element {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="destructive" onClick={confirmAbandon} disabled={updateTask.isPending}>
-                确认放弃
+              <Button variant="outline" onClick={confirmAbandon} disabled={updateTask.isPending || (reason === "other" && reasonText.trim().length === 0)}>
+                今天先放下
               </Button>
             </DialogFooter>
           </DialogContent>

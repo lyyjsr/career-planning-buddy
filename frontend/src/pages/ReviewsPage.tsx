@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useMe } from "@/api/auth";
 import { useCreateReview, useReviews, useStartNextPlan } from "@/api/reviews";
@@ -23,6 +23,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { ReviewResponse } from "@/api/types";
+import { toUserFacingError } from "@/lib/errors";
 
 const MOOD_EMOJI = ["😞", "😕", "😐", "🙂", "😄"];
 
@@ -37,6 +38,7 @@ function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }
   const [blockers, setBlockers] = useState("");
   const [adjustmentRequest, setAdjustmentRequest] = useState("");
   const [freeText, setFreeText] = useState("");
+  const displayError = createReview.error === null ? null : toUserFacingError(createReview.error);
 
   function submit(): void {
     if (createReview.isPending) return;
@@ -112,6 +114,7 @@ function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }
           </div>
         </div>
         <DialogFooter>
+          {displayError !== null && <p className="mr-auto text-sm text-destructive">{displayError.message}</p>}
           <Button onClick={submit} disabled={createReview.isPending}>
             {createReview.isPending ? "提交中…" : "提交复盘"}
           </Button>
@@ -184,6 +187,7 @@ export function ReviewsPage(): JSX.Element {
   const startNext = useStartNextPlan();
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const hasPlan =
     me.data?.profile_complete === true && (me.data?.active_plan ?? activePlan.data) !== null;
@@ -195,11 +199,10 @@ export function ReviewsPage(): JSX.Element {
       { reviewId, idempotencyKey: `next-${Date.now()}` },
       {
         onSuccess: () => {
-          window.location.href = "/today";
+          navigate("/today");
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : "触发 replan 失败";
-          setError(msg);
+          setError(toUserFacingError(err).message);
         },
       }
     );
@@ -210,9 +213,9 @@ export function ReviewsPage(): JSX.Element {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">复盘</h1>
+    <div className="mx-auto max-w-3xl space-y-5">
+      <div className="flex items-end justify-between gap-4">
+        <div><p className="text-sm font-medium text-primary">看见真实节奏</p><h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">复盘</h1><p className="mt-2 text-sm text-muted-foreground">不是评判完成多少，而是让下一步更合适。</p></div>
         {hasPlan && (
           <Button size="sm" onClick={() => setShowForm(true)}>
             新建复盘
