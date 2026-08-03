@@ -7,6 +7,10 @@
 
 本文件不重复 `docs/review/revision-report.md` 的早期设计稿一致性审查，只记录**当前交付版本的真实缺口**，用于指导后续迭代。
 
+> **更新日志**
+> - 2026-08-03 (初版)：9 个 commit 基线评估。
+> - 2026-08-03 (增量)：commit `9a9b1c2` / `a382247` 后再次核对前端，**P-3、E-2 已做掉；P-0、E-3 部分缓解；E-6 未动。详见各表格的"最新状态"列**。
+
 ---
 
 ## 0. 基线状态摘要
@@ -35,15 +39,15 @@
 
 ### 1.2 产品缺口（按优先级）
 
-| ID | 优先级 | 缺口 | 影响 |
-|---|---|---|---|
-| P-0 | P0 | 无 landing page / 无 demo 入口 / guest 登录是隐藏的 | 无法做用户测试，没人能自然进入产品 |
-| P-1 | P0 | `MemoryCandidatesPage` 永远空（`distill_evidence` 未实现，候选写入路径完全缺失） | 用户看到的"记忆"页面永远无数据，强破坏产品承诺 |
-| P-2 | P1 | "今天"之外的"未来 N 周"无 sense-making 可视化，`weekly_focus` 只在 Plan 详情里列文本 | 产品退化为 Todo + LLM，体现不出"规划"价值 |
-| P-3 | P1 | API error_code 直接打给用户（`PROVIDER_RATE_LIMITED` 等） | 无产品化错误恢复、无重试倒计时 |
-| P-4 | P1 | SSE 断线重连 UI 无视觉提示 | 用户无法感知 "重连中…" |
-| P-5 | P2 | 无 analytics 埋点 | 无法做漏斗分析、无法 measure iterate |
-| P-6 | P2 | `evals/datasets/stage5-v1.jsonl` 30 条固定 case 是开发者测试 | 不是真实用户 case 库，会过拟合 |
+| ID | 优先级 | 缺口 | 影响 | 最新状态 (2026-08-03 增量) |
+|---|---|---|---|---|
+| P-0 | P0 | 无 landing page / 无 demo 入口 / guest 登录是隐藏的 | 无法做用户测试，没人能自然进入产品 | 🟡 部分：新增 `/me`（MyPage）作为个人 dashboard，提供导航枢纽 + 计划数/任务数汇总；但仍非面向新用户的 landing page，guest 登录仍自动触发 |
+| P-1 | P0 | `MemoryCandidatesPage` 永远空（`distill_evidence` 未实现） | 用户看到的"记忆"页面永远无数据，强破坏产品承诺 | ❌ 未动 |
+| P-2 | P1 | "今天"之外的"未来 N 周"无 sense-making 可视化，`weekly_focus` 只在 Plan 详情里列文本 | 产品退化为 Todo + LLM，体现不出"规划"价值 | ❌ 未动 |
+| P-3 | P1 | API error_code 直接打给用户（`PROVIDER_RATE_LIMITED` 等） | 无产品化错误恢复、无重试倒计时 | ✅ **已闭环**：`frontend/src/lib/errors.ts` 把后端 error_code 映射到中文友好提示 + 重试建议，3 个 vitest 守护；各 page 改用 `toUserMessage()` |
+| P-4 | P1 | SSE 断线重连 UI 无视觉提示 | 用户无法感知 "重连中…" | ❌ 未动 |
+| P-5 | P2 | 无 analytics 埋点 | 无法做漏斗分析、无法 measure iterate | ❌ 未动 |
+| P-6 | P2 | `evals/datasets/stage5-v1.jsonl` 30 条固定 case 是开发者测试 | 不是真实用户 case 库，会过拟合 | ❌ 未动 |
 
 ### 1.3 流程完善度（PM 视角）
 
@@ -73,15 +77,15 @@
 
 ### 2.2 工程层缺口（nit 级，不影响交付，影响长期维护）
 
-| ID | 优先级 | 缺口 | 建议 |
-|---|---|---|---|
-| E-0 | P1 | `agent/graph.py` 709 行，单类塞了拓扑构造 + 10 节点回调 + 候选生成 + repair 全部逻辑 | 拆到 `agent/nodes/` 子模块（设计 §15 自己建议过但未落地）|
-| E-1 | P1 | `MockPlanningProvider` 里 `generate_plan` / `generate_agent_turn` 含大段 copy-paste | 抽 `_descent_candidate()` 公共方法 |
-| E-2 | P2 | 中文 label 表（`STATUS_LABEL`）散落 4+ 处页面重复 | 提到 `frontend/src/lib/labels.ts` |
-| E-3 | P2 | `HomePage.tsx` 当前 router 没人路由到它（已切到 PlansPage），但 `HomePage.test.tsx` 还在测它 | 删除或接回路由 |
-| E-4 | P2 | 测试基础设施 `runtime_factory` / savepoint 模式在 conftest 和 runtime 测试里重复 | DRY，提 shared fixture |
-| E-5 | P2 | OpenAPI snapshot 是手维护，schema 改时无 PR 模板提醒同步 | 加 PR checklist 或 CI 自动 diff |
-| E-6 | P3 | 前端 `TodayPage` 240 行手写 5 种 Run 状态条件渲染 | 抽 `useRunLifecycle` hook |
+| ID | 优先级 | 缺口 | 建议 | 最新状态 (2026-08-03 增量) |
+|---|---|---|---|---|
+| E-0 | P1 | `agent/graph.py` 709 行，单类塞了拓扑构造 + 10 节点回调 + 候选生成 + repair 全部逻辑 | 拆到 `agent/nodes/` 子模块（设计 §15 自己建议过但未落地）| ❌ 未动 |
+| E-1 | P1 | `MockPlanningProvider` 里 `generate_plan` / `generate_agent_turn` 含大段 copy-paste | 抽 `_descent_candidate()` 公共方法 | ❌ 未动 |
+| E-2 | P2 | 中文 label 表（`STATUS_LABEL`）散落 4+ 处页面重复 | 提到 `frontend/src/lib/labels.ts` | ✅ **已闭环**：`frontend/src/lib/labels.ts`（47 行）集中了 STATUS / TASK_TYPE / ABANDONED_REASON 等映射，TodayPage / PlanDetailPage / PlansPage / TaskCard 已切换引用 |
+| E-3 | P2 | `HomePage.tsx` 当前 router 没人路由到它（已切到 PlansPage），但 `HomePage.test.tsx` 还在测它 | 删除或接回路由 | 🟡 部分：MyPage 接管了"首页 dashboard"角色，HomePage 在 router 里仍无用，但其测试仍跑——仍待清理 |
+| E-4 | P2 | 测试基础设施 `runtime_factory` / savepoint 模式在 conftest 和 runtime 测试里重复 | DRY，提 shared fixture | ❌ 未动 |
+| E-5 | P2 | OpenAPI snapshot 是手维护，schema 改时无 PR 模板提醒同步 | 加 PR checklist 或 CI 自动 diff | ❌ 未动 |
+| E-6 | P3 | 前端 `TodayPage` 240 行手写 5 种 Run 状态条件渲染 | 抽 `useRunLifecycle` hook | ❌ 未动（ThisPage 改用 lib/errors 后略瘦，但仍 200+ 行，未抽 hook） |
 
 ---
 
@@ -234,15 +238,22 @@
 2. AG-1 prompt 加 few-shot（1 小时）
 3. A-0 spec 标 Stage 6 未交付（5 分钟）
 4. CI-0 加 weekly 真模型回归（半天）
+5. E-3 删除 HomePage dead code + 测试（5 分钟）
 
 **2-4 周**（产品化）：
-5. P-0 landing page + demo 入口
-6. P-1 接通 distill_evidence 让 MemoryCandidates 有数据
-7. AG-3 意图路由 LLM fallback
-8. AG-6 LLM-as-judge Eval
+6. P-0 真正的 landing page + demo 入口（MyPage 已是 dashboard，但缺面向新用户的入口）
+7. P-1 接通 distill_evidence 让 MemoryCandidates 有数据
+8. AG-3 意图路由 LLM fallback
+9. AG-6 LLM-as-judge Eval
 
 **1-3 个月**（品质化）：
-9. AG-2 validator 改 scoring
-10. AG-4 Best-of-N decoding
-11. AG-5 Targeted Repair
-12. 多副本 / 监控 / 备份
+10. AG-2 validator 改 scoring
+11. AG-4 Best-of-N decoding
+12. AG-5 Targeted Repair
+13. 多副本 / 监控 / 备份
+
+> **已完成（2026-08-03 增量）**
+> - ✅ P-3：API error_code → 中文友好提示（`lib/errors.ts`）
+> - ✅ E-2：中文 label 集中（`lib/labels.ts`）
+> - 🟡 P-0 部分：MyPage 接管 dashboard 角色
+> - 🟡 E-3 部分：MyPage 接管后再清理 HomePage 即可闭环
