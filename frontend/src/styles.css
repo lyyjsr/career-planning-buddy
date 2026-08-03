@@ -5,25 +5,25 @@
 @layer base {
   :root {
     /* Calming 青绿 + 暖灰：契合"求职焦虑"语境，避免红绿对比刺激 */
-    --background: 180 20% 99%;
-    --foreground: 200 25% 18%;
+    --background: 80 16% 97%;
+    --foreground: 201 28% 16%;
 
     --card: 0 0% 100%;
     --card-foreground: 200 25% 18%;
 
-    --primary: 173 58% 39%;
+    --primary: 174 66% 29%;
     --primary-foreground: 180 50% 98%;
 
     --secondary: 200 20% 94%;
     --secondary-foreground: 200 25% 22%;
 
     --muted: 200 16% 94%;
-    --muted-foreground: 200 12% 42%;
+    --muted-foreground: 198 11% 43%;
 
-    --accent: 173 40% 92%;
+    --accent: 170 35% 91%;
     --accent-foreground: 200 30% 22%;
 
-    --destructive: 12 60% 50%;
+    --destructive: 3 44% 49%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 200 18% 88%;
@@ -33,7 +33,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 200 25% 18%;
 
-    --radius: 0.6rem;
+    --radius: 1rem;
   }
 
   .dark {
@@ -63,7 +63,20 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply overflow-x-hidden bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
   }
 }

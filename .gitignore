@@ -15,6 +15,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+# Keep the React application's source helpers; the generic Python template rule above
+# otherwise hides new TypeScript files under frontend/src/lib.
+!frontend/src/lib/
+!frontend/src/lib/*.ts
 lib64/
 parts/
 sdist/
@@ -243,3 +247,4 @@ tmp/
 *.swp
 *.swo
 *~
+output/
