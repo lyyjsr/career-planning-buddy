@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = Field(default=1440, ge=1, le=10080)
     jwt_issuer: str = "career-planning-buddy"
     agent_graph_version: str = Field(default="stage5-v1", min_length=1, max_length=64)
-    agent_feature_stage: Literal[4, 5] = 5
+    agent_feature_stage: int = Field(default=5, ge=4, le=5)
     llm_provider: Literal["mock", "openai_compatible"] = "mock"
     llm_api_key: SecretStr | None = Field(default=None, min_length=1)
     llm_base_url: AnyHttpUrl | None = None
