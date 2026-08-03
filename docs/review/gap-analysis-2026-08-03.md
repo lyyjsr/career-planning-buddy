@@ -1,16 +1,16 @@
-# Gap Analysis 与严肃升级路线（严肃版本）
+# Gap Analysis 与升级路线
 
 > 评估时间：2026-08-03（含 2026-08-03 增量更新）
-> 视角：开发工程师 / 架构师 / **Agent 算法工程师**
+> 视角：开发工程师 / 架构师 / Agent 算法
 > 基线：分支 `feat/sdd-docs-migration-ly-dev`，HEAD `128d35e`：含 docker 部署修复、真模型 GLM-4.7 接入、产品 UI（Today/Plan/Reviews/Memories/MyPage/ProfileSettings）、18 个新增单测、配置/CI 修补
 > 评估方法：基于实际代码行号 + 人工静态审查 + 真模型 E2E + 调研论文/成熟项目对照
 
-本文件**不是工程自查 todo 清单**（保留原 gap-analysis 体例），而是严肃的算法/工程升级路线图：每条缺口都对照成熟项目或论文，方案描述可执行（给函数签名/参数/算法步骤），并标了**面向"Agent 研发工程师/算法工程师"岗位作品集**时的展示价值。文档目的是让"做出 MVP 后想再上一个台阶"的迭代可被规划、可被验证、可对外沉淀。
+本文件为本仓库交付版本的结构化差距分析与升级路线图。与 `docs/review/revision-report.md` 的早期设计稿一致性审查正交，本文件聚焦当前交付版本的真实缺口，要求每条缺口均：(a) 对照成熟项目或论文给出外部参照；(b) 提供可执行的升级方案（函数签名、参数取值、算法步骤）；(c) 标明工程展示价值，使后续迭代可规划、可验证、可对外沉淀。
 
 > **更新日志**
-> - 2026-08-03 初版：9 commit 4 视角 gap analysis。
-> - 2026-08-03 增量：commit `9a9b1c2` / `a382247` 后再核对前端，P-3 / E-2 闭环，P-0 / E-3 部分缓解。
-> - **2026-08-03 严肃版（本版）**：整体重写，加入论文引用 + 代码级方案 + 作品集维度。
+> - 2026-08-03 初版：9 commit 4 视角差距分析。
+> - 2026-08-03 增量：commit `9a9b1c2` / `a382247` 前端复核，P-3 / E-2 闭环，P-0 / E-3 部分缓解。
+> - **2026-08-03 v2（本版）**：重写，补全论文引用、代码级方案与工程展示价值维度。
 
 ---
 
@@ -21,7 +21,7 @@
 | 后端规模 | 79 个 Python 文件（含 tests/evals），101 个 pytest pass，5 秒内完成 |
 | 前端规模 | 12 个业务页面/组件 + 9 个 shadcn 组件 + 7 个 API 模块 + 9 vitest pass |
 | Agent 形态 | workflow（10 节点 + 条件边）+ 单一 LLM-生成节点（`app/agent/graph.py` 共 709 行）|
-| 向量检索基础设施 | pgvector 迁移（`20260731_0006`）建表 + HNSW 索引；`EvidenceRepository.memory_lookup` **已支持** cosine_distance 查 memory，但 `_build_context` 主链路未调用 → 板凳深度充足（详见 §3） |
+| 向量检索基础设施 | pgvector 迁移（`20260731_0006`）建表 + HNSW 索引；`EvidenceRepository.memory_lookup` 已支持 `cosine_distance` 查询 memory，但 `_build_context` 主链路未调用 → 检索能力已就绪但未接入（详见 §3） |
 | 几个被网络认作"幻觉"的 spec | `quality_reviewer.spec.md` / `distill_evidence.spec.md` 在 `app/` 里 **0 行代码**（grep 全空），属"文档领先代码" |
 | 真模型验证 | GLM-4.7 端到端 completed（~15s），但 CI 仍全程 mock |
 
@@ -43,12 +43,12 @@
 | P-0 | P0 | 无面向新用户的 landing page / demo 入口 / guest 自动登录 | 无法做用户测试 | 🟡 部分：`/me`（MyPage）已承担 dashboard；仍非新用户入口 |
 | P-1 | P0 | `MemoryCandidatesPage` 永远空（`distill_evidence` 未实现） | 用户"记忆"页无数据 | ❌ 未动 |
 | P-2 | P1 | "未来 N 周"无 sense-making 可视化，`weekly_focus` 只在 Plan 详情里列文本 | 退化为 Todo + LLM | ❌ 未动 |
-| P-3 | P1 | API error_code 直接打给用户 | 无产品化错误恢复 | ✅ 已闭环：`frontend/src/lib/errors.ts` 58 行 + 3 vitest |
+| P-3 | P1 | API error_code 直接暴露给终端用户 | 无产品化错误恢复机制 | ✅ 已闭环：`frontend/src/lib/errors.ts`（58 行）+ 3 个 vitest |
 | P-4 | P1 | SSE 断线重连 UI 无视觉提示 | 用户感知不到重连中 | ❌ 未动 |
 | P-5 | P2 | 无 analytics 埋点 | 无漏斗分析 | ❌ 未动 |
 | P-6 | P2 | 30 条 Eval 是开发者 fixture，会过拟合 | 不是用户 case 库 | ❌ 未动 |
 
-**作品集建议**：在简历/作品页可强调"**单回路 + 四态降级 + safe_response 安抚设计**"——这是大多数 demo 级 Agent 不会考虑的工程意识。
+**工程展示价值**：单回路状态机、四态降级与 safe_response 安抚设计是多数 demo 级 Agent 不会考虑的工程化要素，可作为生产级 LLM 应用的代表性实践对外呈现。
 
 ---
 
@@ -84,7 +84,7 @@
 |---|---|
 | 确定性骨架 + 受控 LLM（workflow not agent）| ✅ 与 [Anthropic "Building Effective Agents" (2024)](https://www.anthropic.com/research/building-effective-agents) "选择最简单可行方案"原则一致 |
 | 不可变快照（`RunInputSnapshot` + `RuntimeConfigSnapshot`）支持 Replay | ✅ Eval 可信根基，类似 LangSmith / Langfuse 的 trace replay |
-| 事件溯源 + 原子序号 + terminal-last 事务 | ✅ 可重新构造 Run 历史；与 LangGraph checkpoint 异曲同工 |
+| 事件溯源 + 原子序号 + terminal-last 事务 | ✅ 可重建 Run 历史，与 LangGraph checkpoint 模式同源 |
 | Budget 防御纵深（LLM 调用次数 + Token + deadline + CT）| ✅ production-grade 思路，绝大多数 demo 不做 |
 | Provider Protocol | ✅ 切厂商零代码改动（已实测 DeepSeek↔GLM↔Qwen） |
 
@@ -92,23 +92,23 @@
 
 | ID | 优先级 | 缺口 | 影响 | 代码级位置 |
 |---|---|---|---|---|
-| **A-0** | **P0** | **幽灵 spec 节点** `quality_reviewer.spec.md` / `distill_evidence.spec.md` 在代码里完全不存在 | 严重诚实问题：spec 声称闭环，git grep 0 行实现 | `docs/model-design/agent-nodes/*.spec.md` 对比 `app/agent/graph.py` 节点列表 |
-| A-1 | P0 | 单 Worker 假设：SSE 0.05s DB 轮询；`recover_interrupted` 多副本冲突；乐观锁无并发冲突处理 | 多副本即翻车 | `app/services/agent_runs.py:stream_events` |
-| A-2 | P1 | `ToolRegistry._reuse` 用 `tool_name + args_hash` 去重，不含 Tool 内部状态（如 memory 已更新）| Review→replan 时返回过期 evidence（ABA 隐患） | `app/tools/registry.py:_reuse` |
-| A-3 | P1 | `BudgetGuard.record_llm_call` 用 `tokens_in + tokens_out`，但 reasoning_tokens 不在 completion_tokens 里 | GLM/DeepSeek 关不掉 reasoning 时账错 | `app/harness/budget.py` + `providers/llm.py:_extract_usage` |
-| A-4 | P1 | Replay ≠ 真复现：replay 时只读 `tool_calls` 历史 fixture，不重调 Tool | 文档没承认落差 | `evals/runner.py` |
-| A-5 | P2 | `api/auth.py:get_me` 跨 3 个 service | 应有 `MeAggregateService` | 我自己引入的债，可清 |
-| A-6 | P2 | 前端缺状态层抽象 | `useRunLifecycle` | `TodayPage.tsx:115-180` |
+| **A-0** | **P0** | spec 节点缺失实现：`quality_reviewer.spec.md` / `distill_evidence.spec.md` 在代码层完全不存在 | 文档与实现的诚实度问题，spec 声称闭环但代码 grep 0 行 | `docs/model-design/agent-nodes/*.spec.md`、`app/agent/graph.py` |
+| A-1 | P0 | 单 Worker 假设：SSE 0.05s DB 轮询；`recover_interrupted` 多副本会重复抢救同一批 Run；乐观锁 `version+1` 未处理并发冲突 | 多副本部署即异常 | `app/services/agent_runs.py:stream_events` |
+| A-2 | P1 | `ToolRegistry._reuse` 用 `tool_name + args_hash` 去重，不包含 Tool 内部状态（如 memory 表已更新）| Review → replan 路径可能返回过期 evidence（ABA 隐患） | `app/tools/registry.py:_reuse` |
+| A-3 | P1 | `BudgetGuard.record_llm_call` 用 `tokens_in + tokens_out`，但 reasoning models 的 `reasoning_tokens` 未计入 `completion_tokens` | 关不掉 reasoning 时预算计量不准确 | `app/harness/budget.py`、`providers/llm.py:_extract_usage` |
+| A-4 | P1 | Replay 不等同真实复现：replay 时只读 `tool_calls` 历史 fixture，不重新调用 Tool | 文档未显式说明此落差 | `evals/runner.py` |
+| A-5 | P2 | `api/auth.py:get_me` 直接跨 3 个 service | 应由 `MeAggregateService` 统一封装 | `app/api/auth.py` |
+| A-6 | P2 | 前端缺统一状态层抽象，5 种 Run 终态在 `TodayPage` 内手写条件渲染 | 应抽象为 `useRunLifecycle` hook | `TodayPage.tsx:115-180` |
 
 ---
 
-## 4. Agent 算法视角（严肃版核心章节）
+## 4. Agent 算法视角（核心章节）
 
 ### 4.1 形态定位：workflow + 单一受控 LLM 节点
 
 按 [Anthropic, 2024] 的分类：本项目属于 **"Evaluator-Optimizer" 工作流**（"LLM 生成，另一组规则做评估与反馈，直到质量满足，否则降级"）。这与中国/海外主流"做事 Agent"（Devin、Manus、Claude Code）不是同一赛道——它们是 [Plan-and-Execute / ReAct] 类真 Agent。选定 workflow 而非 agent 是**正确取舍**：因为本系统**输出 plan 而非执行 action**，可控性 > 自由度。
 
-但形态选对不等于算法层没空间。下面把"7 层 Agent 路径"逐层对照当下 SOTA。
+但形态选对不等于算法层无优化空间。下面将"7 层 Agent 路径"逐层对照当前 SOTA。
 
 ```
 [L1 输入] 意图 + 槽位 + 安全过滤
@@ -159,7 +159,7 @@ async def _retrieve_memory(self, user_id, query, context_tokens):
 
 **Recency 函数**：指数衰减 `exp(-Δdays / 14)`——14 天半衰期符合"求职场景用户记忆"。
 
-**作品集建议**：展示"time-decayed + relevance-scored retrieval with token budget awareness"——这是 [Anthropic Contextual Retrieval (2024)](https://www.anthropic.com/news/contextual-retrieval) 落地在自己项目的样子。
+**工程展示价值**：构成"带时间衰减与相关性加权、token 预算感知的检索"完整链路，与 [Anthropic Contextual Retrieval (2024)](https://www.anthropic.com/news/contextual-retrieval) 所倡导的工程实践对齐。
 
 #### **AG-1：Prompt 工程深度升级**
 
@@ -232,7 +232,7 @@ def aggregate(scores) -> tuple[bool, str | None]:
 - [Constitutional AI (Anthropic 2022)](https://arxiv.org/abs/2212.08073)：用一组带权原则打分而非硬约束
 - [Self-Refine (Madaan et al. 2023)](https://arxiv.org/abs/2303.17651)：反馈从"错/对"改为"具体维度的具体分数"能让 refinement 更针对
 
-**实现成本**：2 天。先把 13 条全 → 打分型，再加 threshold + soft-pass 路径（>50% severity 才 fail，否则放走）。
+**实现成本**：2 天。先将 13 条规则改造为打分型，再加入 threshold 与 soft-pass 路径（severity 累计 > 50% 才判定失败，否则放行）。
 
 ### 4.3 其余算法缺口（按 ROI 排序）
 
@@ -249,20 +249,20 @@ def aggregate(scores) -> tuple[bool, str | None]:
 
 ## 5. RAG / 检索视角（独立章节）
 
-项目已用 pgvector 但只走到"板凳深度"，离 production RAG 还差三层：
+项目已接入 pgvector，但仅完成向量存储与索引构建，距离生产级 RAG 仍有三层差距：
 
 | 层 | 现状 | SOTA 实践 | 论文/工具 |
 |---|---|---|---|
 | **Query Rewriting** | 直接 embed 用户原文 | HyDE（假设性文档）/ step-back prompting | [HyDE (Gao et al. 2022)](https://arxiv.org/abs/2212.10496) |
 | **Retrieval** | 仅 vector cosine | Hybrid: BM25 + vector；re-rank | [Cohere Rerank / bge-reranker](https://github.com/FlagOpen/FlagEmbedding) |
-| **Context Placement** | 不感知 lost-in-the-middle | 把 evidence 放开头/结尾，中间放次要 | [Liu et al. 2023, Lost in the Middle](https://arxiv.org/abs/2307.03172) |
+| **Context Placement** | 不感知 lost-in-the-middle | evidence 放置于上下文首尾，中间留次要内容 | [Liu et al. 2023, Lost in the Middle](https://arxiv.org/abs/2307.03172) |
 | **Chunking** | 整段 context 拼接 | sentence-window + parent-doc retriever | [LlamaIndex chunking strategies](https://docs.llamaindex.ai/) |
 
 **最高 ROI**：AG-0 接通 cosine + 加 lost-in-the-middle 排序（半天完成）。HyDE / Hybrid Search 列为 Stage 6+ 优化。
 
 ---
 
-## 6. Eval 视角（严肃版）
+## 6. Eval 视角
 
 ### 6.1 当前 Eval 评估：**L1+L2 级，缺 L3-L5**
 
@@ -322,7 +322,7 @@ jobs:
         with: {name: eval-report}
 ```
 
-**作品集建议**：这套 L3+L4+L5 是绝大多数 Agent demo 缺位的，问面试官"你们项目如何做 quality regression"时拿这个回答非常有分量。
+**工程展示价值**：L3/L4/L5 三层评估体系是当前多数 Agent 项目缺位的环节，体现的是"从 mock 自洽到真实质量度量"的工程闭环能力。
 
 ---
 
@@ -352,8 +352,8 @@ jobs:
 
 | 层 | 评价 |
 |---|---|
-| 工程 | 顶级 MVP 梯队：分层、类型、契约、测试、降级，打败 90% 开源 Agent demo |
-| 产品 | 停留在 demo 阶段，0 真实用户；memory_candidates 永远空是强破坏 |
+| 工程 | 分层、类型、契约、测试、降级齐全，工程实现质量在 MVP 体量项目中处于上游水平 |
+| 产品 | 停留在 demo 阶段，0 真实用户；`memory_candidates` 永远为空，与 spec 声明不一致 |
 | 算法 | 骨架对、深度浅：向量检索基础设施齐了没接通，prompt 0 个 few-shot，validator 全 boolean，无 LLM-as-judge，无反馈闭环 |
 
 ### 对标样本
@@ -370,7 +370,7 @@ jobs:
 
 ## 9. 严肃升级路线（按时间窗口）
 
-### Week 1（立竿见影，作品集级）
+### Week 1（高 ROI，技术亮点级）
 
 | # | 改进 | 论文/对照 | 成本 |
 |---|---|---|---|
@@ -380,7 +380,7 @@ jobs:
 | 4 | **CI-0** weekly 真模型回归 workflow | Anthropic evals 实践 | 半天 |
 | 5 | **AG-3** route_intent 加 LLM fallback | Anthropic Routing pattern | 半天 |
 
-**Week 1 完成后**：作品集可写"**生产级 Agent with MemGPT-style retrieval + CoT prompting + 真模型回归 CI**"——这是绝大多数贴着 LangChain 教程做的项目到不了的层次。
+**Week 1 完成后**：系统具备"MemGPT 式记忆检索 + CoT Prompt 工程 + 真模型回归 CI"三项核心能力，可对外构成完整的生产级 Agent 工程实践样本。
 
 ### Week 2-4（产品化 + Eval 升级）
 
@@ -432,8 +432,8 @@ jobs:
 
 ---
 
-## 11. 一句话总结
+## 11. 总结
 
-> **这是工程上的 A、产品上的 C+、算法上的 B- 项目。骨架（受控 Agent + 事件溯源 + 不可变快照）是生产级姿势；算法面（记忆检索未接通、prompt 0 few-shot、validator 全 boolean、无 LLM-as-judge）离 production-grade Agent 还有 2-4 周密集迭代的距离。**
+> **本项目在工程层达到生产级实现标准（受控 Agent + 事件溯源 + 不可变快照 + 预算防御纵深）；算法层在骨架完整的基础上存在明确的深度优化空间（记忆检索基础设施未接通、Prompt 缺失 Few-Shot 与 CoT、Validator 全部为 boolean 约束、缺少 LLM-as-Judge 评估）；产品层尚处于 demo 阶段，未进入真实用户验证。**
 >
-> **可执行的最佳下一步是 Week 1 的 5 件事**——做完即从"工程自洽"跳到"算法面合格"，并且每一项都能在简历/作品集上单独成条展示。
+> **可执行的最佳下一步为 Week 1 的 5 项工作。完成后系统将从"工程自洽"演进至"算法层达到同类项目平均水平"，且每项改进均构成可独立对外呈现的技术能力点。**
