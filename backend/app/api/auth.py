@@ -1,17 +1,17 @@
 """Guest authentication and current-user HTTP endpoints."""
 
-from typing import Annotated
 from datetime import date
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     get_auth_service,
     get_current_user,
-    get_db_session,
     get_profile_service,
 )
+from app.core.database import get_db_session
 from app.core.exceptions import AppError
 from app.core.security import AuthenticatedUser
 from app.repositories.agent_runs import AgentRunRepository

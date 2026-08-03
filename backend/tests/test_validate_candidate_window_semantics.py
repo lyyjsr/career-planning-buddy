@@ -4,7 +4,7 @@ These tests pin the bug fix that lets a real LLM spread tasks across the
 1~8 week planning window while still enforcing each individual day's budget.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from uuid import uuid4
 
 from app.agent.nodes import build_planning_context, validate_candidate
@@ -13,6 +13,7 @@ from app.schemas.agent_runs import (
     PlanningContext,
     ProfileContext,
     TaskCandidate,
+    ValidationReport,
     WeeklyFocusCandidate,
 )
 from app.schemas.enums import CareerStage, GoalType, SkillLevel, TaskType
@@ -57,7 +58,13 @@ def _candidate(context: PlanningContext, tasks: list[TaskCandidate]) -> PlanCand
     )
 
 
-def _task(scheduled_date, minutes: int, *, title: str = "任务", deliverable: str = "产物") -> TaskCandidate:
+def _task(
+    scheduled_date: date,
+    minutes: int,
+    *,
+    title: str = "任务",
+    deliverable: str = "产物",
+) -> TaskCandidate:
     return TaskCandidate(
         title=title,
         task_type=TaskType.LEARNING,
@@ -69,7 +76,7 @@ def _task(scheduled_date, minutes: int, *, title: str = "任务", deliverable: s
     )
 
 
-def _failed_codes(report) -> list[str]:
+def _failed_codes(report: ValidationReport) -> list[str]:
     return [check.code for check in report.checks if not check.passed]
 
 

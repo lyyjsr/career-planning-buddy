@@ -91,8 +91,12 @@ def parse_horizon_weeks(message: str) -> int | None:
         return max(1, min(8, int(match.group(1))))
     chinese_match = re.search(r"(?:未来|接下来)?\s*([一二三四五六七八两半月])\s*周", message)
     if chinese_match:
-        chinese_map = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "半": 0, "月": 4}
-        return max(1, min(8, chinese_map[chinese_match.group(1)]))
+        cn = chinese_match.group(1)
+        chinese_map = {
+            "一": 1, "两": 2, "二": 2, "三": 3, "四": 4,
+            "五": 5, "六": 6, "七": 7, "八": 8, "半": 0, "月": 4,
+        }
+        return max(1, min(8, chinese_map[cn]))
     month_match = re.search(r"(?:未来|接下来)?\s*(\d+)\s*个?月", message)
     if month_match:
         return max(1, min(8, int(month_match.group(1)) * 4))

@@ -1,6 +1,5 @@
 """Authentication and current-user API contracts."""
 
-from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
