@@ -15,9 +15,9 @@ NODE_TIMEOUTS: dict[str, float] = {
     "clarification": 2,
     "safe_response": 2,
     "context_builder": 5,
-    "career_planning_agent": 30,
+    "career_planning_agent": 60,
     "rule_validator": 2,
-    "revise_or_fallback": 12,
+    "revise_or_fallback": 40,
     "companion_response": 2,
     "persist": 8,
 }

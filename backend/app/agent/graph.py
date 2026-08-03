@@ -487,18 +487,34 @@ class FixedPlanningGraph:
             )
             if force_final:
                 available_tools = []
-            raw = await self._provider.generate_agent_turn(
-                message=state["request"].message,
-                context=context,
-                replan_mode=mode,
-                available_tools=available_tools,
-                evidence_catalog=evidence_catalog,
-                force_final=force_final,
-            )
+            # 当本轮没有任何 Tool 时，走更轻量的 generate_plan prompt 路径
+            # （ProviderPlanResponse schema）。带 Tool 时才使用完整的 agent-turn prompt。
+            using_plan_path = not available_tools
+            if available_tools:
+                raw = await self._provider.generate_agent_turn(
+                    message=state["request"].message,
+                    context=context,
+                    replan_mode=mode,
+                    available_tools=available_tools,
+                    evidence_catalog=evidence_catalog,
+                    force_final=force_final,
+                )
+            else:
+                raw = await self._provider.generate_plan(
+                    message=state["request"].message,
+                    context=context,
+                    replan_mode=mode,
+                )
             usage = self._extract_usage(raw)
             self._budget.record_llm_call(usage.tokens_in, usage.tokens_out)
             total_usage = usage if total_usage is None else self._combine_usage(total_usage, usage)
             try:
+                if using_plan_path:
+                    response = ProviderPlanResponse.model_validate(raw)
+                    return NodeOutput(
+                        (response.candidate, evidence_catalog, tool_round, tool_call_count),
+                        self._telemetry(total_usage, prompt_version),
+                    )
                 turn = AgentTurnResponse.model_validate(raw)
             except ValidationError:
                 self._budget.claim_format_repair()
