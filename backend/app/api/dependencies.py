@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,17 +91,27 @@ async def get_current_user(
         HTTPAuthorizationCredentials | None,
         Depends(bearer_scheme),
     ],
+    request: Annotated[Request, "request"],
     session: Annotated[AsyncSession, Depends(get_db_session)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ) -> AuthenticatedUser:
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    raw_token: str | None = None
+    if credentials is not None and credentials.scheme.lower() == "bearer":
+        raw_token = credentials.credentials
+    else:
+        # SSE 端点（EventSource 无法设置 Header）通过 query 参数 ?access_token= 发凭证
+        query_token = request.query_params.get("access_token")
+        if isinstance(query_token, str) and query_token:
+            raw_token = query_token
+
+    if raw_token is None:
         raise AppError(
             code="AUTH_INVALID_TOKEN",
             message="a valid bearer token is required",
             status_code=401,
         )
 
-    user_id, _token_role = token_service.verify(credentials.credentials)
+    user_id, _token_role = token_service.verify(raw_token)
     user = await UserRepository(session).get_by_id(user_id)
     if user is None or not user.is_active:
         raise AppError(
