@@ -130,7 +130,7 @@ class SearchSource(Base):
 
     __tablename__ = "search_sources"
     __table_args__ = (
-        UniqueConstraint("run_id", "url", name="uq_search_sources_run_url"),
+        UniqueConstraint("run_id", "url_hash", name="uq_search_sources_run_url_hash"),
         CheckConstraint(
             "source_type IN ('official','job_board','blog','community','other')",
             name="ck_search_sources_type",
@@ -147,12 +147,54 @@ class SearchSource(Base):
         nullable=False,
     )
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str | None] = mapped_column(String(300))
     snippet: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     reliability: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_request_id: Mapped[str | None] = mapped_column(String(200))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExperienceAtomCandidate(Base):
+    """Source-backed reusable knowledge awaiting developer review."""
+
+    __tablename__ = "experience_atom_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','approved','rejected','expired')",
+            name="ck_experience_atom_candidates_status",
+        ),
+        UniqueConstraint("content_hash", name="uq_experience_atom_candidates_content_hash"),
+        Index("ix_experience_atom_candidates_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    goal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(String(300), nullable=False)
+    source_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    evidence_excerpt: Mapped[str] = mapped_column(String(300), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    proposed_by_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE")
+    )
+    approved_atom_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("experience_atoms.id", ondelete="SET NULL")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExperienceAtom(Base):

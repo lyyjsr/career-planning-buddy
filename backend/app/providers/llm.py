@@ -135,20 +135,8 @@ class OpenAICompatiblePlanningProvider:
             message=message,
             context=context,
             replan_mode=replan_mode,
+            evidence_catalog=evidence_catalog,
         )
-        if evidence_catalog:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "<evidence_catalog>\n"
-                    + json.dumps(
-                        [item.model_dump(mode="json") for item in evidence_catalog],
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    + "\n</evidence_catalog>",
-                }
-            )
         request_body: dict[str, object] = {
             "model": self._model,
             "messages": messages,

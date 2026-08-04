@@ -104,9 +104,7 @@ async def test_dev_trace_is_role_guarded_redacted_and_terminal_checked(
     await db_session.flush()
     dev_token = TokenService(get_settings()).issue(user_id=user.id, role="dev")
     listed = await api_client.get("/api/v1/dev/runs", headers=bearer(dev_token))
-    detailed = await api_client.get(
-        f"/api/v1/dev/runs/{run.id}", headers=bearer(dev_token)
-    )
+    detailed = await api_client.get(f"/api/v1/dev/runs/{run.id}", headers=bearer(dev_token))
 
     assert forbidden.status_code == HTTPStatus.FORBIDDEN
     assert listed.status_code == HTTPStatus.OK
@@ -228,9 +226,7 @@ async def test_dev_eval_api_lists_runs_and_reads_persisted_report(
     await db_session.flush()
     token = TokenService(get_settings()).issue(user_id=user.id, role="dev")
 
-    datasets = await api_client.get(
-        "/api/v1/dev/evals/datasets", headers=bearer(token)
-    )
+    datasets = await api_client.get("/api/v1/dev/evals/datasets", headers=bearer(token))
     started = await api_client.post(
         "/api/v1/dev/evals/experiments",
         json={"dataset_id": "stage5-v1", "case_limit": 1},

@@ -47,9 +47,7 @@ class DevTraceRepository:
     ) -> tuple[list[AgentStep], list[ToolCall], list[AgentEvent]]:
         steps = list(
             await self._session.scalars(
-                select(AgentStep)
-                .where(AgentStep.run_id == run_id)
-                .order_by(AgentStep.sequence)
+                select(AgentStep).where(AgentStep.run_id == run_id).order_by(AgentStep.sequence)
             )
         )
         tools = list(
@@ -61,9 +59,7 @@ class DevTraceRepository:
         )
         events = list(
             await self._session.scalars(
-                select(AgentEvent)
-                .where(AgentEvent.run_id == run_id)
-                .order_by(AgentEvent.sequence)
+                select(AgentEvent).where(AgentEvent.run_id == run_id).order_by(AgentEvent.sequence)
             )
         )
         return steps, tools, events

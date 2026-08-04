@@ -203,7 +203,7 @@ def test_provider_factory_switches_explicitly_without_fallback() -> None:
     assert real_snapshot.provider == "openai_compatible"
     assert real_snapshot.model_alias == "configured-model"
     assert real_snapshot.prompt_versions["career_planning"] == (
-        "openai_compatible_plan_stage4_v1"
+        "openai_compatible_plan_stage6_context_v1"
     )
 
 

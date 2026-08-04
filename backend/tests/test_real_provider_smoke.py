@@ -16,8 +16,7 @@ async def test_smoke_workflow_completes_with_provider_protocol(
         _env_file=None,
         app_env="test",
         database_url=(
-            "postgresql+asyncpg://career_buddy:career_buddy_local@"
-            "127.0.0.1:5432/career_buddy"
+            "postgresql+asyncpg://career_buddy:career_buddy_local@127.0.0.1:5432/career_buddy"
         ),
         jwt_secret="test-secret-with-at-least-32-characters",
         llm_provider="mock",

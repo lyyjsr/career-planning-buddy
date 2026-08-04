@@ -208,9 +208,7 @@ class DevTraceService:
                     attempt=source_step.attempt,
                     status=source_step.status,
                     prompt_version=source_step.prompt_version,
-                    model_id=(
-                        "mock-career-planner-v1" if source_step.model_id else None
-                    ),
+                    model_id=("mock-career-planner-v1" if source_step.model_id else None),
                     tokens_in=source_step.tokens_in,
                     tokens_out=source_step.tokens_out,
                     cost_cny=Decimal("0"),

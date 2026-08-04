@@ -39,9 +39,9 @@ class SnapshotService:
             ),
             prompt_versions={
                 "career_planning": (
-                    "openai_compatible_plan_stage4_v1"
+                    "openai_compatible_plan_stage6_context_v1"
                     if is_real
-                    else "mock_plan_stage4_v1"
+                    else "mock_plan_stage6_context_v1"
                 ),
                 "format_repair": (
                     "openai_compatible_format_repair_v1" if is_real else "mock_format_repair_v1"
@@ -58,6 +58,12 @@ class SnapshotService:
             max_output_tokens_per_call=settings.agent_max_output_tokens_per_call,
             deadline_seconds=settings.agent_deadline_seconds,
             node_timeouts_seconds=NODE_TIMEOUTS,
+            memory_semantic_retrieval_enabled=(settings.memory_semantic_retrieval_enabled),
+            memory_retrieval_limit=settings.memory_retrieval_limit,
+            memory_context_max_items=settings.memory_context_max_items,
+            memory_context_max_chars=settings.memory_context_max_chars,
+            memory_min_similarity=settings.memory_min_similarity,
+            memory_recency_half_life_days=(settings.memory_recency_half_life_days),
         )
 
     @staticmethod

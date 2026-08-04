@@ -81,3 +81,20 @@ def test_openai_compatible_configuration_is_validated_without_exposing_key() -> 
 def test_embedding_dimension_must_match_pgvector_migration() -> None:
     with pytest.raises(ValidationError, match="EMBEDDING_DIM must be 1024"):
         Settings(_env_file=None, embedding_dim=768)
+
+
+def test_memory_context_settings_are_bounded_and_snapshot_safe() -> None:
+    settings = Settings(
+        _env_file=None,
+        memory_semantic_retrieval_enabled=False,
+        memory_retrieval_limit=8,
+        memory_context_max_items=5,
+        memory_context_max_chars=1200,
+        memory_min_similarity=0.35,
+        memory_recency_half_life_days=14,
+    )
+
+    assert settings.memory_semantic_retrieval_enabled is False
+    assert settings.memory_context_max_items == 5
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, memory_context_max_items=6)

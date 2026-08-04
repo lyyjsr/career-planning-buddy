@@ -42,9 +42,7 @@ async def run_demo(base_url: str) -> dict[str, object]:
     suffix = uuid4().hex
     started = monotonic()
     async with httpx.AsyncClient(base_url=base_url, timeout=60, trust_env=False) as client:
-        login = await client.post(
-            "/api/v1/auth/guest", json={"device_id": f"stage5-demo-{suffix}"}
-        )
+        login = await client.post("/api/v1/auth/guest", json={"device_id": f"stage5-demo-{suffix}"})
         login.raise_for_status()
         login_body = login.json()
         token = str(login_body["access_token"])

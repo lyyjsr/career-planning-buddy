@@ -2,7 +2,9 @@
 
 ## 定位
 
-确定性只读节点。负责把数据库事实转换成受预算约束、可序列化、可回放的 `PlanningContext`。它不调用主模型，不执行 Web Search，也不写业务状态。
+确定性上下文节点。负责把数据库事实转换成受预算约束、可序列化、可回放的
+`PlanningContext`。它不调用主模型、不执行 Web Search、不创建业务实体；Stage 6A
+仅通过 Repository best-effort 更新被选中 Memory 的 `last_used_at` 使用元数据。
 
 ## Input
 
@@ -37,6 +39,8 @@ class PlanningContext(BaseModel):
     pinned_memories: list[MemoryContext]
     completed_facts: list[CompletedFact]
     blockers: list[str]
+    task_history_summary: str | None
+    review_history_summary: str | None
     timezone: str
     time_budget_minutes: int
     token_estimate: int
@@ -59,13 +63,14 @@ class PlanningContext(BaseModel):
 | Profile | 1 | 必须是当前用户最新 version |
 | Active/Source Plan | 各 1 | replan 的 source_plan 必须属于当前用户，可为 generated/active/completed |
 | Source Review | 1 | 从 `/reviews/{id}/start-next-plan` 创建时注入 |
-| Recent Tasks | 14 天内最多 30 | 优先 completed/abandoned/in_progress |
-| Recent Reviews | 最近 7 条 | 只取规划相关字段 |
-| Pinned Memories | 最多 5 | 仅 active、已确认、当前用户 |
+| Recent Tasks | 查询 30，完整保留最近 5 | 更早记录做确定性摘要 |
+| Recent Reviews | 查询 7，完整保留最近 2 | 更早记录只聚合重复 blocker/adjustment |
+| Selected Memories | 最多 5 / 1200 字符 | active、当前用户；pinned 优先，再做语义+时间衰减排序 |
 | Completed Facts | 最多 20 | 从任务事实确定性生成 |
 | Blockers | 最多 10 | 从 abandoned/review 结构化字段提取 |
 
-Stage 4 的更多 Memory/RAG/Search 由 Agent 通过 Tool 按需获取，避免 `context_builder` 与 Tool 重复检索。
+Stage 6A 自动检索与本次请求相关的长期 Memory；更广泛的 RAG/Search 仍由 Agent
+通过只读 Tool 按需获取。未确认 MemoryCandidate 永远不属于检索数据源。
 
 ## 预算和裁剪顺序
 
@@ -85,7 +90,7 @@ Profile > planning window > source/active plan > completed facts > 当前未完�
 ## 不变量
 
 - 所有查询按 user_id 过滤；
-- 不更新 memory.last_used_at 等业务字段；
+- 除选中 Memory 的 `last_used_at` 外不更新业务字段；该更新失败不得阻塞 Run；
 - 不把高风险原文写入上下文快照；
 - 不把搜索结果或模型输出伪装成数据库事实；
 - replan 必须包含 source_plan、completed_facts 与 blockers；

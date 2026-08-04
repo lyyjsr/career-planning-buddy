@@ -5,11 +5,11 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.evidence import ExperienceAtom, Memory, SearchSource
+from app.models.evidence import ExperienceAtom, ExperienceAtomCandidate, Memory, SearchSource
 
 
 class EvidenceRepository:
@@ -56,11 +56,31 @@ class EvidenceRepository:
             Memory.status == "active",
         )
         if terms:
-            statement = statement.where(Memory.summary.ilike(f"%{terms[0]}%"))
+            statement = statement.where(or_(*(Memory.summary.ilike(f"%{term}%") for term in terms)))
         memory_rows = await self._session.scalars(
             statement.order_by(Memory.updated_at.desc()).limit(limit)
         )
         return [(memory, 0.5) for memory in memory_rows]
+
+    async def touch_memories(
+        self,
+        *,
+        user_id: UUID,
+        memory_ids: list[UUID],
+        used_at: datetime,
+    ) -> None:
+        if not memory_ids:
+            return
+        await self._session.execute(
+            update(Memory)
+            .where(
+                Memory.user_id == user_id,
+                Memory.status == "active",
+                Memory.id.in_(memory_ids),
+            )
+            .values(last_used_at=used_at)
+        )
+        await self._session.flush()
 
     async def rag_retrieve(
         self,
@@ -68,6 +88,7 @@ class EvidenceRepository:
         goal_type: str,
         vector: list[float],
         limit: int,
+        min_similarity: float = 0.35,
     ) -> list[tuple[ExperienceAtom, float]]:
         distance = ExperienceAtom.embedding.cosine_distance(vector)
         rows = await self._session.execute(
@@ -76,6 +97,7 @@ class EvidenceRepository:
                 ExperienceAtom.goal_type == goal_type,
                 ExperienceAtom.is_active.is_(True),
                 ExperienceAtom.embedding.is_not(None),
+                distance <= 1 - min_similarity,
             )
             .order_by(distance)
             .limit(limit)
@@ -87,30 +109,41 @@ class EvidenceRepository:
         *,
         run_id: UUID,
         url: str,
+        url_hash: str,
+        content_hash: str,
         title: str | None,
         snippet: str,
         source_type: str,
         reliability: float,
         provider: str,
         retrieved_at: datetime,
+        provider_request_id: str | None = None,
+        published_at: datetime | None = None,
     ) -> SearchSource:
         statement = (
             insert(SearchSource)
             .values(
                 run_id=run_id,
                 url=url,
+                canonical_url=url,
+                url_hash=url_hash,
                 title=title,
                 snippet=snippet,
                 source_type=source_type,
                 reliability=Decimal(str(reliability)),
                 provider=provider,
+                content_hash=content_hash,
+                provider_request_id=provider_request_id,
+                published_at=published_at,
                 retrieved_at=retrieved_at,
             )
-            .on_conflict_do_nothing(index_elements=["run_id", "url"])
+            .on_conflict_do_nothing(index_elements=["run_id", "url_hash"])
         )
         await self._session.execute(statement)
         source = await self._session.scalar(
-            select(SearchSource).where(SearchSource.run_id == run_id, SearchSource.url == url)
+            select(SearchSource).where(
+                SearchSource.run_id == run_id, SearchSource.url_hash == url_hash
+            )
         )
         if source is None:
             raise RuntimeError("SearchSource upsert did not return a row")
@@ -121,6 +154,55 @@ class EvidenceRepository:
             select(SearchSource)
             .where(SearchSource.run_id == run_id)
             .order_by(SearchSource.retrieved_at, SearchSource.id)
+        )
+        return list(rows)
+
+    async def sources_by_ids(self, *, run_id: UUID, source_ids: list[UUID]) -> list[SearchSource]:
+        if not source_ids:
+            return []
+        rows = await self._session.scalars(
+            select(SearchSource).where(
+                SearchSource.run_id == run_id, SearchSource.id.in_(source_ids)
+            )
+        )
+        return list(rows)
+
+    async def add_experience_candidate(
+        self, candidate: ExperienceAtomCandidate
+    ) -> ExperienceAtomCandidate | None:
+        statement = (
+            insert(ExperienceAtomCandidate)
+            .values(
+                goal_type=candidate.goal_type,
+                title=candidate.title,
+                content=candidate.content,
+                source_ids=candidate.source_ids,
+                evidence_excerpt=candidate.evidence_excerpt,
+                confidence=candidate.confidence,
+                content_hash=candidate.content_hash,
+                status=candidate.status,
+                proposed_by_run_id=candidate.proposed_by_run_id,
+                expires_at=candidate.expires_at,
+            )
+            .on_conflict_do_nothing(index_elements=["content_hash"])
+            .returning(ExperienceAtomCandidate)
+        )
+        row = await self._session.scalar(statement)
+        return row if isinstance(row, ExperienceAtomCandidate) else None
+
+    async def candidate_for_update(self, candidate_id: UUID) -> ExperienceAtomCandidate | None:
+        row = await self._session.scalar(
+            select(ExperienceAtomCandidate)
+            .where(ExperienceAtomCandidate.id == candidate_id)
+            .with_for_update()
+        )
+        return row if isinstance(row, ExperienceAtomCandidate) else None
+
+    async def list_candidates(self, status: str = "pending") -> list[ExperienceAtomCandidate]:
+        rows = await self._session.scalars(
+            select(ExperienceAtomCandidate)
+            .where(ExperienceAtomCandidate.status == status)
+            .order_by(ExperienceAtomCandidate.created_at, ExperienceAtomCandidate.id)
         )
         return list(rows)
 

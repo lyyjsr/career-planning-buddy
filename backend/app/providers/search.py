@@ -1,34 +1,208 @@
-"""Search Provider protocol and deterministic Stage 4 Mock implementation."""
+"""Search Provider protocol plus Mock and Baidu implementations."""
 
 import asyncio
+import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from hashlib import sha256
+from time import monotonic
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
-from pydantic import Field
+import httpx
+from pydantic import Field, ValidationError
 
-from app.agent.errors import ProviderUnavailableError
+from app.agent.errors import (
+    ProviderAuthenticationError,
+    ProviderConfigurationError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+    StructuredOutputError,
+)
+from app.core.config import Settings
 from app.schemas.base import StrictModel
+
+SourceType = Literal["official", "job_board", "blog", "community", "other"]
+_CONTROL_OR_TAG = re.compile(r"[\x00-\x1f\x7f]|<[^>]{0,200}>")
+_TOKEN = re.compile(r"[\u3400-\u9fff]+|[A-Za-z0-9][A-Za-z0-9+.#_-]*")
+_PRIORITY = re.compile(
+    r"岗位|招聘|职位|要求|技能|技术|校招|社招|面试|薪资|趋势|目标|202[0-9]|"
+    r"job|role|skill|tech|career|interview|salary|hiring",
+    re.IGNORECASE,
+)
 
 
 class SearchResultItem(StrictModel):
     url: str
     title: str | None
     snippet: str
-    source_type: Literal["official", "job_board", "blog", "community", "other"]
+    source_type: SourceType
     reliability: float = Field(ge=0, le=1)
     retrieved_at: datetime
+    provider_request_id: str | None = None
+    published_at: datetime | None = None
 
 
 class SearchProvider(Protocol):
     provider_name: str
 
     async def search(
+        self, *, query: str, limit: int, freshness_days: int | None
+    ) -> list[SearchResultItem]: ...
+
+
+def compact_baidu_search_query(value: str, *, max_weight: int = 72) -> str:
+    """Return a bounded deterministic query without forwarding prompt/context blobs."""
+    cleaned = _CONTROL_OR_TAG.sub(" ", value)
+    tokens = _TOKEN.findall(cleaned)
+    prioritized = [token for token in tokens if _PRIORITY.search(token)]
+    ordered = list(dict.fromkeys([*prioritized, *tokens]))
+    selected: list[str] = []
+    weight = 0
+    for token in ordered:
+        token_weight = sum(2 if "\u3400" <= char <= "\u9fff" else 1 for char in token)
+        if token_weight == 0 or weight + token_weight > max_weight:
+            continue
+        selected.append(token)
+        weight += token_weight
+    result = " ".join(selected).strip()
+    if not result:
+        raise ValueError("search query has no usable terms")
+    return result
+
+
+def classify_source(url: str) -> tuple[SourceType, float]:
+    host = (urlsplit(url).hostname or "").lower()
+    official = (".gov.cn", ".edu.cn", ".org.cn", "open.baidu.com", "cloud.baidu.com")
+    job = ("zhipin.com", "liepin.com", "51job.com", "zhaopin.com", "jobs.")
+    community = ("zhihu.com", "reddit.com", "stackoverflow.com", "v2ex.com")
+    blog = ("blog.", "medium.com", "csdn.net", "cnblogs.com", "juejin.cn")
+    if any(item in host for item in official):
+        return "official", 0.9
+    if any(item in host for item in job):
+        return "job_board", 0.75
+    if any(item in host for item in community):
+        return "community", 0.45
+    if any(item in host for item in blog):
+        return "blog", 0.6
+    return "other", 0.5
+
+
+class BaiduSearchProvider:
+    provider_name = "baidu"
+
+    def __init__(
         self,
         *,
-        query: str,
-        limit: int,
-        freshness_days: int | None,
-    ) -> list[SearchResultItem]: ...
+        api_key: str,
+        base_url: str,
+        edition: Literal["lite", "standard"],
+        max_results: int,
+        timeout_seconds: float,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._base_url = base_url
+        self._edition = edition
+        self._max_results = max_results
+        self._timeout = timeout_seconds
+        self._transport = transport
+        self.last_trace: dict[str, object] = {}
+
+    async def search(
+        self, *, query: str, limit: int, freshness_days: int | None
+    ) -> list[SearchResultItem]:
+        compact = compact_baidu_search_query(query)
+        top_k = min(limit, self._max_results)
+        payload: dict[str, object] = {
+            "messages": [{"role": "user", "content": compact}],
+            "edition": self._edition,
+            "search_source": "baidu_search_v2",
+            "resource_type_filter": [{"type": "web", "top_k": top_k}],
+        }
+        if freshness_days is not None:
+            payload["freshness_days"] = freshness_days
+        started = monotonic()
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
+                response = await client.post(
+                    self._base_url,
+                    headers={
+                        "X-Appbuilder-Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("Baidu search timed out") from exc
+        except httpx.NetworkError as exc:
+            raise ProviderUnavailableError("Baidu search network failure") from exc
+        self.last_trace = {
+            "query_hash": sha256(compact.encode()).hexdigest(),
+            "query_length": len(compact),
+            "latency_ms": int((monotonic() - started) * 1000),
+        }
+        if response.status_code in {401, 403}:
+            raise ProviderAuthenticationError("Baidu search authentication failed")
+        if response.status_code == 429:
+            raise ProviderRateLimitError("Baidu search rate limited")
+        if response.status_code >= 500:
+            raise ProviderUnavailableError("Baidu search service unavailable")
+        if response.status_code >= 400:
+            raise ProviderUnavailableError("Baidu search request rejected")
+        try:
+            body = response.json()
+            if not isinstance(body, Mapping):
+                raise TypeError
+            references = body.get("references")
+            if references is None and isinstance(body.get("result"), Mapping):
+                result = body["result"]
+                references = result.get("references")
+            if not isinstance(references, list):
+                raise TypeError
+            request_id = self._string(body.get("request_id") or body.get("id"))
+            self.last_trace["request_id"] = request_id or response.headers.get("x-request-id", "")
+            return [
+                item
+                for raw in references[:top_k]
+                if (item := self._map_reference(raw, request_id)) is not None
+            ]
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise StructuredOutputError("Baidu search returned an invalid response") from exc
+
+    @classmethod
+    def _map_reference(cls, raw: object, request_id: str | None) -> SearchResultItem | None:
+        if not isinstance(raw, Mapping):
+            return None
+        url = cls._string(raw.get("url") or raw.get("link"))
+        snippet = cls._string(raw.get("snippet") or raw.get("content") or raw.get("abstract"))
+        if not url or not snippet:
+            return None
+        source_type, reliability = classify_source(url)
+        published = raw.get("published_at") or raw.get("date")
+        published_at: datetime | None = None
+        if isinstance(published, str):
+            try:
+                published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            except ValueError:
+                published_at = None
+        return SearchResultItem(
+            url=url,
+            title=cls._string(raw.get("title")),
+            snippet=snippet,
+            source_type=source_type,
+            reliability=reliability,
+            retrieved_at=datetime.now(UTC),
+            provider_request_id=request_id,
+            published_at=published_at,
+        )
+
+    @staticmethod
+    def _string(value: object) -> str | None:
+        return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 class MockSearchProvider:
@@ -37,11 +211,7 @@ class MockSearchProvider:
     provider_name = "mock"
 
     async def search(
-        self,
-        *,
-        query: str,
-        limit: int,
-        freshness_days: int | None,
+        self, *, query: str, limit: int, freshness_days: int | None
     ) -> list[SearchResultItem]:
         del freshness_days
         if "[mock:search-timeout]" in query:
@@ -78,5 +248,16 @@ class MockSearchProvider:
         return fixtures[:limit]
 
 
-def build_search_provider() -> SearchProvider:
-    return MockSearchProvider()
+def build_search_provider(settings: Settings) -> SearchProvider:
+    """Build only the configured provider; a real-provider failure never falls back."""
+    if settings.search_provider == "mock":
+        return MockSearchProvider()
+    if settings.baidu_search_api_key is None:
+        raise ProviderConfigurationError("baidu search requires BAIDU_SEARCH_API_KEY")
+    return BaiduSearchProvider(
+        api_key=settings.baidu_search_api_key.get_secret_value(),
+        base_url=str(settings.baidu_search_base_url),
+        edition=settings.baidu_search_edition,
+        max_results=settings.baidu_search_max_results,
+        timeout_seconds=settings.baidu_search_timeout_seconds,
+    )

@@ -35,6 +35,7 @@ registered_models = (
     application_models.MemoryCandidate,
     application_models.SearchSource,
     application_models.ExperienceAtom,
+    application_models.ExperienceAtomCandidate,
 )
 
 

@@ -48,7 +48,15 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = Field(default=None, min_length=1)
     llm_base_url: AnyHttpUrl | None = None
     llm_model: str | None = Field(default=None, min_length=1, max_length=128)
-    search_provider: Literal["mock"] = "mock"
+    search_provider: Literal["mock", "baidu"] = "mock"
+    baidu_search_api_key: SecretStr | None = Field(default=None, min_length=1)
+    baidu_search_base_url: AnyHttpUrl = AnyHttpUrl(
+        "https://qianfan.baidubce.com/v2/ai_search/web_search"
+    )
+    baidu_search_edition: Literal["lite", "standard"] = "standard"
+    baidu_search_max_results: int = Field(default=5, ge=1, le=10)
+    baidu_search_timeout_seconds: float = Field(default=8, gt=0, le=30)
+    rag_min_similarity: float = Field(default=0.35, ge=0, le=1)
     embedding_provider: Literal["mock", "local"] = "mock"
     embedding_model_path: Path | None = None
     embedding_model_name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -56,10 +64,14 @@ class Settings(BaseSettings):
         default=1024,
         ge=1,
         le=4096,
-        validation_alias=AliasChoices(
-            "embedding_dim", "EMBEDDING_DIM", "EMBEDDING_DIMENSION"
-        ),
+        validation_alias=AliasChoices("embedding_dim", "EMBEDDING_DIM", "EMBEDDING_DIMENSION"),
     )
+    memory_semantic_retrieval_enabled: bool = True
+    memory_retrieval_limit: int = Field(default=8, ge=1, le=20)
+    memory_context_max_items: int = Field(default=5, ge=1, le=5)
+    memory_context_max_chars: int = Field(default=1200, ge=100, le=10000)
+    memory_min_similarity: float = Field(default=0.35, ge=0, le=1)
+    memory_recency_half_life_days: int = Field(default=14, ge=1, le=365)
     tool_timeout_seconds: float = Field(default=8, gt=0, le=30)
     agent_max_llm_calls: int = Field(default=7, ge=1, le=7)
     agent_max_tool_rounds: int = Field(default=2, ge=0, le=2)
@@ -100,6 +112,7 @@ class Settings(BaseSettings):
         "llm_model",
         "embedding_model_path",
         "embedding_model_name",
+        "baidu_search_api_key",
         mode="before",
     )
     @classmethod
@@ -129,6 +142,8 @@ class Settings(BaseSettings):
                 raise ValueError("local embedding requires EMBEDDING_MODEL_PATH")
             if not self.embedding_model_path.is_dir():
                 raise ValueError("EMBEDDING_MODEL_PATH must be an existing local directory")
+        if self.search_provider == "baidu" and self.baidu_search_api_key is None:
+            raise ValueError("baidu search requires BAIDU_SEARCH_API_KEY")
         return self
 
 

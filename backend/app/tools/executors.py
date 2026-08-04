@@ -2,6 +2,7 @@
 
 import re
 from decimal import Decimal
+from hashlib import sha256
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel
@@ -91,9 +92,11 @@ class RagRetrieveHandler:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         embedding_provider: EmbeddingProvider,
+        min_similarity: float = 0.35,
     ) -> None:
         self._sessions = session_factory
         self._embedding = embedding_provider
+        self._min_similarity = min_similarity
 
     async def __call__(self, payload: BaseModel, context: ToolContext) -> BaseModel:
         request = RagRetrieveInput.model_validate(payload)
@@ -108,6 +111,7 @@ class RagRetrieveHandler:
                     goal_type=context.goal_type.value,
                     vector=vectors[0],
                     limit=request.limit,
+                    min_similarity=self._min_similarity,
                 )
         items: list[RagEvidenceItem] = []
         evidence_items: list[EvidenceItem] = []
@@ -118,7 +122,8 @@ class RagRetrieveHandler:
                 if isinstance(raw_reliability, (int, float, Decimal))
                 else 0.7
             )
-            evidence_text = _clean(str(atom.evidence_json.get("source", "curated")), 300)
+            excerpt = atom.evidence_json.get("evidence_excerpt", "curated")
+            evidence_text = _clean(str(excerpt), 300)
             content = _clean(atom.content, 1200)
             items.append(
                 RagEvidenceItem(
@@ -177,12 +182,16 @@ class WebSearchHandler:
                     source = await repository.upsert_search_source(
                         run_id=context.run_id,
                         url=normalized_url,
+                        url_hash=sha256(normalized_url.encode("utf-8")).hexdigest(),
+                        content_hash=sha256(snippet.encode("utf-8")).hexdigest(),
                         title=title,
                         snippet=snippet,
                         source_type=source_item.source_type,
                         reliability=source_item.reliability,
                         provider=self._search.provider_name,
                         retrieved_at=source_item.retrieved_at,
+                        provider_request_id=source_item.provider_request_id,
+                        published_at=source_item.published_at,
                     )
                     items.append(
                         WebSearchItem(
@@ -223,13 +232,20 @@ def _normalize_url(value: str) -> str:
         for key, item in parse_qsl(parsed.query, keep_blank_values=False)
         if not key.lower().startswith("utm_")
     ]
+    hostname = parsed.hostname.lower() if parsed.hostname else ""
+    port = parsed.port
+    if port is not None and not (
+        (parsed.scheme.lower() == "http" and port == 80)
+        or (parsed.scheme.lower() == "https" and port == 443)
+    ):
+        hostname = f"{hostname}:{port}"
     path = parsed.path.rstrip("/") or "/"
     return urlunsplit(
         (
             parsed.scheme.lower(),
-            parsed.netloc.lower(),
+            hostname,
             path,
-            urlencode(filtered_query),
+            urlencode(sorted(filtered_query)),
             "",
         )
     )

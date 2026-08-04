@@ -24,7 +24,7 @@ from app.schemas.agent_runs import (
     ValidationReport,
     WeeklyFocusCandidate,
 )
-from app.schemas.enums import GoalType, ReplanMode, RunIntent, TaskType
+from app.schemas.enums import GoalType, ReplanMode, RunIntent, TaskStatus, TaskType
 
 HIGH_RISK_PATTERNS = (
     ("risk_self_harm_zh", re.compile(r"自杀|结束生命|伤害自己")),
@@ -238,6 +238,10 @@ def validate_candidate(
 ) -> ValidationReport:
     window = context.planning_window
     allowed_evidence = {(item.kind, item.id) for item in (evidence_catalog or [])}
+    completed_deliverables = set(context.completed_facts)
+    completed_deliverables.update(
+        task.deliverable for task in context.recent_tasks if task.state == TaskStatus.COMPLETED
+    )
     results = {
         "HORIZON_MATCH": (
             candidate.plan_date == window.planning_date
@@ -258,7 +262,7 @@ def validate_candidate(
             for task in candidate.tasks
         ),
         "RECENT_DUPLICATE": not any(
-            task.deliverable in context.completed_facts for task in candidate.tasks
+            task.deliverable in completed_deliverables for task in candidate.tasks
         ),
         "REPLAN_CONTINUITY": _valid_replan_continuity(candidate, context),
         "SOURCE_INTEGRITY": all(

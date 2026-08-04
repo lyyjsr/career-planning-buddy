@@ -105,6 +105,12 @@ class RuntimeConfigSnapshot(StrictModel):
     max_output_tokens_per_call: int = Field(ge=1)
     deadline_seconds: int = Field(ge=1)
     node_timeouts_seconds: dict[str, float]
+    memory_semantic_retrieval_enabled: bool = True
+    memory_retrieval_limit: int = Field(default=8, ge=1, le=20)
+    memory_context_max_items: int = Field(default=5, ge=1, le=5)
+    memory_context_max_chars: int = Field(default=1200, ge=100, le=10000)
+    memory_min_similarity: float = Field(default=0.35, ge=0, le=1)
+    memory_recency_half_life_days: int = Field(default=14, ge=1, le=365)
 
 
 class RunRequestSnapshot(StrictModel):
@@ -195,7 +201,9 @@ class PlanningContext(StrictModel):
     recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
     completed_facts: list[str] = Field(default_factory=list, max_length=20)
     blockers: list[str] = Field(default_factory=list, max_length=10)
-    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=3)
+    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=5)
+    task_history_summary: str | None = None
+    review_history_summary: str | None = None
     timezone: str = "UTC"
     time_budget_minutes: int = Field(ge=15, le=480)
     token_estimate: int = Field(ge=0)
@@ -212,7 +220,9 @@ class RunInputSnapshot(StrictModel):
     recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
     completed_facts: list[str] = Field(default_factory=list, max_length=20)
     blockers: list[str] = Field(default_factory=list, max_length=10)
-    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=3)
+    pinned_memories: list[MemoryContext] = Field(default_factory=list, max_length=5)
+    task_history_summary: str | None = None
+    review_history_summary: str | None = None
     recent_task_ids: list[UUID] = Field(default_factory=list, max_length=30)
     recent_review_ids: list[UUID] = Field(default_factory=list, max_length=7)
     memory_versions: dict[str, int] = Field(default_factory=dict)

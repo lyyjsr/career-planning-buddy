@@ -11,7 +11,7 @@
 | status | varchar(16) | NO | pending/confirmed/rejected/expired | |
 | proposed_by_run_id | uuid | YES | FK agent_runs.id | |
 | activated_memory_id | uuid | YES | FK memories.id | |
-| expires_at | timestamptz | NO | | 默认 7 天 |
+| expires_at | timestamptz | NO | | Review 自动提炼候选默认 14 天 |
 | created_at | timestamptz | NO | now() | |
 | decided_at | timestamptz | YES | | |
 

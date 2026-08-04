@@ -1,5 +1,6 @@
-"""Stage 3 daily-review and user-confirmed next-plan use cases."""
+"""Daily-review, memory feedback, and user-confirmed next-plan use cases."""
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from http import HTTPStatus
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
 from app.models.review import Review
 from app.repositories.agent_runs import AgentRunRepository
+from app.repositories.memories import MemoryRepository
 from app.repositories.plans import PlanRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.enums import NextPlanAction, ReplanMode, RunStatus
@@ -25,6 +27,13 @@ from app.schemas.reviews import (
     ReviewResponse,
     StartNextPlanResponse,
 )
+from app.services.memory_candidate_distiller import (
+    MemoryDistillationInput,
+    distill_memory_candidates,
+    normalize_candidate_summary,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewService:
@@ -40,6 +49,7 @@ class ReviewService:
         self._reviews = ReviewRepository(session)
         self._plans = PlanRepository(session)
         self._runs = AgentRunRepository(session)
+        self._memories = MemoryRepository(session)
 
     async def create(
         self,
@@ -124,6 +134,12 @@ class ReviewService:
                     trigger_tag="review_completed",
                     message=companion,
                     template_version="review_completed_v1",
+                )
+                await self._create_memory_candidates_best_effort(
+                    user_id=user_id,
+                    review=review,
+                    source_run_id=plan.source_run_id,
+                    recent_blocker=(recent_reviews[0].blockers if recent_reviews else None),
                 )
                 return self._to_response(review, companion)
         except IntegrityError as exc:
@@ -269,6 +285,56 @@ class ReviewService:
     async def _response(self, review: Review, user_id: UUID) -> ReviewResponse:
         companion = await self._reviews.companion_for_review(review.id, user_id)
         return self._to_response(review, companion.message if companion else "")
+
+    async def _create_memory_candidates_best_effort(
+        self,
+        *,
+        user_id: UUID,
+        review: Review,
+        source_run_id: UUID | None,
+        recent_blocker: str | None,
+    ) -> None:
+        try:
+            proposals = distill_memory_candidates(
+                MemoryDistillationInput(
+                    user_id=user_id,
+                    source_run_id=source_run_id,
+                    review_id=review.id,
+                    adjustment_request=review.adjustment_request,
+                    blockers=review.blockers,
+                    free_text=review.free_text,
+                    completed_count=review.completed_count,
+                    abandoned_count=review.abandoned_count,
+                    recent_blocker=recent_blocker,
+                )
+            )
+            async with self._session.begin_nested():
+                for proposal in proposals:
+                    normalized = normalize_candidate_summary(proposal.summary)
+                    exists = await self._memories.candidate_exists_for_review(
+                        user_id=user_id,
+                        review_id=review.id,
+                        memory_type=proposal.memory_type,
+                        normalized_summary=normalized,
+                    )
+                    if exists:
+                        continue
+                    content = dict(proposal.content)
+                    content["normalized_summary"] = normalized
+                    await self._memories.create_candidate(
+                        user_id=user_id,
+                        memory_type=proposal.memory_type,
+                        summary=proposal.summary,
+                        content_json=content,
+                        sensitivity=proposal.sensitivity,
+                        proposed_by_run_id=source_run_id,
+                        expires_at=datetime.now(UTC) + timedelta(days=14),
+                    )
+        except Exception:
+            logger.exception(
+                "memory_candidate_distillation_failed",
+                extra={"review_id": str(review.id), "user_id": str(user_id)},
+            )
 
     @staticmethod
     def _to_response(review: Review, companion_message: str) -> ReviewResponse:

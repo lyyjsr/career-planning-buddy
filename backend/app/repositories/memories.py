@@ -130,6 +130,27 @@ class MemoryRepository:
         await self._session.refresh(candidate)
         return candidate
 
+    async def candidate_exists_for_review(
+        self,
+        *,
+        user_id: UUID,
+        review_id: UUID,
+        memory_type: str,
+        normalized_summary: str,
+    ) -> bool:
+        candidate_id = await self._session.scalar(
+            select(MemoryCandidate.id)
+            .where(
+                MemoryCandidate.user_id == user_id,
+                MemoryCandidate.memory_type == memory_type,
+                MemoryCandidate.content_json["source_review_id"].as_string() == str(review_id),
+                MemoryCandidate.content_json["normalized_summary"].as_string()
+                == normalized_summary,
+            )
+            .limit(1)
+        )
+        return candidate_id is not None
+
     @staticmethod
     def expire_if_needed(candidate: MemoryCandidate) -> None:
         if candidate.status == "pending" and candidate.expires_at <= datetime.now(UTC):

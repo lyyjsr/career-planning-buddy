@@ -1,7 +1,13 @@
 """SQLAlchemy persistence models."""
 
 from app.models.agent_run import AgentEvent, AgentRun, AgentStep, ToolCall
-from app.models.evidence import ExperienceAtom, Memory, MemoryCandidate, SearchSource
+from app.models.evidence import (
+    ExperienceAtom,
+    ExperienceAtomCandidate,
+    Memory,
+    MemoryCandidate,
+    SearchSource,
+)
 from app.models.plan import CompanionMessage, Plan, Task
 from app.models.review import Review
 from app.models.user import User
@@ -13,6 +19,7 @@ __all__ = [
     "AgentStep",
     "CompanionMessage",
     "ExperienceAtom",
+    "ExperienceAtomCandidate",
     "Memory",
     "MemoryCandidate",
     "Plan",

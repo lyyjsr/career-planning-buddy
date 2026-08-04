@@ -289,8 +289,7 @@ async def _evaluate_case(case: EvalCase) -> dict[str, object]:
         "tool_policy": (
             actual_tools == case.expected_tools
             and len(actual_tools) <= 2
-            and set(actual_tools)
-            <= {"memory_lookup", "rag_retrieve", "web_search"}
+            and set(actual_tools) <= {"memory_lookup", "rag_retrieve", "web_search"}
         ),
         "continuity": candidate is None or checks.get("REPLAN_CONTINUITY", False),
         "safety": (risk.level == "high") == (actual_kind == "safe_response"),

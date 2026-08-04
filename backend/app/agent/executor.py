@@ -16,6 +16,11 @@ from app.agent.node_runner import NodeRunner
 from app.core.database import AsyncSessionFactory, session_transaction
 from app.harness.budget import BudgetGuard, CancellationToken
 from app.models.agent_run import AgentRun
+from app.providers.embedding import EmbeddingProvider, MockEmbeddingProvider
+from app.providers.evidence_distillation import (
+    EvidenceDistillationProvider,
+    MockEvidenceDistillationProvider,
+)
 from app.providers.llm import MockPlanningProvider, PlanningProvider
 from app.schemas.agent_runs import (
     PlanningState,
@@ -23,6 +28,7 @@ from app.schemas.agent_runs import (
     RuntimeConfigSnapshot,
 )
 from app.schemas.enums import GoalType, ReplanMode
+from app.services.experience_atoms import ExperienceAtomService
 from app.tools.registry import ToolRegistry
 
 
@@ -34,10 +40,16 @@ class AgentRunExecutor:
         session_factory: async_sessionmaker[AsyncSession] = AsyncSessionFactory,
         provider: PlanningProvider | None = None,
         tool_registry: ToolRegistry | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        evidence_distillation_provider: EvidenceDistillationProvider | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider or MockPlanningProvider()
         self._tool_registry = tool_registry or ToolRegistry()
+        self._embedding_provider = embedding_provider or MockEmbeddingProvider()
+        self._evidence_distillation_provider = (
+            evidence_distillation_provider or MockEvidenceDistillationProvider()
+        )
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
     def submit(self, run_id: UUID) -> None:
@@ -59,6 +71,16 @@ class AgentRunExecutor:
             raise RuntimeError("cannot replace Tool registry while Agent Runs are active")
         self._tool_registry = registry
 
+    def set_embedding_provider(self, provider: EmbeddingProvider) -> None:
+        if any(not task.done() for task in self._tasks.values()):
+            raise RuntimeError("cannot replace Embedding Provider while Agent Runs are active")
+        self._embedding_provider = provider
+
+    def set_evidence_distillation_provider(self, provider: EvidenceDistillationProvider) -> None:
+        if any(not task.done() for task in self._tasks.values()):
+            raise RuntimeError("cannot replace Evidence Provider while Agent Runs are active")
+        self._evidence_distillation_provider = provider
+
     async def execute(self, run_id: UUID) -> None:
         loaded = await self._start_and_load(run_id)
         if loaded is None:
@@ -79,6 +101,7 @@ class AgentRunExecutor:
             self._session_factory,
             self._provider,
             self._tool_registry,
+            self._embedding_provider,
         ).build(
             node_runner=runner,
             finalizer=finalizer,
@@ -117,6 +140,8 @@ class AgentRunExecutor:
                 "fallback_reason": None,
             }
             await graph.execute(state)
+            if profile is not None:
+                await self._distill_evidence_best_effort(run_id, profile.goal_type.value)
         except asyncio.CancelledError:
             cancellation.cancel()
             await finalizer.finalize_cancelled(run_id)
@@ -195,6 +220,18 @@ class AgentRunExecutor:
                 status = await session.scalar(select(AgentRun.status).where(AgentRun.id == run_id))
         if status in {"pending", "running"}:
             await finalizer.finalize_failed(run_id, error_code="AGENT_TERMINAL_MISSING")
+
+    async def _distill_evidence_best_effort(self, run_id: UUID, goal_type: str) -> None:
+        try:
+            async with self._session_factory() as session:
+                await ExperienceAtomService(
+                    session,
+                    self._embedding_provider,
+                    self._evidence_distillation_provider,
+                ).distill_run(run_id=run_id, goal_type=goal_type)
+        except Exception:
+            # Post-success enrichment must never alter the Run's terminal contract.
+            return
 
     def _discard(self, run_id: UUID, task: asyncio.Task[None]) -> None:
         if self._tasks.get(run_id) is task:

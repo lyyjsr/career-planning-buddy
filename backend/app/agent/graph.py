@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent.context_compression import compress_context_history
+from app.agent.context_selection import MemorySelectionResult, select_memories
 from app.agent.errors import StructuredOutputError
 from app.agent.finalizer import AgentRunFinalizer
 from app.agent.node_runner import NodeOutput, NodeRunner, NodeTelemetry
@@ -30,6 +32,7 @@ from app.models.agent_run import AgentRun
 from app.models.plan import Plan
 from app.models.review import Review
 from app.models.user_profile import UserProfile
+from app.providers.embedding import EmbeddingProvider, MockEmbeddingProvider
 from app.providers.llm import PlanningProvider
 from app.repositories.evidence import EvidenceRepository
 from app.repositories.plans import PlanRepository
@@ -67,6 +70,7 @@ class FixedPlanningGraph:
         finalizer: AgentRunFinalizer,
         budget: BudgetGuard,
         tool_registry: ToolRegistry,
+        embedding_provider: EmbeddingProvider,
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider
@@ -74,6 +78,7 @@ class FixedPlanningGraph:
         self._finalizer = finalizer
         self._budget = budget
         self._tool_registry = tool_registry
+        self._embedding_provider = embedding_provider
         self._graph = self._build_graph()
 
     async def execute(self, state: PlanningState) -> None:
@@ -309,22 +314,10 @@ class FixedPlanningGraph:
         recent_reviews: list[ReviewContext] = []
         completed_facts: list[str] = []
         blockers: list[str] = []
-        pinned_memories: list[MemoryContext] = []
+        selected_memories: list[MemoryContext] = []
         async with self._session_factory() as session:
             async with session_transaction(session):
                 plans = PlanRepository(session)
-                memory_rows = await EvidenceRepository(session).pinned_memories(
-                    state["user_id"], limit=3
-                )
-                pinned_memories = [
-                    MemoryContext(
-                        memory_id=memory.id,
-                        version=memory.version,
-                        memory_type=memory.memory_type,
-                        summary=memory.summary,
-                    )
-                    for memory in memory_rows
-                ]
                 if state["request"].source_plan_id is not None:
                     source_plan = await plans.get_for_user(
                         state["request"].source_plan_id,
@@ -375,6 +368,53 @@ class FixedPlanningGraph:
                 if source_review is not None and source_review.blockers:
                     blockers.insert(0, source_review.blockers)
                     blockers = list(dict.fromkeys(blockers))[:10]
+        memory_selection = MemorySelectionResult(
+            selected=[],
+            query_hash="",
+            pinned_count=0,
+            semantic_count=0,
+            fallback_used=False,
+            retrieval_failed=False,
+        )
+        try:
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    config = state["runtime_config"]
+                    memory_selection = await select_memories(
+                        repository=EvidenceRepository(session),
+                        embedding_provider=self._embedding_provider,
+                        user_id=state["user_id"],
+                        user_message=state["request"].message,
+                        goal_type=intent.effective_goal_type.value,
+                        blockers=blockers,
+                        adjustment_request=(
+                            source_review.adjustment_request if source_review else None
+                        ),
+                        semantic_enabled=config.memory_semantic_retrieval_enabled,
+                        retrieval_limit=config.memory_retrieval_limit,
+                        max_items=config.memory_context_max_items,
+                        max_chars=config.memory_context_max_chars,
+                        min_similarity=config.memory_min_similarity,
+                        half_life_days=config.memory_recency_half_life_days,
+                    )
+        except Exception:
+            memory_selection = memory_selection.__class__(
+                selected=[],
+                query_hash=memory_selection.query_hash,
+                pinned_count=0,
+                semantic_count=0,
+                fallback_used=memory_selection.fallback_used,
+                retrieval_failed=True,
+            )
+        selected_memories = [
+            MemoryContext(
+                memory_id=memory.memory_id,
+                version=memory.version,
+                memory_type=memory.memory_type,
+                summary=memory.summary,
+            )
+            for memory in memory_selection.selected
+        ]
         plan_context = self._plan_context(source_plan) if source_plan else None
         review_context = self._review_context(source_review) if source_review else None
         planning_date = None
@@ -396,7 +436,9 @@ class FixedPlanningGraph:
             blockers=blockers,
             planning_date=planning_date,
         )
-        context = context.model_copy(update={"pinned_memories": pinned_memories})
+        context = context.model_copy(update={"pinned_memories": selected_memories})
+        compression = compress_context_history(context)
+        context = compression.context
         evidence_catalog = [
             EvidenceCatalogItem(
                 kind="memory",
@@ -405,7 +447,7 @@ class FixedPlanningGraph:
                 content=memory.summary,
                 reliability=0.9,
             )
-            for memory in pinned_memories
+            for memory in selected_memories
         ]
         snapshot = RunInputSnapshot(
             profile=profile,
@@ -416,11 +458,13 @@ class FixedPlanningGraph:
             source_review=context.source_review,
             recent_tasks=context.recent_tasks,
             recent_reviews=context.recent_reviews,
-            completed_facts=context.completed_facts,
+            completed_facts=completed_facts,
             blockers=context.blockers,
             pinned_memories=context.pinned_memories,
-            recent_task_ids=[task.task_id for task in context.recent_tasks],
-            recent_review_ids=[review.review_id for review in context.recent_reviews],
+            task_history_summary=context.task_history_summary,
+            review_history_summary=context.review_history_summary,
+            recent_task_ids=[task.task_id for task in recent_tasks],
+            recent_review_ids=[review.review_id for review in recent_reviews],
             memory_versions={
                 str(memory.memory_id): memory.version for memory in context.pinned_memories
             },
@@ -436,6 +480,21 @@ class FixedPlanningGraph:
                 trace_data={
                     "token_estimate": context.token_estimate,
                     "horizon_weeks": context.planning_window.horizon_weeks,
+                    "context_chars_before": compression.before_chars,
+                    "context_chars_after": compression.after_chars,
+                    "compressed_task_count": compression.task_compressed_count,
+                    "compressed_review_count": compression.review_compressed_count,
+                    "memory_query_hash": memory_selection.query_hash,
+                    "pinned_memory_count": memory_selection.pinned_count,
+                    "semantic_memory_count": memory_selection.semantic_count,
+                    "selected_memory_ids": [
+                        str(item.memory_id) for item in memory_selection.selected
+                    ],
+                    "selected_memory_scores": [
+                        round(item.final_score, 6) for item in memory_selection.selected
+                    ],
+                    "memory_fallback_used": memory_selection.fallback_used,
+                    "memory_retrieval_failed": memory_selection.retrieval_failed,
                 }
             ),
         )
@@ -524,9 +583,7 @@ class FixedPlanningGraph:
                             if key not in existing:
                                 from app.schemas.agent_runs import EvidenceRef
 
-                                merged.append(
-                                    EvidenceRef(kind=cat_item.kind, id=cat_item.id)
-                                )
+                                merged.append(EvidenceRef(kind=cat_item.kind, id=cat_item.id))
                         if merged != candidate.evidence_refs:
                             payload = candidate.model_dump(mode="python")
                             payload["evidence_refs"] = [
@@ -585,9 +642,7 @@ class FixedPlanningGraph:
                         user_id=state["user_id"],
                         goal_type=context.profile.goal_type,
                         intent=state["intent"].intent,
-                        requires_fresh_information=(
-                            state["intent"].requires_fresh_information
-                        ),
+                        requires_fresh_information=(state["intent"].requires_fresh_information),
                         remaining_deadline_ms=int(self._budget.remaining_seconds() * 1000),
                     ),
                     step_id=step_id,
@@ -714,10 +769,12 @@ class GraphFactory:
         session_factory: async_sessionmaker[AsyncSession],
         provider: PlanningProvider,
         tool_registry: ToolRegistry | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider
         self._tool_registry = tool_registry or ToolRegistry()
+        self._embedding_provider = embedding_provider or MockEmbeddingProvider()
 
     def build(
         self,
@@ -733,6 +790,7 @@ class GraphFactory:
             finalizer=finalizer,
             budget=budget,
             tool_registry=self._tool_registry,
+            embedding_provider=self._embedding_provider,
         )
 
 

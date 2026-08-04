@@ -427,14 +427,16 @@ def build_tool_registry(
             ),
             input_model=RagRetrieveInput,
             output_model=RagRetrieveOutput,
-            handler=RagRetrieveHandler(session_factory, embedding_provider),
+            handler=RagRetrieveHandler(
+                session_factory, embedding_provider, settings.rag_min_similarity
+            ),
             timeout_seconds=settings.tool_timeout_seconds,
             provider=embedding_provider.provider_name,
         ),
         RegisteredTool(
             spec=ModelToolSpec(
                 name="web_search",
-                description="Search fixed Mock evidence when fresh information is required.",
+                description="Search external evidence only when fresh information is required.",
                 input_json_schema=WebSearchInput.model_json_schema(),
                 contract_version="1.0",
             ),

@@ -119,9 +119,7 @@ async def _run_in_transaction(
             create_run_id,
             stage="create_plan",
         )
-        source_plan = await session.scalar(
-            select(Plan).where(Plan.source_run_id == create_run_id)
-        )
+        source_plan = await session.scalar(select(Plan).where(Plan.source_run_id == create_run_id))
         if source_plan is None:
             raise SmokeRunError("SMOKE_PLAN_NOT_PERSISTED", stage="create_plan")
 

@@ -4,7 +4,7 @@ Career Planning Buddy is a single-user-facing career-planning Agent MVP. It turn
 profile and execution feedback into a versioned plan with startable daily tasks,
 reviews, replanning, consent-based memory, and cited local RAG evidence.
 
-The repository now implements Stages 0–5. Codex is used for engineering only; runtime
+The repository now implements Stages 0–5 and Stage 6A. Codex is used for engineering only; runtime
 model access always goes through the project Provider protocols.
 
 ## Stack and boundaries
@@ -97,7 +97,8 @@ The API flow is:
 4. query the generated Plan and update Task state
 5. `POST /api/v1/reviews`
 6. `POST /api/v1/reviews/{id}/start-next-plan`
-7. confirm Memory candidates and retrieve local RAG evidence
+7. review the deterministic Memory candidates, then confirm or reject them
+8. let later planning runs retrieve confirmed active memories by semantic relevance
 
 The developer console is at `http://localhost:5173/dev/runs`. It requires a JWT for a
 local user whose persisted role is `dev`. It displays redacted snapshots and hashes,
@@ -107,7 +108,7 @@ Mock replay and never mutates the source Run or Plan.
 
 ## Eval, Replay, and Bad Cases
 
-Run all 30 fixed cases offline:
+Run the frozen 30-case Stage 5 suite and the 12-case Stage 6A memory/context suite offline:
 
 ```bash
 cd backend
@@ -119,6 +120,11 @@ format-repair, business-rule validation/repair, and fallback code paths. It repo
 graders and writes reports to `backend/evals/artifacts/`; failed cases are written as
 JSONL to `backend/evals/bad_cases/`. Generated artifacts are ignored by Git. Replay and
 CI never call DeepSeek, external embeddings, or search.
+
+Stage 6A additionally verifies pinned/semantic memory selection, candidate consent
+boundaries, user isolation, embedding text fallback, and at least 40% deterministic
+compression on the large-history fixture. Planning context is rendered in stable,
+explicitly untrusted sections instead of one undifferentiated JSON block.
 
 Latest verified Stage 5 baseline (2026-08-01): 30/30 cases passed; 21 completed and 9
 contractually degraded (four clarification, three safety, two controlled fallbacks).
@@ -152,7 +158,7 @@ Git Bash, WSL, Linux, or macOS:
 bash scripts/check.sh
 ```
 
-Both run Ruff, Mypy, Alembic upgrade, Pytest, the offline 30-case Eval, frontend tests,
+Both run Ruff, Mypy, Alembic upgrade, Pytest, both offline Eval datasets, frontend tests,
 and the production frontend build. GitHub Actions uses Python 3.12, Node.js 20,
 PostgreSQL+pgvector, locked dependencies, and Mock Providers only.
 

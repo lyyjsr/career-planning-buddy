@@ -1,6 +1,6 @@
 # Agent 节点施工索引
 
-项目共 10 个核心节点和 2 个增强能力。只有 `career_planning_agent` 是真正具备自主 Tool Calling 的 Agent；其余都是确定性节点、分类节点、模板节点或 Service 适配节点。
+项目共 10 个核心节点和 3 个增强能力。只有 `career_planning_agent` 是真正具备自主 Tool Calling 的 Agent；其余都是确定性节点、分类节点、模板节点或 Service 适配节点。
 
 完整运行时、预算、快照、事件和终态规则见 [`../agent-runtime/README.md`](../agent-runtime/README.md)。
 
@@ -25,6 +25,11 @@
 |---|---|---:|---:|
 | [quality_reviewer](./quality_reviewer.spec.md) | LLM Judge；默认离线 shadow | 否，独立 Eval 记录 | 5 |
 | [distill_evidence](./distill_evidence.spec.md) | 成功 Run 后的证据整理 | 否 | 4 |
+| [memory_candidate_distiller](./memory_candidate_distiller.spec.md) | Review 的确定性候选提炼 | 否；Review Service 同事务调用 | 6A |
+
+`memory_candidate_distiller` 与尚未实现的 `distill_evidence` 不同：前者只处理
+`Review → MemoryCandidate`，后者仍保留为未来的
+`SearchSource → ExperienceAtomCandidate` 设计，不得混用。
 
 ## 每个节点 spec 必须回答
 
