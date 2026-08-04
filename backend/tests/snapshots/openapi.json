@@ -1243,16 +1243,34 @@
         "description": "Stage 1 home restoration aggregate.",
         "properties": {
           "active_plan": {
-            "title": "Active Plan",
-            "type": "null"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivePlanResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "active_run": {
-            "title": "Active Run",
-            "type": "null"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "latest_review": {
-            "title": "Latest Review",
-            "type": "null"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "profile": {
             "anyOf": [
@@ -1270,7 +1288,7 @@
           },
           "today_tasks": {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/TaskResponse"
             },
             "title": "Today Tasks",
             "type": "array"

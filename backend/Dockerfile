@@ -10,9 +10,11 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY evals ./evals
+COPY tests ./tests
+COPY scripts ./scripts
 RUN python -m pip install --no-cache-dir --requirement requirements.lock \
     && python -m pip install --no-cache-dir --no-deps .
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["sh", "-c", "python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]

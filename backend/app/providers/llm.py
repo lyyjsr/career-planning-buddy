@@ -97,7 +97,10 @@ class OpenAICompatiblePlanningProvider:
             )
         self._api_key = api_key
         self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
-        self._is_official_deepseek = urlparse(base_url).hostname == "api.deepseek.com"
+        provider_host = urlparse(base_url).hostname
+        self._supports_thinking_control = provider_host == "api.deepseek.com" or (
+            provider_host is not None and provider_host.endswith(".deepseek.com")
+        )
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
@@ -153,8 +156,7 @@ class OpenAICompatiblePlanningProvider:
             "max_tokens": self._max_output_tokens,
             "response_format": {"type": "json_object"},
         }
-        if self._is_official_deepseek:
-            request_body["thinking"] = {"type": "disabled"}
+        self._apply_thinking_disabled(request_body)
         if available_tools and not force_final:
             request_body["tools"] = [
                 {
@@ -242,8 +244,7 @@ class OpenAICompatiblePlanningProvider:
             "max_tokens": self._max_output_tokens,
             "response_format": {"type": "json_object"},
         }
-        if self._is_official_deepseek:
-            request_body["thinking"] = {"type": "disabled"}
+        self._apply_thinking_disabled(request_body)
         response, latency_ms, response_text = await self._post(request_body)
         raw_output_hash = sha256(response_text.encode("utf-8")).hexdigest()
         body = self._response_mapping(response)
@@ -302,6 +303,11 @@ class OpenAICompatiblePlanningProvider:
             raise ProviderUnavailableError(f"LLM provider returned HTTP {response.status_code}")
 
         return response, int((monotonic() - started) * 1000), response.text
+
+    def _apply_thinking_disabled(self, request_body: dict[str, object]) -> None:
+        """Disable reasoning only for the explicitly supported DeepSeek API."""
+        if self._supports_thinking_control:
+            request_body["thinking"] = {"type": "disabled"}
 
     @staticmethod
     def _response_mapping(response: httpx.Response) -> Mapping[object, object]:

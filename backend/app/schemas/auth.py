@@ -3,10 +3,13 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, JsonValue
+from pydantic import Field
 
+from app.schemas.agent_runs import AgentRunResponse
 from app.schemas.base import StrictModel
+from app.schemas.plans import ActivePlanResponse, TaskResponse
 from app.schemas.profile import ProfileResponse
+from app.schemas.reviews import ReviewResponse
 
 
 class GuestLoginRequest(StrictModel):
@@ -38,7 +41,7 @@ class MeResponse(StrictModel):
     user: UserSummary
     profile_complete: bool
     profile: ProfileResponse | None
-    active_plan: None = None
-    today_tasks: list[JsonValue] = Field(default_factory=list)
-    latest_review: None = None
-    active_run: None = None
+    active_plan: ActivePlanResponse | None = None
+    today_tasks: list[TaskResponse] = Field(default_factory=list)
+    latest_review: ReviewResponse | None = None
+    active_run: AgentRunResponse | None = None

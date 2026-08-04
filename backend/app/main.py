@@ -53,7 +53,13 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH"],
-        allow_headers=["Accept", "Authorization", "Content-Type", "Idempotency-Key"],
+        allow_headers=[
+            "Accept",
+            "Authorization",
+            "Content-Type",
+            "Idempotency-Key",
+            "Last-Event-ID",
+        ],
     )
     register_exception_handlers(application)
     application.include_router(api_router)

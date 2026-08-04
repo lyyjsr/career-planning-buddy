@@ -94,14 +94,20 @@ async def get_current_user(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ) -> AuthenticatedUser:
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    raw_token = (
+        credentials.credentials
+        if credentials is not None and credentials.scheme.lower() == "bearer"
+        else None
+    )
+
+    if raw_token is None:
         raise AppError(
             code="AUTH_INVALID_TOKEN",
             message="a valid bearer token is required",
             status_code=401,
         )
 
-    user_id, _token_role = token_service.verify(credentials.credentials)
+    user_id, _token_role = token_service.verify(raw_token)
     user = await UserRepository(session).get_by_id(user_id)
     if user is None or not user.is_active:
         raise AppError(

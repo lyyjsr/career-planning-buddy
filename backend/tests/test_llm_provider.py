@@ -43,6 +43,7 @@ def response_handler(
         request_body: object = json.loads(request.content)
         assert isinstance(request_body, dict)
         assert request_body.get("max_tokens") == 1500
+        assert "thinking" not in request_body
         response_format = request_body.get("response_format")
         assert isinstance(response_format, dict)
         assert response_format == {"type": "json_object"}

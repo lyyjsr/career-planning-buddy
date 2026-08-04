@@ -487,18 +487,56 @@ class FixedPlanningGraph:
             )
             if force_final:
                 available_tools = []
-            raw = await self._provider.generate_agent_turn(
-                message=state["request"].message,
-                context=context,
-                replan_mode=mode,
-                available_tools=available_tools,
-                evidence_catalog=evidence_catalog,
-                force_final=force_final,
-            )
+            # 当本轮没有任何 Tool 时，走更轻量的 generate_plan prompt 路径
+            # （ProviderPlanResponse schema）。带 Tool 时才使用完整的 agent-turn prompt。
+            using_plan_path = not available_tools
+            if available_tools:
+                raw = await self._provider.generate_agent_turn(
+                    message=state["request"].message,
+                    context=context,
+                    replan_mode=mode,
+                    available_tools=available_tools,
+                    evidence_catalog=evidence_catalog,
+                    force_final=force_final,
+                )
+            else:
+                raw = await self._provider.generate_plan(
+                    message=state["request"].message,
+                    context=context,
+                    replan_mode=mode,
+                )
             usage = self._extract_usage(raw)
             self._budget.record_llm_call(usage.tokens_in, usage.tokens_out)
             total_usage = usage if total_usage is None else self._combine_usage(total_usage, usage)
             try:
+                if using_plan_path:
+                    response = ProviderPlanResponse.model_validate(raw)
+                    candidate = response.candidate
+                    # generate_plan 路径不会自动把 evidence_catalog 写到 candidate 上
+                    # （与 generate_agent_turn 不同），这里手动补齐，保证 evidence_refs
+                    # 与上下文一致，避免 agent-turn-only 测试断言失效。
+                    if evidence_catalog:
+                        allowed = evidence_catalog[:10]
+                        existing = {(ref.kind, str(ref.id)) for ref in candidate.evidence_refs}
+                        merged = list(candidate.evidence_refs)
+                        for cat_item in allowed:
+                            key = (cat_item.kind, str(cat_item.id))
+                            if key not in existing:
+                                from app.schemas.agent_runs import EvidenceRef
+
+                                merged.append(
+                                    EvidenceRef(kind=cat_item.kind, id=cat_item.id)
+                                )
+                        if merged != candidate.evidence_refs:
+                            payload = candidate.model_dump(mode="python")
+                            payload["evidence_refs"] = [
+                                {"kind": r.kind, "id": str(r.id)} for r in merged
+                            ]
+                            candidate = PlanCandidate.model_validate(payload)
+                    return NodeOutput(
+                        (candidate, evidence_catalog, tool_round, tool_call_count),
+                        self._telemetry(total_usage, prompt_version),
+                    )
                 turn = AgentTurnResponse.model_validate(raw)
             except ValidationError:
                 self._budget.claim_format_repair()

@@ -1,0 +1,48 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, getAuthToken, setAuthToken } from "./client";
+import type { GuestLoginResponse, MeResponse } from "./types";
+
+const DEVICE_KEY = "cpb_device_id";
+let guestLoginInFlight: Promise<GuestLoginResponse> | null = null;
+
+function getOrCreateDeviceId(): string {
+  const existing = localStorage.getItem(DEVICE_KEY);
+  if (existing !== null) return existing;
+  const created = crypto.randomUUID();
+  localStorage.setItem(DEVICE_KEY, created);
+  return created;
+}
+
+export function useGuestLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: loginGuestOnce,
+    onSuccess: (data) => {
+      setAuthToken(data.access_token);
+      qc.removeQueries({ queryKey: ["me"], exact: true });
+    },
+  });
+}
+
+async function loginGuestOnce(): Promise<GuestLoginResponse> {
+  if (guestLoginInFlight !== null) return guestLoginInFlight;
+  const request = apiRequest<GuestLoginResponse>("/api/v1/auth/guest", {
+    method: "POST",
+    body: { device_id: getOrCreateDeviceId() },
+  });
+  guestLoginInFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (guestLoginInFlight === request) guestLoginInFlight = null;
+  }
+}
+
+export function useMe() {
+  return useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiRequest<MeResponse>("/api/v1/me"),
+    enabled: getAuthToken() !== null,
+    retry: false,
+  });
+}

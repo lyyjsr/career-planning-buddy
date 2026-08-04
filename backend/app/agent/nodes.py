@@ -89,14 +89,39 @@ def parse_horizon_weeks(message: str) -> int | None:
     match = re.search(r"(?:未来|接下来)?\s*(\d+)\s*周", message)
     if match:
         return max(1, min(8, int(match.group(1))))
-    chinese_match = re.search(r"(?:未来|接下来)?\s*([一二三四五六七八])\s*周", message)
+    chinese_match = re.search(r"(?:未来|接下来)?\s*([一二两三四五六七八])\s*周", message)
     if chinese_match:
-        chinese_weeks = "一二三四五六七八".index(chinese_match.group(1)) + 1
-        return chinese_weeks
+        return _clamp_horizon_weeks(_chinese_number(chinese_match.group(1)))
+    if re.search(r"(?:未来|接下来)?\s*半\s*个?月", message):
+        return 2
     month_match = re.search(r"(?:未来|接下来)?\s*(\d+)\s*个?月", message)
     if month_match:
-        return max(1, min(8, int(month_match.group(1)) * 4))
+        return _clamp_horizon_weeks(int(month_match.group(1)) * 4)
+    chinese_month_match = re.search(
+        r"(?:未来|接下来)?\s*([一二两三四五六七八])\s*个?月",
+        message,
+    )
+    if chinese_month_match:
+        return _clamp_horizon_weeks(_chinese_number(chinese_month_match.group(1)) * 4)
     return None
+
+
+def _chinese_number(value: str) -> int:
+    return {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+    }[value]
+
+
+def _clamp_horizon_weeks(value: int) -> int:
+    return max(1, min(8, value))
 
 
 def build_clarification(intent: IntentResult) -> ClarificationRequest:
@@ -181,6 +206,14 @@ def _deadline_weeks(today: date, deadline: date | None) -> int:
     return max(1, min(8, (days + 6) // 7))
 
 
+def _within_daily_budget(tasks: list[TaskCandidate], daily_budget: int) -> bool:
+    """Allow multi-day candidates; constrain only per-day minutes to the daily budget."""
+    per_day: dict[date, int] = {}
+    for task in tasks:
+        per_day[task.scheduled_date] = per_day.get(task.scheduled_date, 0) + task.estimated_minutes
+    return all(total <= daily_budget for total in per_day.values())
+
+
 CHECK_ORDER = (
     "HORIZON_MATCH",
     "WEEKLY_FOCUS",
@@ -217,13 +250,12 @@ def validate_candidate(
             == list(range(1, len(candidate.weekly_focus) + 1))
         ),
         "TASK_COUNT": 1 <= len(candidate.tasks) <= 3,
-        "TIME_BUDGET": (
-            sum(task.estimated_minutes for task in candidate.tasks) <= context.time_budget_minutes
-        ),
+        "TIME_BUDGET": _within_daily_budget(candidate.tasks, context.time_budget_minutes),
         "STARTER_ACTION": all(bool(task.starter_action.strip()) for task in candidate.tasks),
         "DELIVERABLE": all(bool(task.deliverable.strip()) for task in candidate.tasks),
         "SCHEDULE_DATE": all(
-            task.scheduled_date == window.planning_date for task in candidate.tasks
+            window.horizon_start <= task.scheduled_date <= window.horizon_end
+            for task in candidate.tasks
         ),
         "RECENT_DUPLICATE": not any(
             task.deliverable in context.completed_facts for task in candidate.tasks

@@ -67,6 +67,25 @@ async def test_profile_cors_preflight_allows_stage_one_headers() -> None:
     assert "idempotency-key" in allowed_headers
 
 
+@pytest.mark.asyncio
+async def test_sse_cors_preflight_allows_authorization_and_resume_header() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.options(
+            "/api/v1/agent-runs/00000000-0000-0000-0000-000000000000/events",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,last-event-id",
+            },
+        )
+
+    assert response.status_code == HTTPStatus.OK
+    allowed_headers = response.headers["Access-Control-Allow-Headers"].lower()
+    assert "authorization" in allowed_headers
+    assert "last-event-id" in allowed_headers
+
+
 def test_health_response_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         HealthResponse.model_validate(

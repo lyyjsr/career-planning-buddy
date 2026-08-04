@@ -29,6 +29,10 @@ async def test_create_get_cancel_and_idempotency_contract(api_client: AsyncClien
     )
     run_id = first.json()["run_id"]
     fetched = await api_client.get(f"/api/v1/agent-runs/{run_id}", headers=bearer(token))
+    query_token_attempt = await api_client.get(
+        f"/api/v1/agent-runs/{run_id}/events",
+        params={"access_token": token},
+    )
     conflict = await api_client.post(
         "/api/v1/agent-runs",
         json={"message": "并发第二个 Run"},
@@ -44,6 +48,7 @@ async def test_create_get_cancel_and_idempotency_contract(api_client: AsyncClien
     assert repeated.json()["run_id"] == run_id
     assert fetched.status_code == HTTPStatus.OK
     assert fetched.json()["status"] == "pending"
+    assert query_token_attempt.status_code == HTTPStatus.UNAUTHORIZED
     assert conflict.status_code == HTTPStatus.CONFLICT
     assert conflict.json()["error"]["code"] == "STATE_RUN_ALREADY_ACTIVE"
     assert cancelled.status_code == HTTPStatus.ACCEPTED
