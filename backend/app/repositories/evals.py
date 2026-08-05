@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval import EvalExperiment, EvalScore, EvalTrial
@@ -52,7 +52,7 @@ class EvalRepository:
 
     async def attach_trial_outcome(
         self,
-        trial: EvalTrial,
+        trial_id: UUID,
         *,
         status: str,
         run_id: UUID | None,
@@ -64,8 +64,13 @@ class EvalRepository:
         finished_at: datetime,
         error_code: str | None = None,
         error_message: str | None = None,
-    ) -> EvalTrial:
+    ) -> None:
         """Freeze a Trial's terminal outcome.
+
+        Uses an explicit UPDATE keyed on ``trial_id`` so the write does not
+        depend on the ORM identity map of the originating session (the
+        TrialRunner calls this from a different session than the one that
+        created the Trial row).
 
         Satisfies ``ck_eval_trials_completed_outcome``: a ``completed`` Trial
         must carry a ``run_id`` + ``outcome_snapshot_json`` + 64-hex
@@ -74,26 +79,40 @@ class EvalRepository:
         ``error_code`` instead.
         """
 
-        trial.status = status
-        trial.run_id = run_id
-        trial.outcome_snapshot_json = outcome_snapshot
-        trial.transcript_hash = transcript_hash
-        trial.tokens_in = tokens_in
-        trial.tokens_out = tokens_out
-        trial.latency_ms = latency_ms
-        trial.error_code = error_code
-        trial.error_message = error_message
-        trial.finished_at = finished_at
-        await self._session.flush()
-        return trial
+        await self._session.execute(
+            update(EvalTrial)
+            .where(EvalTrial.id == trial_id)
+            .values(
+                status=status,
+                run_id=run_id,
+                outcome_snapshot_json=outcome_snapshot,
+                transcript_hash=transcript_hash,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                latency_ms=latency_ms,
+                error_code=error_code,
+                error_message=error_message,
+                finished_at=finished_at,
+            )
+        )
 
-    async def mark_trial_running(self, trial: EvalTrial, *, started_at: datetime) -> EvalTrial:
-        """Transition a pending Trial to ``running`` before execution."""
+    async def mark_trial_running(
+        self, trial_id: UUID, *, started_at: datetime
+    ) -> None:
+        """Transition a pending Trial to ``running`` before execution.
 
-        trial.status = "running"
-        trial.started_at = started_at
-        await self._session.flush()
-        return trial
+        Uses an explicit UPDATE keyed on ``trial_id`` so the write does not
+        depend on the ORM identity map of the originating session (the
+        TrialRunner calls this from a different session than the one that
+        created the Trial row). Mirrors the DB trigger's legal
+        ``pending -> running`` transition.
+        """
+
+        await self._session.execute(
+            update(EvalTrial)
+            .where(EvalTrial.id == trial_id, EvalTrial.status == "pending")
+            .values(status="running", started_at=started_at)
+        )
 
     async def count_nonterminal_trials(self, experiment_id: UUID) -> int:
         result = await self._session.execute(

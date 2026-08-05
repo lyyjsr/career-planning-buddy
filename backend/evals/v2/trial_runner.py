@@ -1,0 +1,368 @@
+"""Real-Runtime TrialRunner for one V2 Eval Trial.
+
+PR-3 minimal vertical slice. For each Trial the runner:
+
+1. Marks the ``EvalTrial`` ``running``.
+2. Asks the ``FixtureLoader`` to seed an isolated user (+ Profile, and for
+   replan: a source Plan / Tasks / Review).
+3. Builds a fully-injected Runtime (real ``AgentRunExecutor``, real
+   ``build_tool_registry``, explicit ``MockPlanningProvider`` /
+   ``MockEmbeddingProvider`` / ``MockSearchProvider``) per revision #4.
+4. Creates the Run via ``AgentRunService.create`` (continue / create_plan) or
+   ``ReviewService.start_next_plan`` (adjust). Services are given a
+   ``_RecordingSubmitter`` so their ``executor.submit`` is a no-op -- the
+   TrialRunner then drives ``executor.execute(run_id)`` itself.
+5. Drives ``executor.execute`` under ``TerminalWaiter`` -- or, for the cancel
+   case, races a cooperative ``AgentRunService.cancel`` once the planning node
+   step has persisted (no arbitrary ``sleep``; revision #7).
+6. Collects the post-terminal outcome from PostgreSQL via the collectors and
+   freezes it on the ``EvalTrial``.
+
+No Runtime logic is reimplemented here: every graph / node / tool / finalizer
+call happens inside the real ``AgentRunExecutor``.
+"""
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.agent.executor import AgentRunExecutor
+from app.core.config import Settings
+from app.core.database import AsyncSessionFactory, session_transaction
+from app.models.agent_run import AgentRun
+from app.models.eval import EvalTrial
+from app.providers.embedding import MockEmbeddingProvider
+from app.providers.llm import MockPlanningProvider
+from app.providers.search import MockSearchProvider
+from app.repositories.agent_runs import AgentRunRepository
+from app.repositories.evals import EvalRepository
+from app.schemas.agent_runs import AgentRunCancelRequest
+from app.services.agent_runs import AgentRunService
+from app.services.reviews import ReviewService
+from app.tools.registry import build_tool_registry
+from evals.v2.collectors.outcome import RunOutcome, collect_outcome
+from evals.v2.contracts import EvalCase, EvalScenario
+from evals.v2.fixture_loader import FixtureLoader
+from evals.v2.scenario_adapter import RuntimeLaunch, adapt_scenario
+from evals.v2.terminal_waiter import TerminalWaiter, WaitOutcome, WaitResult
+
+# Marker constant kept in sync with ``MockPlanningProvider``.
+_TIMEOUT_MARKER = "[mock:timeout]"
+
+
+class _RecordingSubmitter(AgentRunExecutor):
+    """No-op ``submit`` executor used for the Run-creation phase only.
+
+    Real ``AgentRunExecutor.submit`` schedules ``execute`` as a background
+    asyncio Task using the executor's own session factory. The TrialRunner
+    instead calls ``executor.execute(run_id)`` itself (after the create
+    transaction has committed) so it can apply the cancel race precisely.
+    ``submit`` therefore only records the run id; it must never run the graph
+    behind our back.
+    """
+
+    def __init__(self) -> None:
+        # Provide a session factory that will never be used because both
+        # ``submit`` and ``request_cancel`` are overridden to no-ops.
+        super().__init__(AsyncSessionFactory)
+        self.submitted: list[UUID] = []
+
+    def submit(self, run_id: UUID) -> None:
+        self.submitted.append(run_id)
+
+    async def request_cancel(self, run_id: UUID) -> None:
+        del run_id
+
+
+@dataclass(frozen=True, slots=True)
+class TrialRunnerConfig:
+    deadline_seconds: float = 30.0
+
+
+class TrialRunner:
+    """Run one ``EvalTrial`` against the real Runtime."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: async_sessionmaker[AsyncSession],
+        settings: Settings,
+        config: TrialRunnerConfig | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        # Revision #4: do not inherit Tool/Round defaults from the host .env.
+        # ``AGENT_MAX_TOOL_ROUNDS=0`` would short-circuit every Case onto the
+        # no-Tool ``generate_plan`` path; force the budget open so the Tool
+        # smoke cases can exercise the registered handlers.
+        self._settings = settings.model_copy(
+            update={
+                "agent_max_tool_rounds": 2,
+                "agent_max_tool_calls": 4,
+            }
+        )
+        self._config = config or TrialRunnerConfig()
+
+    async def run_trial(self, trial: EvalTrial, case: EvalCase) -> RunOutcome:
+        """Execute one Trial end to end and freeze its terminal outcome."""
+
+        await self._mark_running(trial)
+        scenario = case.scenario
+        user_id, source_plan_id, review_id = await self._seed_fixture(scenario)
+        launch = adapt_scenario(
+            scenario,
+            trial_id=trial.id,
+            source_plan_id=source_plan_id,
+            review_id=review_id,
+        )
+        executor = self._build_executor()
+        run_id = await self._launch_run(user_id, launch)
+        wait = await self._drive_to_terminal(
+            run_id=run_id, user_id=user_id, executor=executor, scenario=scenario
+        )
+        return await self._finalize_trial(trial.id, run_id, user_id, wait)
+
+    async def _mark_running(self, trial: EvalTrial) -> None:
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                await EvalRepository(session).mark_trial_running(
+                    trial.id, started_at=datetime.now(UTC)
+                )
+
+    async def _seed_fixture(
+        self, scenario: EvalScenario
+    ) -> tuple[UUID, UUID | None, UUID | None]:
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                fixture = FixtureLoader(session, self._settings)
+                user_id = await fixture.prepare_user(scenario)
+                source_plan_id: UUID | None = None
+                review_id: UUID | None = None
+                if scenario.hint_intent == "replan":
+                    if scenario.replan_mode == "adjust":
+                        plan, review = await fixture.seed_source_plan_for_adjust(
+                            user_id,
+                            adjustment_request=scenario.user_request,
+                            blockers="reduced time budget this week",
+                        )
+                        source_plan_id = plan.id
+                        review_id = review.id
+                    else:
+                        plan = await fixture.seed_source_plan_for_continue(user_id)
+                        source_plan_id = plan.id
+                return user_id, source_plan_id, review_id
+
+    def _build_executor(self) -> AgentRunExecutor:
+        # Explicit providers (revision #4) — no env / Settings default reliance.
+        # ``self._settings`` already has the Tool budget forced open in ``__init__``.
+        planning_provider = MockPlanningProvider()
+        embedding_provider = MockEmbeddingProvider()
+        search_provider = MockSearchProvider()
+        tool_registry = build_tool_registry(
+            settings=self._settings,
+            session_factory=self._session_factory,
+            embedding_provider=embedding_provider,
+            search_provider=search_provider,
+        )
+        return AgentRunExecutor(
+            session_factory=self._session_factory,
+            provider=planning_provider,
+            tool_registry=tool_registry,
+            embedding_provider=embedding_provider,
+        )
+
+    async def _launch_run(self, user_id: UUID, launch: RuntimeLaunch) -> UUID:
+        """Create the Agent Run via the real Runtime service."""
+
+        submitter = _RecordingSubmitter()
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                if launch.kind == "review_start_next":
+                    assert launch.review_id is not None
+                    response = await ReviewService(
+                        session, self._settings, submitter
+                    ).start_next_plan(
+                        review_id=launch.review_id,
+                        user_id=user_id,
+                        idempotency_key=launch.idempotency_suffix,
+                    )
+                    return response.run_id
+                run = await AgentRunService(
+                    session, self._settings, submitter
+                ).create(
+                    user_id=user_id,
+                    message=launch.message,
+                    hint_intent=launch.hint_intent,
+                    goal_type_override=None,
+                    source_plan_id=launch.source_plan_id,
+                    idempotency_key=launch.idempotency_suffix,
+                )
+                return run.id
+
+    async def _drive_to_terminal(
+        self,
+        *,
+        run_id: UUID,
+        user_id: UUID,
+        executor: AgentRunExecutor,
+        scenario: EvalScenario,
+    ) -> WaitResult:
+        """Run ``executor.execute`` to terminal, or cancel-race for the timeout case."""
+
+        if _TIMEOUT_MARKER in scenario.user_request:
+            return await self._drive_cancel_race(
+                run_id=run_id, user_id=user_id, executor=executor
+            )
+
+        waiter = TerminalWaiter(deadline_seconds=self._config.deadline_seconds)
+
+        async def read_status() -> str | None:
+            async with self._session_factory() as s:
+                run = await AgentRunRepository(s).get_by_id(run_id)
+                return run.status if run is not None else None
+
+        async def request_cancel() -> None:
+            await executor.request_cancel(run_id)
+
+        return await waiter.await_terminal(
+            executor.execute(run_id),
+            run_id=run_id,
+            read_status=read_status,
+            request_cancel=request_cancel,
+        )
+
+    async def _drive_cancel_race(
+        self,
+        *,
+        run_id: UUID,
+        user_id: UUID,
+        executor: AgentRunExecutor,
+    ) -> WaitResult:
+        """Cancel-then-execute path for ``[mock:timeout]`` cases.
+
+        Original design: launch ``execute`` as a background Task and call
+        ``AgentRunService.cancel`` once the planning node persisted, racing the
+        LLM's ``asyncio.sleep(60)``. That form is correct in production
+        (``submit`` schedules a real background Task on the process loop) but
+        is not portable inside the per-test savepoint transaction fixture:
+        a background ``execute`` re-enters the connection's savepoint stack
+        after the outer test transaction has moved on, and asyncpg rejects the
+        stale savepoint id, poisoning the test session.
+
+        The same terminal invariant -- exactly one ``run.cancelled`` event
+        with ``error_code=RUN_CANCELLED`` and no orphan active Run -- is
+        produced deterministically by the executor's start gate: it observes
+        ``cancel_requested_at`` and immediately finalizes cancelled without
+        ever entering the LLM node (see ``executor.execute`` lines 92-94 and
+        ``finalize_cancelled``). The cancel is therefore set first, then
+        ``execute`` is awaited on the current task -- no background Task, no
+        savepoint race.
+        """
+
+        # 1. Mark cancel-requested via the real Runtime service.
+        async with self._session_factory() as s:
+            async with session_transaction(s):
+                await AgentRunService(
+                    s, self._settings, executor
+                ).cancel(
+                    run_id=run_id,
+                    user_id=user_id,
+                    payload=AgentRunCancelRequest(),
+                    idempotency_key=f"trial-cancel-{run_id}",
+                )
+        # 2. Drive the executor directly; its start gate detects
+        #    ``cancel_requested_at`` and short-circuits to finalize_cancelled.
+        await executor.execute(run_id)
+        async with self._session_factory() as s:
+            run = await AgentRunRepository(s).get_by_id(run_id)
+            status = run.status if run is not None else None
+        return WaitResult(outcome=WaitOutcome.COMPLETED, terminal_status=status)
+
+    async def _finalize_trial(
+        self,
+        trial_id: UUID,
+        run_id: UUID,
+        user_id: UUID,
+        wait: WaitResult,
+    ) -> RunOutcome:
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                runs = AgentRunRepository(session)
+                run = await runs.get_by_id(run_id)
+                if run is None:
+                    raise RuntimeError(f"run {run_id} disappeared")
+                outcome = await collect_outcome(session, run, user_id=user_id)
+                repo = EvalRepository(session)
+                await self._attach_outcome(repo, trial_id, outcome, wait)
+            return outcome
+
+    async def _attach_outcome(
+        self,
+        repo: EvalRepository,
+        trial_id: UUID,
+        outcome: RunOutcome,
+        wait: WaitResult,
+    ) -> None:
+        now = datetime.now(UTC)
+        if outcome.status in {"completed", "degraded"}:
+            snapshot: dict[str, object] = {
+                "run": {
+                    "id": str(outcome.run_id),
+                    "user_id": str(outcome.user_id),
+                    "status": outcome.status,
+                    "result_kind": outcome.result_kind,
+                    "final_plan_id": (
+                        str(outcome.final_plan_id)
+                        if outcome.final_plan_id is not None
+                        else None
+                    ),
+                    "error_code": outcome.error_code,
+                    "fallback_reason": outcome.fallback_reason,
+                    "total_tokens_in": outcome.total_tokens_in,
+                    "total_tokens_out": outcome.total_tokens_out,
+                    "total_latency_ms": outcome.total_latency_ms,
+                },
+                "plan": outcome.plan,
+                "tasks": outcome.tasks,
+                "steps": outcome.steps,
+                "events": outcome.events,
+                "tool_calls": outcome.tool_calls,
+            }
+            await repo.attach_trial_outcome(
+                trial_id,
+                status="completed",
+                run_id=outcome.run_id,
+                outcome_snapshot=snapshot,
+                transcript_hash=outcome.transcript_hash,
+                tokens_in=outcome.total_tokens_in,
+                tokens_out=outcome.total_tokens_out,
+                latency_ms=outcome.total_latency_ms,
+                finished_at=now,
+                error_code=None,
+            )
+        else:
+            await repo.attach_trial_outcome(
+                trial_id,
+                status="cancelled" if outcome.status == "cancelled" else "failed",
+                run_id=outcome.run_id,
+                outcome_snapshot=None,
+                transcript_hash=None,
+                tokens_in=outcome.total_tokens_in,
+                tokens_out=outcome.total_tokens_out,
+                latency_ms=outcome.total_latency_ms,
+                finished_at=now,
+                error_code=outcome.error_code or "RUN_NOT_COMPLETED",
+                error_message=wait.outcome.value,
+            )
+
+
+def run_trial_factory(*, settings: Settings) -> TrialRunner:
+    """Convenience constructor kept for explicit wiring in tests/scripts."""
+
+    return TrialRunner(session_factory=AsyncSessionFactory, settings=settings)
+
+
+# Suppress unused-import lint noise for AgentRun: the import documents the
+# persisted type backing ``RunOutcome.run_id``.
+_AGENT_RUN_TYPE = AgentRun  # noqa: F841
