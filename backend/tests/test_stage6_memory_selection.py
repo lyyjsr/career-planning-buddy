@@ -182,7 +182,8 @@ async def test_graph_selects_only_current_users_active_memory_and_updates_snapsh
     assert snapshot.memory_versions == {str(selected_id): selected_version}
     assert selected_row.last_used_at is not None
     assert plan is not None
-    assert {item["id"] for item in plan.evidence_refs_json} == {str(selected_id)}
+    # Catalog visibility does not imply that the model cited the memory.
+    assert plan.evidence_refs_json == []
     assert context_step is not None
     assert context_step.trace_data["selected_memory_ids"] == [str(selected_id)]
     assert context_step.trace_data["memory_query_hash"]

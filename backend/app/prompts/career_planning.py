@@ -61,6 +61,7 @@ def format_repair_messages(
     raw_output: Mapping[str, object],
     context: PlanningContext,
     replan_mode: ReplanMode,
+    evidence_catalog: list[EvidenceCatalogItem],
 ) -> list[dict[str, str]]:
     payload: dict[str, object] = {
         "operation": "repair_format_once",
@@ -72,7 +73,7 @@ def format_repair_messages(
         context_text=render_planning_context(
             message="Format repair uses the frozen planning context.",
             context=context,
-            evidence_catalog=[],
+            evidence_catalog=evidence_catalog,
             replan_mode=replan_mode,
         ),
         payload=payload,
@@ -86,6 +87,7 @@ def business_repair_messages(
     repair_instructions: list[str],
     message: str,
     replan_mode: ReplanMode,
+    evidence_catalog: list[EvidenceCatalogItem],
 ) -> list[dict[str, str]]:
     payload: dict[str, object] = {
         "operation": "repair_business_rules_once",
@@ -97,7 +99,7 @@ def business_repair_messages(
         context_text=render_planning_context(
             message=message,
             context=context,
-            evidence_catalog=[],
+            evidence_catalog=evidence_catalog,
             replan_mode=replan_mode,
         ),
         payload=payload,

@@ -43,7 +43,7 @@
 8. Tool Policy Grader；
 9. Replan Continuity Grader；
 10. Safety Routing Grader；
-11. Snapshot/Replay Grader。
+11. Replay Grader（仅在 V2 真实重执行与结果 diff 完成后启用）。
 
 规则可判的指标优先使用程序 Grader。LLM Judge 只作为辅助，不作为唯一真值。
 
@@ -59,3 +59,10 @@
 - non_deterministic Replay 数量。
 
 CI 默认跑不访问真实网络的 smoke 子集；完整 30 Case 手动或夜间运行。
+
+## 当前能力边界（PR-0）
+
+- `stage5-v1` 是确定性 Mock 数据集，可用于规则回归，不代表真实模型质量；
+- `quality_reviewer` 当前只是确定性完整性检查，不是 LLM Judge；
+- `snapshot_replay` 已从报告移除，禁止用恒真值伪装 Replay 能力；
+- V2 Replay 尚未交付前，报告不得宣称“快照重执行通过”或“Replay 一致性通过”。

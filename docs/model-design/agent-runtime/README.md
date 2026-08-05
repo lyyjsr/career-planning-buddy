@@ -106,6 +106,7 @@ class PlanningState(TypedDict, total=False):
     # 上下文与证据
     planning_context: PlanningContext
     evidence_catalog: list[EvidenceItem]
+    candidate_evidence_visibility: EvidenceVisibility
     tool_round: int
     tool_call_count: int
 

@@ -27,6 +27,7 @@ from app.agent.nodes import (
 )
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
+from app.harness.evidence import build_evidence_visibility
 from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
 from app.models.plan import Plan
@@ -40,6 +41,7 @@ from app.repositories.reviews import ReviewRepository
 from app.schemas.agent_runs import (
     AgentTurnResponse,
     EvidenceCatalogItem,
+    EvidenceVisibility,
     MemoryContext,
     PlanCandidate,
     PlanContext,
@@ -211,14 +213,17 @@ class FixedPlanningGraph:
         }
 
     async def _agent_node(self, state: PlanningState) -> dict[str, object]:
-        candidate, evidence_catalog, tool_round, tool_call_count = await self._nodes.run_with_step(
-            state["run_id"],
-            "career_planning_agent",
-            lambda step_id: self._generate_candidate(state, step_id),
+        candidate, evidence_catalog, visibility, tool_round, tool_call_count = (
+            await self._nodes.run_with_step(
+                state["run_id"],
+                "career_planning_agent",
+                lambda step_id: self._generate_candidate(state, step_id),
+            )
         )
         result: dict[str, object] = {
             "candidate_plan": candidate,
             "evidence_catalog": evidence_catalog,
+            "candidate_evidence_visibility": visibility,
             "tool_round": tool_round,
             "tool_call_count": tool_call_count,
         }
@@ -235,7 +240,7 @@ class FixedPlanningGraph:
                 validate_candidate(
                     state["candidate_plan"],
                     state["planning_context"],
-                    state.get("evidence_catalog", []),
+                    state["candidate_evidence_visibility"],
                 ),
                 {"check_count": 13, "attempt": attempt},
             ),
@@ -247,7 +252,7 @@ class FixedPlanningGraph:
         }
 
     async def _revise_node(self, state: PlanningState) -> dict[str, object]:
-        candidate, fallback_reason = await self._nodes.run(
+        candidate, fallback_reason, visibility = await self._nodes.run(
             state["run_id"],
             "revise_or_fallback",
             lambda: self._revise_or_fallback(state),
@@ -255,6 +260,7 @@ class FixedPlanningGraph:
         )
         return {
             "candidate_plan": candidate,
+            "candidate_evidence_visibility": visibility,
             "fallback_reason": fallback_reason,
             "repair_count": state.get("repair_count", 0) + 1,
         }
@@ -277,6 +283,7 @@ class FixedPlanningGraph:
             run_id=run_id,
             user_id=state["user_id"],
             candidate=state["candidate_plan"],
+            evidence_visibility=state["candidate_evidence_visibility"],
             companion=state["companion"],
             persist_step_id=persist_step.id,
             fallback_reason=state.get("fallback_reason"),
@@ -527,7 +534,9 @@ class FixedPlanningGraph:
         self,
         state: PlanningState,
         step_id: UUID,
-    ) -> NodeOutput[tuple[PlanCandidate, list[EvidenceCatalogItem], int, int]]:
+    ) -> NodeOutput[
+        tuple[PlanCandidate, list[EvidenceCatalogItem], EvidenceVisibility, int, int]
+    ]:
         context = state["planning_context"]
         mode = state["intent"].replan_mode
         evidence_catalog = list(state.get("evidence_catalog", []))
@@ -535,7 +544,7 @@ class FixedPlanningGraph:
         tool_call_count = state.get("tool_call_count", 0)
         total_usage: ProviderUsage | None = None
         prompt_version = state["runtime_config"].prompt_versions["career_planning"]
-        for _turn in range(3):
+        for turn_index in range(3):
             force_final = (
                 tool_round >= state["runtime_config"].max_tool_rounds
                 or tool_call_count >= state["runtime_config"].max_tool_calls
@@ -546,6 +555,10 @@ class FixedPlanningGraph:
             )
             if force_final:
                 available_tools = []
+            visible_catalog, visibility = build_evidence_visibility(
+                call_id=f"{state['run_id']}:career_planning:{turn_index + 1}",
+                evidence_catalog=evidence_catalog,
+            )
             # 当本轮没有任何 Tool 时，走更轻量的 generate_plan prompt 路径
             # （ProviderPlanResponse schema）。带 Tool 时才使用完整的 agent-turn prompt。
             using_plan_path = not available_tools
@@ -555,7 +568,7 @@ class FixedPlanningGraph:
                     context=context,
                     replan_mode=mode,
                     available_tools=available_tools,
-                    evidence_catalog=evidence_catalog,
+                    evidence_catalog=visible_catalog,
                     force_final=force_final,
                 )
             else:
@@ -563,6 +576,7 @@ class FixedPlanningGraph:
                     message=state["request"].message,
                     context=context,
                     replan_mode=mode,
+                    evidence_catalog=visible_catalog,
                 )
             usage = self._extract_usage(raw)
             self._budget.record_llm_call(usage.tokens_in, usage.tokens_out)
@@ -571,36 +585,28 @@ class FixedPlanningGraph:
                 if using_plan_path:
                     response = ProviderPlanResponse.model_validate(raw)
                     candidate = response.candidate
-                    # generate_plan 路径不会自动把 evidence_catalog 写到 candidate 上
-                    # （与 generate_agent_turn 不同），这里手动补齐，保证 evidence_refs
-                    # 与上下文一致，避免 agent-turn-only 测试断言失效。
-                    if evidence_catalog:
-                        allowed = evidence_catalog[:10]
-                        existing = {(ref.kind, str(ref.id)) for ref in candidate.evidence_refs}
-                        merged = list(candidate.evidence_refs)
-                        for cat_item in allowed:
-                            key = (cat_item.kind, str(cat_item.id))
-                            if key not in existing:
-                                from app.schemas.agent_runs import EvidenceRef
-
-                                merged.append(EvidenceRef(kind=cat_item.kind, id=cat_item.id))
-                        if merged != candidate.evidence_refs:
-                            payload = candidate.model_dump(mode="python")
-                            payload["evidence_refs"] = [
-                                {"kind": r.kind, "id": str(r.id)} for r in merged
-                            ]
-                            candidate = PlanCandidate.model_validate(payload)
                     return NodeOutput(
-                        (candidate, evidence_catalog, tool_round, tool_call_count),
-                        self._telemetry(total_usage, prompt_version),
+                        (
+                            candidate,
+                            evidence_catalog,
+                            visibility,
+                            tool_round,
+                            tool_call_count,
+                        ),
+                        self._telemetry(total_usage, prompt_version, visibility),
                     )
                 turn = AgentTurnResponse.model_validate(raw)
             except ValidationError:
                 self._budget.claim_format_repair()
+                repair_catalog, repair_visibility = build_evidence_visibility(
+                    call_id=f"{state['run_id']}:format_repair",
+                    evidence_catalog=evidence_catalog,
+                )
                 repaired = await self._provider.repair_format(
                     raw_output=raw,
                     context=context,
                     replan_mode=mode,
+                    evidence_catalog=repair_catalog,
                 )
                 repair_usage = self._extract_usage(repaired)
                 self._budget.record_llm_call(
@@ -614,18 +620,40 @@ class FixedPlanningGraph:
                 except ValidationError:
                     state["fallback_reason"] = "format_repair_failed"
                     fallback = fallback_candidate(context, mode)
+                    _, fallback_visibility = build_evidence_visibility(
+                        call_id=f"{state['run_id']}:format_fallback",
+                        evidence_catalog=[],
+                    )
                     return NodeOutput(
-                        (fallback, evidence_catalog, tool_round, tool_call_count),
-                        self._telemetry(total_usage, prompt_version),
+                        (
+                            fallback,
+                            evidence_catalog,
+                            fallback_visibility,
+                            tool_round,
+                            tool_call_count,
+                        ),
+                        self._telemetry(total_usage, prompt_version, repair_visibility),
                     )
                 return NodeOutput(
-                    (response.candidate, evidence_catalog, tool_round, tool_call_count),
-                    self._telemetry(total_usage, prompt_version),
+                    (
+                        response.candidate,
+                        evidence_catalog,
+                        repair_visibility,
+                        tool_round,
+                        tool_call_count,
+                    ),
+                    self._telemetry(total_usage, prompt_version, repair_visibility),
                 )
             if turn.final is not None:
                 return NodeOutput(
-                    (turn.final, evidence_catalog, tool_round, tool_call_count),
-                    self._telemetry(total_usage, prompt_version),
+                    (
+                        turn.final,
+                        evidence_catalog,
+                        visibility,
+                        tool_round,
+                        tool_call_count,
+                    ),
+                    self._telemetry(total_usage, prompt_version, visibility),
                 )
             if force_final:
                 raise StructuredOutputError("Tool requested after Tool budget was exhausted")
@@ -662,25 +690,46 @@ class FixedPlanningGraph:
             raise StructuredOutputError("Agent produced no turn")
         state["fallback_reason"] = "tool_round_exhausted"
         fallback = fallback_candidate(context, mode)
+        _, fallback_visibility = build_evidence_visibility(
+            call_id=f"{state['run_id']}:tool_fallback",
+            evidence_catalog=[],
+        )
         return NodeOutput(
-            (fallback, evidence_catalog, tool_round, tool_call_count),
-            self._telemetry(total_usage, prompt_version),
+            (
+                fallback,
+                evidence_catalog,
+                fallback_visibility,
+                tool_round,
+                tool_call_count,
+            ),
+            self._telemetry(total_usage, prompt_version, fallback_visibility),
         )
 
     async def _revise_or_fallback(
         self, state: PlanningState
-    ) -> NodeOutput[tuple[PlanCandidate, str | None]]:
+    ) -> NodeOutput[tuple[PlanCandidate, str | None, EvidenceVisibility]]:
         context = state["planning_context"]
         validation = state["validation_report"]
         if not self._budget.claim_business_repair():
             fallback = fallback_candidate(context, state["intent"].replan_mode)
-            return NodeOutput((fallback, "business_repair_exhausted"))
+            _, visibility = build_evidence_visibility(
+                call_id=f"{state['run_id']}:business_fallback",
+                evidence_catalog=[],
+            )
+            return NodeOutput((fallback, "business_repair_exhausted", visibility))
+        repair_catalog, visibility = build_evidence_visibility(
+            call_id=(
+                f"{state['run_id']}:business_repair:{state.get('repair_count', 0) + 1}"
+            ),
+            evidence_catalog=list(state.get("evidence_catalog", [])),
+        )
         raw = await self._provider.repair_business_rules(
             candidate=state["candidate_plan"],
             context=context,
             repair_instructions=validation.repair_instructions,
             message=state["request"].message,
             replan_mode=state["intent"].replan_mode,
+            evidence_catalog=repair_catalog,
         )
         usage = self._extract_usage(raw)
         self._budget.record_llm_call(usage.tokens_in, usage.tokens_out)
@@ -688,18 +737,24 @@ class FixedPlanningGraph:
             response = ProviderPlanResponse.model_validate(raw)
         except ValidationError:
             fallback = fallback_candidate(context, state["intent"].replan_mode)
+            _, fallback_visibility = build_evidence_visibility(
+                call_id=f"{state['run_id']}:business_invalid_fallback",
+                evidence_catalog=[],
+            )
             return NodeOutput(
-                (fallback, "business_repair_invalid"),
+                (fallback, "business_repair_invalid", fallback_visibility),
                 self._telemetry(
                     usage,
                     state["runtime_config"].prompt_versions["business_repair"],
+                    visibility,
                 ),
             )
         return NodeOutput(
-            (response.candidate, None),
+            (response.candidate, None, visibility),
             self._telemetry(
                 usage,
                 state["runtime_config"].prompt_versions["business_repair"],
+                visibility,
             ),
         )
 
@@ -742,10 +797,20 @@ class FixedPlanningGraph:
         )
 
     @staticmethod
-    def _telemetry(usage: ProviderUsage, prompt_version: str) -> NodeTelemetry:
+    def _telemetry(
+        usage: ProviderUsage,
+        prompt_version: str,
+        visibility: EvidenceVisibility,
+    ) -> NodeTelemetry:
         trace_data: dict[str, object] = {
             "latency_ms": usage.latency_ms,
             "provider": usage.provider,
+            "evidence_call_id": visibility.call_id,
+            "evidence_catalog_hash": visibility.catalog_hash,
+            "visible_evidence_ids": [str(item.id) for item in visibility.visible_refs],
+            "visible_evidence_count": len(visibility.visible_refs),
+            "truncated_evidence_ids": [str(item.id) for item in visibility.truncated_refs],
+            "truncated_evidence_count": len(visibility.truncated_refs),
         }
         if usage.request_id is not None:
             trace_data["request_id"] = usage.request_id

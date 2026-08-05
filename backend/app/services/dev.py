@@ -128,12 +128,11 @@ class DevTraceService:
             ),
         )
 
-    async def replay(self, run_id: UUID, *, tool_mode: str) -> ReplayResponse:
-        """Create an immutable shadow Run from captured snapshots and Tool fixtures.
+    async def legacy_trace_clone(self, run_id: UUID, *, tool_mode: str) -> ReplayResponse:
+        """Clone captured trace rows without executing the Agent graph.
 
-        Stage 5 Replay deliberately does not invoke a network Provider. It reproduces
-        the persisted outcome under the Mock model alias and copies only captured Tool
-        results. The source Run and its user-facing Plan are never updated.
+        This compatibility operation is intentionally not Replay: it does not invoke a
+        Provider, rebuild context, execute nodes, or compare a newly generated result.
         """
         async with session_transaction(self._session):
             source = await self._repo.get_run(run_id)
@@ -161,6 +160,7 @@ class DevTraceService:
                     "model_alias": "mock-career-planner-v1",
                     "replay_tool_mode": tool_mode,
                     "replay_deterministic": tool_mode == "fixture",
+                    "execution_kind": "legacy_trace_clone",
                 }
             )
             replay = AgentRun(
@@ -215,7 +215,10 @@ class DevTraceService:
                     latency_ms=0,
                     input_hash=source_step.input_hash,
                     output_hash=source_step.output_hash,
-                    trace_data={**source_step.trace_data, "replayed": True},
+                    trace_data={
+                        **source_step.trace_data,
+                        "execution_kind": "legacy_trace_clone",
+                    },
                     error_code=source_step.error_code,
                     error_message=source_step.error_message,
                     created_at=now,
@@ -247,8 +250,12 @@ class DevTraceService:
             event_payloads: list[tuple[str, dict[str, object]]] = [
                 ("run.created", {"status": "pending", "replay_of_run_id": str(source.id)}),
                 (
-                    "replay.started",
-                    {"tool_mode": tool_mode, "provider": "mock", "source_run_id": str(source.id)},
+                    "legacy_trace_clone.started",
+                    {
+                        "tool_mode": tool_mode,
+                        "source_run_id": str(source.id),
+                        "execution_kind": "legacy_trace_clone",
+                    },
                 ),
             ]
             event_payloads.extend(
@@ -259,13 +266,16 @@ class DevTraceService:
                         "step_sequence": step.sequence,
                         "status": step.status,
                         "latency_ms": 0,
-                        "replayed": True,
+                        "execution_kind": "legacy_trace_clone",
                     },
                 )
                 for step in source_steps
             )
             terminal_type = f"run.{source.status}"
-            terminal_payload: dict[str, object] = {"status": source.status, "replayed": True}
+            terminal_payload: dict[str, object] = {
+                "status": source.status,
+                "execution_kind": "legacy_trace_clone",
+            }
             if source.result_kind is not None:
                 terminal_payload["result_kind"] = source.result_kind
             if source.final_plan_id is not None:
@@ -292,6 +302,7 @@ class DevTraceService:
             replay_of_run_id=run_id,
             status=source.status,
             deterministic=tool_mode == "fixture",
+            execution_kind="legacy_trace_clone",
         )
 
     @staticmethod

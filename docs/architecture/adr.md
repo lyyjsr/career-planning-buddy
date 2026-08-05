@@ -12,6 +12,7 @@
 | 008 | LangGraph 负责编排，确定性规则不交给 LLM | Accepted |
 | 009 | Spec 驱动但以可运行纵切优先，禁止无限补文档 | Accepted |
 | 010 | Agent Run 冻结输入/配置快照并使用唯一终态 Finalizer | Accepted |
+| 011 | Eval Harness V2 采用真实重执行语义与逐调用证据可见性 | Accepted |
 
 ## ADR-001：独立单体架构
 
@@ -143,3 +144,19 @@ LangGraph 用于：固定条件路由、可序列化状态传递和 Tool Calling
 ## ADR-010：输入/配置快照与唯一终态
 
 Run 创建时冻结 graph/config snapshot，context_builder 后冻结 input snapshot。Replay 默认使用快照而不是读取当前用户数据。所有 completed/degraded/failed/cancelled 都由 AgentRunFinalizer 写入；persist 通过 finalize_plan 调用，每个 Run 只允许一个 terminal event。
+
+## ADR-011：Eval Harness V2 真实性与证据边界
+
+### 决策
+
+- 复制历史 Run/Trace/结果只称为 `legacy_trace_clone`，不得计为 Replay 或 Eval 通过项；
+- Replay 必须从冻结快照重新执行 Graph/Provider/fixture，并产出独立结果和 diff；
+- 每次候选生成或修复都冻结 `EvidenceVisibility(call_id, catalog_hash, visible_refs,
+  truncated_refs)`；
+- `evidence_refs` 只能引用产生当前候选的那次 Provider 调用可见证据；Graph 不自动补引用；
+- rule validator 与 finalizer 分别在生成后和持久化前执行相同的可见性约束。
+
+### 原因
+
+Run 级证据池只能证明证据曾经存在，不能证明模型在生成某个候选时看见过它。逐调用可见性
+使引用合法性可确定性评估，并避免跨用户证据、被压缩证据和失败 Tool 结果被误持久化。

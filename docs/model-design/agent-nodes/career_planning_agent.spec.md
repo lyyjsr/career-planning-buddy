@@ -94,7 +94,8 @@ class TaskCandidate(BaseModel):
 - `weekly_focus` 覆盖规划窗口，week_index 连续且不重复；
 - 所有 Task 的 `scheduled_date == plan_date`；
 - 当天任务 1~3 个，总时长不超过用户每日预算；
-- `evidence_refs` 只能引用本 Run evidence_catalog 中的 Memory/ExperienceAtom/SearchSource；
+- `evidence_refs` 只能引用产生当前候选的 Provider 调用实际可见的
+  Memory/ExperienceAtom/SearchSource；Graph 不得自动补齐引用；
 - 不允许自行改变用户 `goal_type`；
 - create_plan 不得假装存在历史执行事实；
 - `replan_mode=continue` 应延续原方向和下一周重点，不无故推翻；

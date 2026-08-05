@@ -1,4 +1,8 @@
-# Replay
+# Replay V2 目标契约
+
+> 当前 `POST /api/v1/dev/runs/{run_id}/replay` 仅是兼容入口，实际执行种类为
+> `legacy_trace_clone`：复制已持久化的 Run/Step/Tool/结果，不执行 Graph、Provider 或结果
+> diff，因此不得称为真实 Replay。响应会显式返回 `execution_kind=legacy_trace_clone`。
 
 ## 默认输入
 
@@ -38,3 +42,9 @@ tool_name + args_hash + tool_contract_version
 - 节点和 Tool 调用差异。
 
 Replay 不修改原 Run、原 Plan、原 Trace。默认只保存实验结果，不替换用户当前计划。
+
+## V2 完成条件
+
+只有同时满足以下条件，才可把执行种类标记为 Replay：从不可变 input/config snapshot
+重建上下文；按 fixture contract 执行 Tool；重新运行 Graph/Provider；生成独立结果；对新旧
+输出、规则、成本和 Trace 做 diff。复制旧结果不属于 Replay。

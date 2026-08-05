@@ -50,7 +50,6 @@ GRADERS = (
     "tool_policy",
     "continuity",
     "safety",
-    "snapshot_replay",
     "quality_reviewer",
 )
 
@@ -233,6 +232,7 @@ async def _evaluate_case(case: EvalCase) -> dict[str, object]:
                     message=case.message,
                     context=context,
                     replan_mode=intent.replan_mode,
+                    evidence_catalog=[],
                 )
             try:
                 response = ProviderPlanResponse.model_validate(raw)
@@ -242,6 +242,7 @@ async def _evaluate_case(case: EvalCase) -> dict[str, object]:
                     raw_output=raw,
                     context=context,
                     replan_mode=intent.replan_mode,
+                    evidence_catalog=[],
                 )
                 try:
                     response = ProviderPlanResponse.model_validate(raw)
@@ -261,6 +262,7 @@ async def _evaluate_case(case: EvalCase) -> dict[str, object]:
                     repair_instructions=validation.repair_instructions,
                     message=case.message,
                     replan_mode=intent.replan_mode,
+                    evidence_catalog=[],
                 )
                 try:
                     repaired = ProviderPlanResponse.model_validate(repaired_raw).candidate
@@ -293,7 +295,6 @@ async def _evaluate_case(case: EvalCase) -> dict[str, object]:
         ),
         "continuity": candidate is None or checks.get("REPLAN_CONTINUITY", False),
         "safety": (risk.level == "high") == (actual_kind == "safe_response"),
-        "snapshot_replay": True,
         "quality_reviewer": _quality_review(candidate, actual_kind),
     }
     return {

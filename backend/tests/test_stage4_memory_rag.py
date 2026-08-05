@@ -13,6 +13,7 @@ from app.agent.errors import ProviderConfigurationError
 from app.agent.executor import AgentRunExecutor
 from app.agent.nodes import validate_candidate
 from app.core.config import Settings
+from app.harness.evidence import build_evidence_visibility
 from app.models.agent_run import AgentEvent, AgentStep, ToolCall
 from app.models.evidence import ExperienceAtom, Memory, SearchSource
 from app.models.plan import Plan
@@ -378,7 +379,7 @@ async def test_agent_tool_loop_persists_evidence_and_keeps_terminal_last(
     db_session.add(memory)
     await db_session.flush()
     memory_id = memory.id
-    settings = stage4_settings()
+    settings = stage4_settings().model_copy(update={"agent_max_tool_rounds": 1})
     sessions = runtime_factory(db_connection)
     registry = build_tool_registry(
         settings=settings,
@@ -405,9 +406,18 @@ async def test_agent_tool_loop_persists_evidence_and_keeps_terminal_last(
             select(AgentEvent).where(AgentEvent.run_id == run.id).order_by(AgentEvent.sequence)
         )
     )
+    agent_step = await db_session.scalar(
+        select(AgentStep).where(
+            AgentStep.run_id == run.id,
+            AgentStep.node_name == "career_planning_agent",
+        )
+    )
     assert completed.status == "completed"
     assert plan is not None
     assert plan.evidence_refs_json == [{"kind": "memory", "id": str(memory_id)}]
+    assert agent_step is not None
+    assert agent_step.trace_data["visible_evidence_ids"] == [str(memory_id)]
+    assert agent_step.trace_data["visible_evidence_count"] == 1
     assert [event.event_type for event in events if event.event_type.startswith("tool.")] == [
         "tool.called",
         "tool.returned",
@@ -442,12 +452,15 @@ async def test_search_provider_failure_degrades_tool_but_not_plan(
     )
     await AgentRunExecutor(sessions, MockPlanningProvider(), registry).execute(run.id)
     completed = await refresh_run(db_session, run.id)
+    plan = await db_session.scalar(select(Plan).where(Plan.source_run_id == run.id))
     failures = list(
         await db_session.scalars(
             select(ToolCall).where(ToolCall.run_id == run.id, ToolCall.success.is_(False))
         )
     )
     assert completed.status == "completed"
+    assert plan is not None
+    assert plan.evidence_refs_json == []
     assert failures
     assert {item.error_code for item in failures} == {"TOOL_PROVIDER_UNAVAILABLE"}
 
@@ -495,7 +508,9 @@ def test_forged_evidence_reference_is_rejected() -> None:
     report = validate_candidate(
         forged,
         context,
-        [
+        build_evidence_visibility(
+            call_id="forged-evidence-test",
+            evidence_catalog=[
             EvidenceCatalogItem(
                 kind="memory",
                 id=UUID("00000000-0000-0000-0000-000000000002"),
@@ -503,7 +518,8 @@ def test_forged_evidence_reference_is_rejected() -> None:
                 content="allowed",
                 reliability=1,
             )
-        ],
+            ],
+        )[1],
     )
     source_check = next(check for check in report.checks if check.code == "SOURCE_INTEGRITY")
     assert source_check.passed is False

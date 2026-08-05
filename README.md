@@ -102,9 +102,10 @@ The API flow is:
 
 The developer console is at `http://localhost:5173/dev/runs`. It requires a JWT for a
 local user whose persisted role is `dev`. It displays redacted snapshots and hashes,
-steps, Tool calls, durable events, costs/latency, Replay lineage, and the exactly-one,
-terminal-last invariant. `POST /api/v1/dev/runs/{id}/replay` defaults to fixture-only
-Mock replay and never mutates the source Run or Plan.
+steps, Tool calls, durable events, costs/latency, execution lineage, and the exactly-one,
+terminal-last invariant. `POST /api/v1/dev/runs/{id}/replay` is currently a compatibility
+trace-clone endpoint and returns `execution_kind=legacy_trace_clone`; it is not a Graph
+re-execution Replay and never mutates the source Run or Plan.
 
 ## Eval, Replay, and Bad Cases
 

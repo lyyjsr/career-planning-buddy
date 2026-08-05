@@ -260,6 +260,15 @@ class EvidenceRef(StrictModel):
     id: UUID
 
 
+class EvidenceVisibility(StrictModel):
+    """Evidence refs rendered into one candidate-producing Provider call."""
+
+    call_id: str = Field(min_length=1, max_length=200)
+    catalog_hash: str = Field(min_length=64, max_length=64)
+    visible_refs: list[EvidenceRef] = Field(default_factory=list, max_length=100)
+    truncated_refs: list[EvidenceRef] = Field(default_factory=list, max_length=100)
+
+
 class TaskCandidate(StrictModel):
     title: str = Field(min_length=1, max_length=120)
     task_type: TaskType
@@ -357,6 +366,7 @@ class PlanningState(TypedDict, total=False):
     intent: IntentResult
     planning_context: PlanningContext
     evidence_catalog: list[EvidenceCatalogItem]
+    candidate_evidence_visibility: EvidenceVisibility
     tool_round: int
     tool_call_count: int
     candidate_plan: PlanCandidate

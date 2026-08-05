@@ -22,6 +22,21 @@
 
 ## POST /api/v1/dev/runs/{run_id}/replay
 
+PR-0 兼容语义：当前端点只创建 `legacy_trace_clone`，不会重新执行 Agent。响应包含：
+
+```json
+{
+  "run_id": "...",
+  "replay_of_run_id": "...",
+  "status": "completed",
+  "deterministic": true,
+  "execution_kind": "legacy_trace_clone"
+}
+```
+
+请求体中的 V2 字段和下列真实 Replay 行为是目标契约；在重执行引擎交付前不得据此声称
+端点已经完成 Replay。
+
 ```json
 {
   "target_model": null,

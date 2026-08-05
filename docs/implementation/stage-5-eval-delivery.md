@@ -11,13 +11,17 @@
 3. 30 条 JSONL 固定 Eval Case；
 4. 规则 Grader：意图、任务数量、时间预算、可启动性、可验证性、来源、连续性、安全路由；
 5. Bad Case 回流；
-6. Replay：原输入快照 + 配置快照 + Tool fixture；
+6. Replay V2：原输入快照 + 配置快照 + Tool fixture 的真实重执行与 diff；
 7. quality_reviewer 默认由 Eval/Replay 离线 shadow；
 8. Docker Compose 一键启动；
 9. CI：lint、type check、test、migration、eval smoke；
 10. README 截图、Demo、真实测试结果。
 
 ## Replay 范围
+
+当前实现仅有 `legacy_trace_clone`，保留 `/dev/runs/{id}/replay` 路径用于兼容，但响应必须
+显式标记执行种类，文档、报告和 Demo 不得把它作为 Replay 能力。以下内容是 V2 验收目标，
+不是当前已交付事实。
 
 MVP Replay 支持：
 

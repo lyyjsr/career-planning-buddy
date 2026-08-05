@@ -123,7 +123,7 @@ async def test_dev_trace_is_role_guarded_redacted_and_terminal_checked(
 
 
 @pytest.mark.asyncio
-async def test_replay_is_mock_deterministic_and_does_not_mutate_source(
+async def test_legacy_trace_clone_is_explicit_and_does_not_mutate_source(
     api_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -145,9 +145,11 @@ async def test_replay_is_mock_deterministic_and_does_not_mutate_source(
 
     assert response.status_code == HTTPStatus.ACCEPTED
     assert response.json()["deterministic"] is True
+    assert response.json()["execution_kind"] == "legacy_trace_clone"
     assert replay is not None
     assert replay.replay_of_run_id == source.id
     assert replay.config_snapshot_json["provider"] == "mock"
+    assert replay.config_snapshot_json["execution_kind"] == "legacy_trace_clone"
     assert replay.result_payload_json == source.result_payload_json
     assert source.replay_of_run_id is None
 
@@ -211,6 +213,7 @@ async def test_fixed_eval_dataset_runs_all_graders_without_network() -> None:
     rates = report["grader_pass_rates"]
     assert isinstance(rates, dict)
     assert set(rates) == set(GRADERS)
+    assert "snapshot_replay" not in rates
     assert all(value == 1.0 for value in rates.values())
 
 

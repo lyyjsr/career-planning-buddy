@@ -2,7 +2,8 @@
 
 ## Input
 
-`PlanCandidate + PlanningContext + evidence_catalog`。
+`PlanCandidate + PlanningContext + candidate EvidenceVisibility`。可见性必须来自产生当前候选的
+那一次 Provider 调用，不能用整个 Run 的累计 evidence_catalog 替代。
 
 ## Output
 
@@ -32,7 +33,7 @@ class ValidationReport(BaseModel):
 | SCHEDULE_DATE | 所有 Task 日期必须等于 planning_date |
 | RECENT_DUPLICATE | 不重复近期已完成交付物 |
 | REPLAN_CONTINUITY | continue 保持方向并推进；adjust 保留 completed facts 并回应 blocker |
-| SOURCE_INTEGRITY | evidence_ref 存在于当前 Run evidence_catalog 且类型匹配 |
+| SOURCE_INTEGRITY | evidence_ref 在当前候选 Provider 调用的 visible refs 中且类型匹配 |
 | GOAL_IMMUTABLE | 不擅自改变 effective_goal_type |
 | TEXT_LENGTH | 所有文本满足 Schema 长度 |
 | TASK_UNIQUENESS | 本批任务标题/交付物不重复 |

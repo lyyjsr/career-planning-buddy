@@ -2083,6 +2083,11 @@
             "title": "Deterministic",
             "type": "boolean"
           },
+          "execution_kind": {
+            "const": "legacy_trace_clone",
+            "title": "Execution Kind",
+            "type": "string"
+          },
           "replay_of_run_id": {
             "format": "uuid",
             "title": "Replay Of Run Id",
@@ -2102,7 +2107,8 @@
           "run_id",
           "replay_of_run_id",
           "status",
-          "deterministic"
+          "deterministic",
+          "execution_kind"
         ],
         "title": "ReplayResponse",
         "type": "object"

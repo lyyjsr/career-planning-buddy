@@ -57,6 +57,7 @@ class PlanningProvider(Protocol):
         message: str,
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]: ...
 
     async def repair_format(
@@ -65,6 +66,7 @@ class PlanningProvider(Protocol):
         raw_output: Mapping[str, object],
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]: ...
 
     async def repair_business_rules(
@@ -75,6 +77,7 @@ class PlanningProvider(Protocol):
         repair_instructions: list[str],
         message: str,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]: ...
 
 
@@ -112,12 +115,14 @@ class OpenAICompatiblePlanningProvider:
         message: str,
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         return await self._generate(
             generation_messages(
                 message=message,
                 context=context,
                 replan_mode=replan_mode,
+                evidence_catalog=evidence_catalog,
             )
         )
 
@@ -196,12 +201,14 @@ class OpenAICompatiblePlanningProvider:
         raw_output: Mapping[str, object],
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         return await self._generate(
             format_repair_messages(
                 raw_output=raw_output,
                 context=context,
                 replan_mode=replan_mode,
+                evidence_catalog=evidence_catalog,
             )
         )
 
@@ -213,6 +220,7 @@ class OpenAICompatiblePlanningProvider:
         repair_instructions: list[str],
         message: str,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         return await self._generate(
             business_repair_messages(
@@ -221,6 +229,7 @@ class OpenAICompatiblePlanningProvider:
                 repair_instructions=repair_instructions,
                 message=message,
                 replan_mode=replan_mode,
+                evidence_catalog=evidence_catalog,
             )
         )
 
@@ -531,6 +540,7 @@ class MockPlanningProvider:
         message: str,
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         self.plan_calls += 1
         if "[mock:timeout]" in message:
@@ -564,6 +574,23 @@ class MockPlanningProvider:
             return ProviderPlanResponse(
                 candidate=invalid_candidate, usage=self._usage()
             ).model_dump(mode="json")
+        if evidence_catalog and "[mock:tool-" in message:
+            payload = candidate.model_dump(mode="python")
+            payload["evidence_refs"] = [
+                {"kind": item.kind, "id": item.id} for item in evidence_catalog[:10]
+            ]
+            candidate = PlanCandidate.model_validate(payload)
+        if "[mock:forged-evidence]" in message:
+            from uuid import UUID
+
+            payload = candidate.model_dump(mode="python")
+            payload["evidence_refs"] = [
+                {
+                    "kind": "memory",
+                    "id": UUID("00000000-0000-0000-0000-000000000001"),
+                }
+            ]
+            candidate = PlanCandidate.model_validate(payload)
         return ProviderPlanResponse(candidate=candidate, usage=self._usage()).model_dump(
             mode="json"
         )
@@ -574,6 +601,7 @@ class MockPlanningProvider:
         raw_output: Mapping[str, object],
         context: PlanningContext,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         self.format_repair_calls += 1
         if raw_output.get("_mock_scenario") == "invalid-schema-twice":
@@ -591,9 +619,10 @@ class MockPlanningProvider:
         repair_instructions: list[str],
         message: str,
         replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
         self.business_repair_calls += 1
-        del candidate, repair_instructions
+        del candidate, repair_instructions, evidence_catalog
         repaired = self._candidate(context, replan_mode)
         if "[mock:rule-fallback]" in message:
             repaired = repaired.model_copy(

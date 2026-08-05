@@ -11,12 +11,14 @@ from app.agent.errors import PersistTransactionError
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.events import EventRecorder
+from app.harness.evidence import evidence_refs_are_visible
 from app.harness.trace import TraceRecorder
 from app.models.agent_run import AgentRun, AgentStep
 from app.repositories.plans import PlanRepository
 from app.schemas.agent_runs import (
     ClarificationRequest,
     CompanionMessageCandidate,
+    EvidenceVisibility,
     PlanCandidate,
     PlanResultSummary,
     SafeResponse,
@@ -40,12 +42,17 @@ class AgentRunFinalizer:
         run_id: UUID,
         user_id: UUID,
         candidate: PlanCandidate,
+        evidence_visibility: EvidenceVisibility,
         companion: CompanionMessageCandidate,
         persist_step_id: UUID,
         fallback_reason: str | None,
         simulate_failure: bool = False,
     ) -> None:
         started = monotonic()
+        if not evidence_refs_are_visible(candidate.evidence_refs, evidence_visibility):
+            raise PersistTransactionError(
+                "candidate evidence refs are outside the final Provider call visibility"
+            )
         try:
             async with self._session_factory() as session:
                 async with session_transaction(session):

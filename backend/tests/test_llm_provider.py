@@ -107,6 +107,7 @@ async def test_official_deepseek_disables_thinking_for_structured_output() -> No
         message="制定计划",
         context=context,
         replan_mode=ReplanMode.INITIAL,
+        evidence_catalog=[],
     )
 
     assert ProviderPlanResponse.model_validate(raw).candidate == plan
@@ -121,6 +122,7 @@ async def test_openai_compatible_provider_returns_validated_envelope_metadata() 
         message="制定计划",
         context=context,
         replan_mode=ReplanMode.INITIAL,
+        evidence_catalog=[],
     )
     response = ProviderPlanResponse.model_validate(raw)
 
@@ -149,12 +151,14 @@ async def test_invalid_json_can_be_repaired_once_through_explicit_provider_call(
         message="制定计划",
         context=context,
         replan_mode=ReplanMode.INITIAL,
+        evidence_catalog=[],
     )
     assert "_raw_text" in raw
     repaired = await provider.repair_format(
         raw_output=raw,
         context=context,
         replan_mode=ReplanMode.INITIAL,
+        evidence_catalog=[],
     )
 
     assert ProviderPlanResponse.model_validate(repaired).candidate == plan
@@ -181,6 +185,7 @@ async def test_provider_http_failures_map_to_stable_errors(
             message="制定计划",
             context=context,
             replan_mode=ReplanMode.INITIAL,
+            evidence_catalog=[],
         )
 
 

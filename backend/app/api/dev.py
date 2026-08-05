@@ -63,7 +63,8 @@ async def replay_run(
     service: Annotated[DevTraceService, Depends(get_dev_trace_service)],
     _dev: Annotated[AuthenticatedUser, Depends(require_dev)],
 ) -> ReplayResponse:
-    return await service.replay(run_id, tool_mode=payload.tool_mode)
+    # Compatibility endpoint: PR-0 freezes this operation as a trace clone, not Replay.
+    return await service.legacy_trace_clone(run_id, tool_mode=payload.tool_mode)
 
 
 @router.get("/evals/datasets", response_model=EvalDatasetListResponse)

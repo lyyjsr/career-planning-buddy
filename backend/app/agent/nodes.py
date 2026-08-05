@@ -5,10 +5,11 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
+from app.harness.evidence import evidence_refs_are_visible
 from app.schemas.agent_runs import (
     ClarificationRequest,
     CompanionMessageCandidate,
-    EvidenceCatalogItem,
+    EvidenceVisibility,
     IntentResult,
     PlanCandidate,
     PlanContext,
@@ -234,10 +235,9 @@ CHECK_ORDER = (
 def validate_candidate(
     candidate: PlanCandidate,
     context: PlanningContext,
-    evidence_catalog: list[EvidenceCatalogItem] | None = None,
+    evidence_visibility: EvidenceVisibility | None = None,
 ) -> ValidationReport:
     window = context.planning_window
-    allowed_evidence = {(item.kind, item.id) for item in (evidence_catalog or [])}
     completed_deliverables = set(context.completed_facts)
     completed_deliverables.update(
         task.deliverable for task in context.recent_tasks if task.state == TaskStatus.COMPLETED
@@ -265,9 +265,10 @@ def validate_candidate(
             task.deliverable in completed_deliverables for task in candidate.tasks
         ),
         "REPLAN_CONTINUITY": _valid_replan_continuity(candidate, context),
-        "SOURCE_INTEGRITY": all(
-            (reference.kind, reference.id) in allowed_evidence
-            for reference in candidate.evidence_refs
+        "SOURCE_INTEGRITY": (
+            not candidate.evidence_refs
+            or evidence_visibility is not None
+            and evidence_refs_are_visible(candidate.evidence_refs, evidence_visibility)
         ),
         "GOAL_IMMUTABLE": True,
         "TEXT_LENGTH": True,
