@@ -59,9 +59,11 @@ EXPECTED_ALLOWED_KINDS = {
     "model": frozenset({
         EvidenceKind.TOOL_CALL_PROJECTION,
         EvidenceKind.EVIDENCE_VISIBLE_REFS,
+        EvidenceKind.PLAN_PROJECTION,
         EvidenceKind.RUN_METRICS,
         EvidenceKind.REPAIR_SIGNAL,
         EvidenceKind.PROVIDER_CALL_PROJECTION,
+        EvidenceKind.EXPECTED_CITATIONS_MAP,
     }),
 }
 

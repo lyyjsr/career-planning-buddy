@@ -430,6 +430,23 @@ class TrialRunner:
             snapshot["exclude_memory_categories"] = [
                 str(c) for c in excluded if isinstance(c, str)
             ]
+        # PR-8b: ``pinned_memory_visibility="hidden"`` filters planted Memory
+        # rows out of the planning catalog. FixtureLoader suffixes their
+        # category with "__hidden" when planting; tell select_memories to
+        # exclude those categories. The lookup Tool is unaffected.
+        visibility = provider_fixtures.get("pinned_memory_visibility")
+        if isinstance(visibility, str) and visibility == "hidden":
+            existing_raw = snapshot.get("exclude_memory_categories")
+            existing: list[str] = (
+                [str(c) for c in existing_raw if isinstance(c, str)]
+                if isinstance(existing_raw, list)
+                else []
+            )
+            for base_cat in ("relevant", "irrelevant", "conflicting"):
+                tag = f"{base_cat}__hidden"
+                if tag not in existing:
+                    existing.append(tag)
+            snapshot["exclude_memory_categories"] = existing
         cc = provider_fixtures.get("context_compression")
         if isinstance(cc, dict):
             if isinstance(cc.get("recent_tasks_budget"), int):

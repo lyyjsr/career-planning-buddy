@@ -29,9 +29,11 @@ GRADER_VERSION = "v1"
 ALLOWED_KINDS = frozenset({
     EvidenceKind.TOOL_CALL_PROJECTION,
     EvidenceKind.EVIDENCE_VISIBLE_REFS,
+    EvidenceKind.PLAN_PROJECTION,
     EvidenceKind.RUN_METRICS,
     EvidenceKind.REPAIR_SIGNAL,
     EvidenceKind.PROVIDER_CALL_PROJECTION,
+    EvidenceKind.EXPECTED_CITATIONS_MAP,
 })
 
 
@@ -54,6 +56,8 @@ def _boolean_grade(
 def _numeric_grade(
     *, name: str, score: float, threshold: float,
     evidence_ids: list[UUID], rationale: str,
+    actual: object | None = None,
+    expected: object | None = None,
 ) -> GradeResult:
     return GradeResult(
         grader_name=f"{GRADER_NAME_PREFIX}.{name}",
@@ -62,7 +66,11 @@ def _numeric_grade(
         metric_type="numeric",
         score=score, threshold=threshold, hard_gate=False,
         evidence_item_ids=evidence_ids,
-        evidence={"actual": score, "expected": f">= {threshold}", "subgrader": name},
+        evidence={
+            "actual": score if actual is None else actual,
+            "expected": f">= {threshold}" if expected is None else expected,
+            "subgrader": name,
+        },
         rationale=rationale,
     )
 
@@ -81,7 +89,6 @@ def _not_applicable(name: str, evidence_ids: list[UUID], rationale: str) -> Grad
 
 
 async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -> list[GradeResult]:
-    del expected
     metrics = view.first(EvidenceKind.RUN_METRICS)
     metrics_id = metrics.id if metrics is not None else None
     repair = view.first(EvidenceKind.REPAIR_SIGNAL)
@@ -190,4 +197,120 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
         rationale="tokens should be non-zero on any real model interaction",
     ))
 
+    # 5. PR-8b: evidence_citation_precision/recall -- counterfactual axis.
+    #    Compares PlanCandidate.evidence_refs (Memory UUIDs) against the
+    #    expected_citations strings declared on the Case. The collector
+    #    emits an EXPECTED_CITATIONS_MAP item that translates the strings
+    #    into UUIDs so the two sets can be intersected. Returns N/A rows
+    #    (subgrader=N/A shape) when there is no expected citation set or
+    #    no plan projection, preserving the per-Trial score contract.
+    citation_results = _evidence_citation_grades(
+        view=view, expected=expected, evidence_ids=[metrics_id] if metrics_id else []
+    )
+    results.extend(citation_results)
+
     return results
+
+
+def _evidence_citation_grades(
+    *,
+    view: AuthorizedView,
+    expected: EvalCase,
+    evidence_ids: list[UUID],
+) -> list[GradeResult]:
+    """PR-8b Evidence Citation precision + recall.
+
+    Emits two numeric grades (``evidence_citation_precision`` /
+    ``evidence_citation_recall``). When the case carries no
+    ``expected_citations`` fixture or the runtime produced no PLAN_PROJECTION,
+    emits two N/A rows instead so consumers see a deterministic count.
+    """
+
+    no_expected = expected.scenario.provider_fixtures.get("expected_citations")
+    if not isinstance(no_expected, list) or not no_expected:
+        return [
+            _not_applicable(
+                "evidence_citation_precision", evidence_ids,
+                "case does not declare expected_citations",
+            ),
+            _not_applicable(
+                "evidence_citation_recall", evidence_ids,
+                "case does not declare expected_citations",
+            ),
+        ]
+
+    plan_proj = view.first(EvidenceKind.PLAN_PROJECTION)
+    if plan_proj is None or not plan_proj.projection:
+        return [
+            _not_applicable(
+                "evidence_citation_precision", evidence_ids,
+                "no plan projection to verify",
+            ),
+            _not_applicable(
+                "evidence_citation_recall", evidence_ids,
+                "no plan projection to verify",
+            ),
+        ]
+
+    plan_refs_raw = as_dict_list(plan_proj.projection.get("evidence_refs") or [])
+    actual_ids = {
+        str(ref.get("id"))
+        for ref in plan_refs_raw
+        if isinstance(ref, dict) and ref.get("id")
+    }
+    expected_strs = [s for s in no_expected if isinstance(s, str) and s]
+
+    mapping_item = view.first(EvidenceKind.EXPECTED_CITATIONS_MAP)
+    raw_mapping = (
+        mapping_item.projection.get("expected_citations_map")
+        if mapping_item is not None
+        else None
+    )
+    mapping_dict = raw_mapping if isinstance(raw_mapping, dict) else {}
+    expected_uuids = {
+        str(mapping_dict[s])
+        for s in expected_strs
+        if isinstance(mapping_dict.get(s), str)
+    }
+
+    hits = actual_ids & expected_uuids
+    precision = (len(hits) / len(actual_ids)) if actual_ids else 0.0
+    recall = (len(hits) / len(expected_uuids)) if expected_uuids else 1.0
+
+    precision_threshold = 0.5
+    recall_threshold = 0.5
+    shared_evidence_ids = list(evidence_ids)
+    if mapping_item is not None and mapping_item.id is not None:
+        shared_evidence_ids.append(mapping_item.id)
+
+    return [
+        _numeric_grade(
+            name="evidence_citation_precision",
+            score=precision,
+            threshold=precision_threshold,
+            evidence_ids=shared_evidence_ids,
+            actual={
+                "hits": sorted(hits),
+                "actual_refs": sorted(actual_ids),
+                "expected_uuids": sorted(expected_uuids),
+            },
+            expected=f"refs subset of {sorted(expected_uuids)}",
+            rationale=(
+                "fraction of plan evidence_refs that match expected_citations"
+            ),
+        ),
+        _numeric_grade(
+            name="evidence_citation_recall",
+            score=recall,
+            threshold=recall_threshold,
+            evidence_ids=shared_evidence_ids,
+            actual={
+                "hits": sorted(hits),
+                "missing": sorted(expected_uuids - actual_ids),
+            },
+            expected=f"refs cover {sorted(expected_uuids)}",
+            rationale=(
+                "fraction of expected_citations that appear in plan evidence_refs"
+            ),
+        ),
+    ]

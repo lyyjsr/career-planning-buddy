@@ -62,6 +62,13 @@ class EvidenceKind(StrEnum):
     REPAIR_SIGNAL = "repair_signal"
     PROVIDER_CALL_PROJECTION = "provider_call_projection"
 
+    # PR-8b: synthetic kind emitted by collect_evidence carrying the
+    # {fixture_memory_id -> planted Memory UUID} map. Consumed by the
+    # evidence_citation_precision_recall sub-grader to translate the
+    # expected_citations strings (set on the Case) into the UUID form
+    # that PlanCandidate.evidence_refs actually carries.
+    EXPECTED_CITATIONS_MAP = "expected_citations_map"
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceItem:

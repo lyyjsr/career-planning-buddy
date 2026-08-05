@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.nodes import HIGH_RISK_PATTERNS
 from app.models.agent_run import AgentEvent, AgentStep
+from app.models.evidence import Memory
 from app.models.plan import Plan, Task
 from evals.v2.collectors.outcome import (
     RunOutcome,
@@ -228,6 +229,34 @@ async def collect_evidence(
             source_type="tool_call", source_id=source_id,
             projection=tool_call,
         ))
+
+    # PR-8b: emit a synthetic EXPECTED_CITATIONS_MAP evidence so the
+    # evidence_citation_precision/recall sub-grader can translate the
+    # expected_citations=["mem-A", ...] strings (set on the Case) into
+    # the planted Memory UUIDs that PlanCandidate.evidence_refs actually
+    # carries. Always emits a row, even with an empty map, so a grader
+    # can distinguish "no planted memories" from "missing data".
+    planted_rows = (
+        await session.scalars(
+            select(Memory).where(
+                Memory.user_id == outcome.user_id,
+                Memory.status == "active",
+            )
+        )
+    ).all()
+    fixture_map: dict[str, str] = {}
+    for mem in planted_rows:
+        raw_content = mem.content_json if isinstance(mem.content_json, dict) else {}
+        fmid = raw_content.get("fixture_memory_id")
+        if isinstance(fmid, str) and fmid:
+            fixture_map[fmid] = str(mem.id)
+    items.append(_item(
+        trial_id=trial_id,
+        kind=EvidenceKind.EXPECTED_CITATIONS_MAP,
+        source_type="planted_memory_map",
+        source_id="fixture_memory_id_mapping",
+        projection={"expected_citations_map": fixture_map},
+    ))
 
     # --- risk + repair + visible evidence derived from raw rows ---
     event_rows = await session.scalars(

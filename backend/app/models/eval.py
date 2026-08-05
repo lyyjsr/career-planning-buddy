@@ -280,7 +280,7 @@ class EvalEvidenceItem(Base):
             "'run_metrics','outcome_status','evidence_visible_refs',"
             "'transcript_hash','risk_signals','redacted_output',"
             "'cross_user_signal','tool_allowlist','repair_signal',"
-            "'provider_call_projection')",
+            "'provider_call_projection','expected_citations_map')",
             name="ck_eval_evidence_items_kind",
         ),
         CheckConstraint(

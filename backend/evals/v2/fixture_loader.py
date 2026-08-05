@@ -217,14 +217,23 @@ class FixtureLoader:
             if not content:
                 continue
             memory_id_value = entry.get("memory_id")
-            category_value = entry.get("category") or "relevant"
+            category_value = str(entry.get("category") or "relevant")
+            # PR-8b: when the case asks for hidden pinned memories, suffix the
+            # category with "__hidden" so ``select_memories`` can filter them
+            # out of the planning catalog via ``exclude_memory_categories``
+            # (set by ``TrialRunner._apply_counterfactual_overrides`` when
+            # visibility=="hidden"). The memory_lookup Tool path does not
+            # consult exclude_categories, so hidden rows are still reachable
+            # through explicit lookups.
+            if visibility == "hidden":
+                category_value = f"{category_value}__hidden"
             memory = Memory(
                 id=uuid4(),
                 user_id=user_id,
                 memory_type="stable_preference",
                 summary=content[:500],
                 content_json={
-                    "category": str(category_value),
+                    "category": category_value,
                     "visibility": visibility,
                     "counterfactual": True,
                     "fixture_memory_id": (
