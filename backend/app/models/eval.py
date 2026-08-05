@@ -101,8 +101,27 @@ class EvalTrial(Base):
 
     __tablename__ = "eval_trials"
     __table_args__ = (
-        UniqueConstraint(
-            "experiment_id", "case_id", "trial_index", name="uq_eval_trials_case_index"
+        # PR-8: enforce uniqueness for NULL-variant (legacy) and non-NULL
+        # variant (paired counterfactual) Trials via PostgreSQL partial
+        # unique indexes. UniqueConstraint does not accept postgresql_where,
+        # so we model both as partial indexes; the legacy
+        # ``uq_eval_trials_case_index`` name is preserved on the NULL arm.
+        Index(
+            "uq_eval_trials_case_index",
+            "experiment_id",
+            "case_id",
+            "trial_index",
+            unique=True,
+            postgresql_where=text("variant IS NULL"),
+        ),
+        Index(
+            "uq_eval_trials_case_index_variant",
+            "experiment_id",
+            "case_id",
+            "variant",
+            "trial_index",
+            unique=True,
+            postgresql_where=text("variant IS NOT NULL"),
         ),
         CheckConstraint("trial_index >= 0", name="ck_eval_trials_trial_index"),
         CheckConstraint("seed >= 0", name="ck_eval_trials_seed"),
@@ -127,6 +146,11 @@ class EvalTrial(Base):
         ),
         Index("ix_eval_trials_experiment_status", "experiment_id", "status"),
         Index("ix_eval_trials_run_id", "run_id"),
+        Index(
+            "ix_eval_trials_group",
+            "counterfactual_group_id",
+            postgresql_where=text("counterfactual_group_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -141,6 +165,13 @@ class EvalTrial(Base):
     case_fixture_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     trial_index: Mapped[int] = mapped_column(Integer, nullable=False)
     seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # PR-8: counterfactual pairing. ``variant`` identifies which ablation
+    # arm the Trial represents within its group; ``counterfactual_group_id``
+    # ties two or more variants together for paired-diff reporting. Both
+    # are NULL for pre-PR-8 single-arm Trials, which preserves the legacy
+    # uniqueness contract (uq_eval_trials_case_index).
+    variant: Mapped[str | None] = mapped_column(String(64))
+    counterfactual_group_id: Mapped[str | None] = mapped_column(String(64))
     run_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="evaluation")
     run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="RESTRICT")

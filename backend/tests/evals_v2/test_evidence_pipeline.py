@@ -305,3 +305,57 @@ async def test_collect_evidence_stable_hashes_under_recollection(
     assert hashes1 == hashes2, (
         "collect_evidence is non-deterministic across calls on the same outcome"
     )
+
+
+@pytest.mark.asyncio
+async def test_pca1_tool_call_projections_deduplicate_per_call_id(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    """PCA-1 hotfix regression: a Trial with two same-named tool_calls (the
+    runtime-tool-error-01 retry pattern) gets two distinct
+    tool_call_projection evidence rows instead of crashing on
+    uq_eval_evidence_items_trial_kind_source.
+    """
+
+    from evals.v2.runtime_smoke import load_runtime_smoke_dataset
+    from tests.test_agent_runtime import runtime_factory
+
+    settings = get_settings()
+    smoke = load_runtime_smoke_dataset()
+    case = next(c for c in smoke.cases if c.case_id == "runtime-tool-error-01")
+    config = _config(smoke.manifest).model_copy(
+        update={
+            "dataset_id": smoke.manifest.dataset_id,
+            "dataset_version": smoke.manifest.dataset_version,
+            "dataset_hash": smoke.manifest.source_sha256,
+        }
+    )
+    _, trials = await EvalService(db_session).create_experiment(
+        dataset=smoke, config=config
+    )
+    trial = next(t for t in trials if t.case_id == "runtime-tool-error-01")
+    runner = TrialRunner(
+        session_factory=runtime_factory(db_connection),
+        settings=settings,
+    )
+    await runner.run_trial(trial, case)
+
+    # Grading re-collects evidence; if PCA-1 regressed this raises
+    # IntegrityError (duplicate key) inside grade_trial.
+    results = await EvalService(db_session).grade_trial(trial.id, case)
+    assert len(results) > 0
+
+    async with session_transaction(db_session):
+        items = await EvalRepository(db_session).list_evidence_items(trial.id)
+    tool_call_items = [
+        i for i in items if i.kind == "tool_call_projection"
+    ]
+    # Each persisted tool_call_projection must carry a unique source_id
+    # (the projected tool_call.id, NOT the bare tool_name) so that retries
+    # of the same tool within one Trial do not collide.
+    assert len(tool_call_items) >= 1, "tool_call projections missing"
+    source_ids = [i.source_id for i in tool_call_items]
+    assert len(source_ids) == len(set(source_ids)), (
+        f"duplicate tool_call source_ids after PCA-1 fix: {source_ids}"
+    )

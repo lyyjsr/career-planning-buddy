@@ -196,7 +196,14 @@ def _event_projection(event: AgentEvent) -> dict[str, object]:
 
 
 def _tool_call_projection(tool_call: ToolCall) -> dict[str, object]:
+    # PCA-1 hotfix: project an ``id`` so callers needing a per-record key
+    # (e.g. ``collect_evidence`` source_id) get a stable, unique identifier.
+    # The historical primary key is the ORM id; we synthesize a fallback
+    # from round+name when the row was assembled without an ORM id (defensive
+    # -- the ToolCall model always populates ``id`` from gen_random_uuid()).
+    fallback_id = f"r{tool_call.round}:{tool_call.tool_name}"
     return {
+        "id": str(tool_call.id) if tool_call.id is not None else fallback_id,
         "tool_name": tool_call.tool_name,
         "round": tool_call.round,
         "success": tool_call.success,
@@ -242,6 +249,7 @@ def _compute_transcript_hash(
         ],
         "tool_calls": [
             {
+                "id": str(tc.id) if tc.id is not None else f"r{tc.round}:{tc.tool_name}",
                 "tool_name": tc.tool_name,
                 "round": tc.round,
                 "success": tc.success,

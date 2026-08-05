@@ -122,7 +122,19 @@ class EvalService:
                     case_id=case.case_id,
                     case_fixture_hash=case.fixture_hash,
                     trial_index=trial_index,
-                    seed=_trial_seed(case.fixture_hash, trial_index),
+                    # PR-8: paired variants of one counterfactual_group share
+                    # a deterministic base seed derived from the group id so
+                    # every variant lands on the same Mock-provider LLM
+                    # trajectory. Pre-PR-8 cases (group_id is NULL) keep the
+                    # legacy fixture_hash-derived seed.
+                    seed=_trial_seed(
+                        case.counterfactual_group_id
+                        and canonical_sha256(case.counterfactual_group_id)
+                        or case.fixture_hash,
+                        trial_index,
+                    ),
+                    variant=case.variant,
+                    counterfactual_group_id=case.counterfactual_group_id,
                     run_type=run_type,
                     status="pending",
                 )
@@ -341,7 +353,13 @@ class EvalService:
         ``ExperimentRunner.run_experiment_and_grade`` returns.
         """
 
-        from evals.v2.experiment_runner import ExperimentReport, TrialSummary
+        from evals.v2.experiment_runner import (
+            CounterfactualPairDiff,
+            ExperimentReport,
+            TrialSummary,
+            VariantGradeDiff,
+            _build_counterfactual_pair,
+        )
 
         async with session_transaction(self._session):
             experiment = await self._evals.get_experiment(experiment_id)
@@ -356,6 +374,7 @@ class EvalService:
             summaries: list[TrialSummary] = []
             scored = 0
             passed = 0
+            grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
             for trial in trials:
                 case = cases_by_id.get(trial.case_id)
                 # Cases outside the provided dataset snapshot still get a
@@ -367,8 +386,30 @@ class EvalService:
                     scores = await self._evals.list_scores(trial.id)
                     if scores:
                         scored += 1
+                        grade_lookup[trial.id] = [
+                            (
+                                row.grader_name,
+                                float(row.score) if row.score is not None else 0.0,
+                                bool(row.hard_gate),
+                            )
+                            for row in scores
+                        ]
                         if all(score.hard_gate for score in scores):
                             passed += 1
+            # PR-8: build counterfactual paired diffs (mirror of
+            # ExperimentRunner.run_experiment_and_grade's grouping).
+            grouped: dict[str, list[TrialSummary]] = {}
+            for summary in summaries:
+                if not summary.counterfactual_group_id:
+                    continue
+                grouped.setdefault(summary.counterfactual_group_id, []).append(summary)
+            pairs: list[CounterfactualPairDiff] = [
+                _build_counterfactual_pair(
+                    group_summaries, grade_lookup, group_id
+                )
+                for group_id, group_summaries in grouped.items()
+            ]
+            _ = VariantGradeDiff  # re-export for future typed callers
             completed = sum(1 for s in summaries if s.status == "completed") or 1
             return ExperimentReport(
                 experiment_id=experiment.id,
@@ -377,10 +418,12 @@ class EvalService:
                 trials=summaries,
                 scored_trial_count=scored,
                 hard_gate_pass_fraction=round(passed / completed, 6),
+                counterfactual_pairs=pairs,
             )
 
     @staticmethod
-    def _frozen_hash(experiment: EvalExperiment) -> str:        return canonical_sha256(
+    def _frozen_hash(experiment: EvalExperiment) -> str:
+        return canonical_sha256(
             {
                 "dataset_id": experiment.dataset_id,
                 "dataset_version": experiment.dataset_version,
@@ -398,8 +441,17 @@ class EvalService:
         )
 
 
-def _trial_seed(fixture_hash: str, trial_index: int) -> int:
-    return int(fixture_hash[:8], 16) ^ trial_index
+def _trial_seed(group_hash: str, trial_index: int) -> int:
+    """Derive a deterministic int seed for one Trial.
+
+    The ``group_hash`` argument is whichever deterministic fingerprint the
+    caller chose: pre-PR-8 callers pass the Case fixture_hash, while PR-8
+    counterfactual groups pass ``canonical_sha256(counterfactual_group_id)``
+    so paired variants land on the same base trajectory. The function itself
+    is hash-agnostic.
+    """
+
+    return int(group_hash[:8], 16) ^ trial_index
 
 
 def _trial_summary_from_snapshot(trial: EvalTrial):  # type: ignore[no-untyped-def]
@@ -475,4 +527,6 @@ def _trial_summary_from_snapshot(trial: EvalTrial):  # type: ignore[no-untyped-d
         error_code=trial.error_code,
         terminal_event_count=terminal_events_count,
         tool_call_count=tool_call_count,
+        variant=trial.variant,
+        counterfactual_group_id=trial.counterfactual_group_id,
     )

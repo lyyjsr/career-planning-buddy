@@ -43,12 +43,17 @@ class ToolRegistry:
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         max_rounds: int = 2,
         max_calls: int = 4,
+        # PR-8: per-experiment allowlist. None = no-op (legacy behaviour).
+        # Empty set hides every tool from the model; non-empty hides any
+        # registered tool whose name is not in the set.
+        available_tools_override: set[str] | None = None,
     ) -> None:
         self._feature_stage = feature_stage
         self._sessions = session_factory
         self._max_rounds = max_rounds
         self._max_calls = max_calls
         self._tools: dict[str, RegisteredTool] = {}
+        self._available_tools_override = available_tools_override
 
     def register(self, tool: RegisteredTool) -> None:
         if tool.spec.name in self._tools:
@@ -64,11 +69,13 @@ class ToolRegistry:
         allowed_intent = intent in {RunIntent.CREATE_PLAN, RunIntent.REPLAN}
         if not allowed_intent:
             return []
+        override = self._available_tools_override
         return [
             tool.spec
             for tool in self._tools.values()
             if tool.stage <= self._feature_stage
             and (tool.spec.name != "web_search" or requires_fresh_information)
+            and (override is None or tool.spec.name in override)
         ]
 
     async def execute(
@@ -397,12 +404,14 @@ def build_tool_registry(
     session_factory: async_sessionmaker[AsyncSession],
     embedding_provider: EmbeddingProvider,
     search_provider: SearchProvider,
+    available_tools_override: set[str] | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry(
         feature_stage=settings.agent_feature_stage,
         session_factory=session_factory,
         max_rounds=settings.agent_max_tool_rounds,
         max_calls=settings.agent_max_tool_calls,
+        available_tools_override=available_tools_override,
     )
     registrations = [
         RegisteredTool(

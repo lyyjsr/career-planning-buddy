@@ -446,7 +446,9 @@ async def test_run_that_never_reaches_terminal_marks_trial_timed_out(
             trial_id: UUID,
             run_id: UUID,
             fixture_store: FixtureStore | None = None,
+            provider_fixtures: dict[str, object] | None = None,
         ) -> AgentRunExecutor:
+            del provider_fixtures  # HangingRunner ignores counterfactual knobs.
             from app.providers.embedding import MockEmbeddingProvider
             from app.providers.llm import MockPlanningProvider
             from app.providers.search import MockSearchProvider

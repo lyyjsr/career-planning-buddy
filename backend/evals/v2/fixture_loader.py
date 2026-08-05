@@ -23,6 +23,7 @@ from app.core.config import Settings
 from app.harness.events import EventRecorder
 from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
+from app.models.evidence import Memory
 from app.models.plan import Plan
 from app.models.review import Review
 from app.repositories.plans import PlanRepository
@@ -187,14 +188,55 @@ class FixtureLoader:
         return plan, review_row
 
     async def _seed_memory_if_requested(self, scenario: EvalScenario, user_id: UUID) -> None:
-        # PR-3 deliberately does NOT seed memories for tool-memory cases:
-        # the Mock's ``[mock:tool-memory]`` branch only emits ``tool_calls``
-        # when ``evidence_catalog`` is empty on the first turn, and
-        # ``context_builder`` turns any active Memory into catalog evidence.
-        # So seeding here would short-circuit Tool invocation entirely. The
-        # Tool smoke assertions cover persistence of the call itself; PR-8
-        # will seed contradicted / cross-user fixtures for ablation testing.
-        del scenario, user_id
+        """Plant Memory rows for PR-8 counterfactual Memory / Evidence cases.
+
+        Each entry under ``scenario.confirmed_memories`` is treated as a
+        candidate row to insert. ``content_json.category`` carries the
+        ablation tag (``relevant`` / ``irrelevant`` / ``conflicting``)
+        consumed by ``select_memories(exclude_categories=...)`` and by the
+        sub-graders that compute contamination / conflict-override metrics.
+
+        For the cf-evi-01 axis the same planting path is used (with
+        ``category='relevant'``) plus a ``visibility`` field that mirrors
+        the Case's ``pinned_memory_visibility`` (``visible`` vs ``hidden``);
+        when hidden, the Memory is still seeded but is filtered out of the
+        catalog by adding its category to the run's exclude list (the
+        TrialRunner rewrites ``exclude_memory_categories`` from the
+        provider_fixtures of the same Case).
+        """
+        if not scenario.confirmed_memories:
+            return
+        visibility = "visible"
+        provider_visibility = scenario.provider_fixtures.get(
+            "pinned_memory_visibility"
+        )
+        if isinstance(provider_visibility, str):
+            visibility = provider_visibility
+        for entry in scenario.confirmed_memories:
+            content = str(entry.get("content") or "").strip()
+            if not content:
+                continue
+            memory_id_value = entry.get("memory_id")
+            category_value = entry.get("category") or "relevant"
+            memory = Memory(
+                id=uuid4(),
+                user_id=user_id,
+                memory_type="stable_preference",
+                summary=content[:500],
+                content_json={
+                    "category": str(category_value),
+                    "visibility": visibility,
+                    "counterfactual": True,
+                    "fixture_memory_id": (
+                        str(memory_id_value) if memory_id_value is not None else None
+                    ),
+                },
+                sensitivity="normal",
+                status="active",
+                version=1,
+            )
+            self._session.add(memory)
+            await self._session.flush()
 
 
 class _ReviewSeed:

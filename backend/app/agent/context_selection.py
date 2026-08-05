@@ -6,6 +6,7 @@ from hashlib import sha256
 from math import exp, log
 from uuid import UUID
 
+from app.models.evidence import Memory
 from app.providers.embedding import EmbeddingProvider
 from app.repositories.evidence import EvidenceRepository
 
@@ -95,6 +96,20 @@ def select_memories_within_budget(
     return selected
 
 
+def _memory_category(memory: Memory) -> str:
+    """Return a Memory's counterfactual ``content_json.category`` string.
+
+    Pre-PR-8 Memories carry no ``category`` key; this helper returns an
+    empty string for them so the default ``exclude_categories`` (also
+    empty) sees no false positives. PR-8 planted Memories use one of
+    ``relevant`` / ``irrelevant`` / ``conflicting`` / ``visible`` /
+    ``hidden``.
+    """
+
+    raw = memory.content_json.get("category") if memory.content_json else None
+    return str(raw) if isinstance(raw, str) else ""
+
+
 async def select_memories(
     *,
     repository: EvidenceRepository,
@@ -111,6 +126,12 @@ async def select_memories(
     min_similarity: float,
     half_life_days: int,
     now: datetime | None = None,
+    # PR-8: counterfactual memory ablation. When non-empty, candidate
+    # Memory rows carrying any of these categories (in content_json/category)
+    # are excluded from the planning catalog (pinned + retrieved). The
+    # memory_lookup Tool path does NOT use this filter, so planted
+    # "deferred" memories stay reachable through explicit lookups.
+    exclude_categories: set[str] | None = None,
 ) -> MemorySelectionResult:
     selected_at = now or datetime.now(UTC)
     query = build_memory_query(
@@ -120,6 +141,7 @@ async def select_memories(
         adjustment_request=adjustment_request,
     )
     query_hash = sha256(query.encode("utf-8")).hexdigest()
+    excluded = exclude_categories or set()
     try:
         pinned_rows = await repository.pinned_memories(user_id, limit=max_items)
     except Exception:  # Retrieval is explicitly best-effort and must not fail the Run.
@@ -128,6 +150,8 @@ async def select_memories(
     candidates: list[ScoredMemory] = []
     pinned_ids: set[UUID] = set()
     for memory in pinned_rows:
+        if _memory_category(memory) in excluded:
+            continue
         pinned_ids.add(memory.id)
         recency = recency_score(
             last_used_at=memory.last_used_at,
@@ -166,6 +190,8 @@ async def select_memories(
             )
             for memory, similarity in semantic_rows:
                 if memory.id in pinned_ids or similarity < min_similarity:
+                    continue
+                if _memory_category(memory) in excluded:
                     continue
                 recency = recency_score(
                     last_used_at=memory.last_used_at,

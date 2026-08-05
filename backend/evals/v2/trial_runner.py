@@ -123,14 +123,24 @@ class TrialRunner:
 
         await self._mark_running(trial)
         scenario = case.scenario
+        # PR-8: capture provider_fixtures so the launched Run + ToolRegistry
+        # honour per-Case counterfactual knobs (memory categories to exclude,
+        # context compression budgets, available_tools allowlist, etc.).
+        provider_fixtures = dict(scenario.provider_fixtures)
         user_id, source_plan_id, review_id = await self._seed_fixture(scenario)
+        # PR-8 memory ablation: FixtureLoader.prepare_user plants
+        # scenario.confirmed_memories (relevant / irrelevant / conflicting /
+        # visible / hidden) inside the per-Trial user's row set. The category
+        # in each Memory's content_json gates ``select_memories`` filtering.
         launch = adapt_scenario(
             scenario,
             trial_id=trial.id,
             source_plan_id=source_plan_id,
             review_id=review_id,
         )
-        run_id = await self._launch_run(user_id, launch)
+        run_id = await self._launch_run(
+            user_id, launch, provider_fixtures=dict(provider_fixtures)
+        )
         # Replay path: if a prior bundle exists for this Trial, preload the
         # store so the executor replays the recorded responses rather than
         # re-invoking the Mock.
@@ -146,6 +156,7 @@ class TrialRunner:
             active_store = replay_store
         executor = self._build_executor(
             trial_id=trial.id, run_id=run_id, fixture_store=active_store,
+            provider_fixtures=dict(provider_fixtures),
         )
         wait = await self._drive_to_terminal(
             run_id=run_id, user_id=user_id, executor=executor, scenario=scenario
@@ -267,6 +278,7 @@ class TrialRunner:
         trial_id: UUID,
         run_id: UUID,
         fixture_store: FixtureStore | None,
+        provider_fixtures: dict[str, object] | None = None,
     ) -> AgentRunExecutor:
         """Build the executor for one Run, honouring ``settings.eval_provider_mode``.
 
@@ -339,6 +351,7 @@ class TrialRunner:
             session_factory=self._session_factory,
             embedding_provider=embedding_provider,
             search_provider=search_provider,
+            available_tools_override=self._derive_tool_override(provider_fixtures),
         )
         return AgentRunExecutor(
             session_factory=self._session_factory,
@@ -347,8 +360,21 @@ class TrialRunner:
             embedding_provider=embedding_provider,
         )
 
-    async def _launch_run(self, user_id: UUID, launch: RuntimeLaunch) -> UUID:
-        """Create the Agent Run via the real Runtime service."""
+    async def _launch_run(
+        self,
+        user_id: UUID,
+        launch: RuntimeLaunch,
+        provider_fixtures: dict[str, object] | None = None,
+    ) -> UUID:
+        """Create the Agent Run via the real Runtime service.
+
+        PR-8: ``provider_fixtures`` carries counterfactual knobs (memory
+        categories to exclude, context compression budgets, tool allowlist,
+        expected citations). When supplied, the persisted Run's
+        ``config_snapshot_json`` is rewritten with those overrides AFTER
+        AgentRunService.create (which writes the legacy snapshot) so the
+        ContextBuilder downstream observes the per-Trial settings.
+        """
 
         submitter = _RecordingSubmitter()
         async with self._session_factory() as session:
@@ -362,18 +388,87 @@ class TrialRunner:
                         user_id=user_id,
                         idempotency_key=launch.idempotency_suffix,
                     )
-                    return response.run_id
-                run = await AgentRunService(
-                    session, self._settings, submitter
-                ).create(
-                    user_id=user_id,
-                    message=launch.message,
-                    hint_intent=launch.hint_intent,
-                    goal_type_override=None,
-                    source_plan_id=launch.source_plan_id,
-                    idempotency_key=launch.idempotency_suffix,
-                )
-                return run.id
+                    run_id = response.run_id
+                else:
+                    run = await AgentRunService(
+                        session, self._settings, submitter
+                    ).create(
+                        user_id=user_id,
+                        message=launch.message,
+                        hint_intent=launch.hint_intent,
+                        goal_type_override=None,
+                        source_plan_id=launch.source_plan_id,
+                        idempotency_key=launch.idempotency_suffix,
+                    )
+                    run_id = run.id
+                if provider_fixtures:
+                    await self._apply_counterfactual_overrides(
+                        session, run_id, provider_fixtures
+                    )
+                return run_id
+
+    async def _apply_counterfactual_overrides(
+        self,
+        session: AsyncSession,
+        run_id: UUID,
+        provider_fixtures: dict[str, object],
+    ) -> None:
+        """Merge PR-8 counterfactual knobs into the Run's config snapshot.
+
+        Only fields actually present in ``provider_fixtures`` are mutated;
+        absent fields keep the default. ``available_tools`` (when present
+        and a list) is normalized to ``set[str]`` for the ToolRegistry path,
+        which is parameterised in ``_build_executor``.
+        """
+
+        run = await session.get(AgentRun, run_id, with_for_update=True)
+        if run is None or run.config_snapshot_json is None:
+            return
+        snapshot = dict(run.config_snapshot_json)
+        excluded = provider_fixtures.get("deferred_memory_categories")
+        if isinstance(excluded, list):
+            snapshot["exclude_memory_categories"] = [
+                str(c) for c in excluded if isinstance(c, str)
+            ]
+        cc = provider_fixtures.get("context_compression")
+        if isinstance(cc, dict):
+            if isinstance(cc.get("recent_tasks_budget"), int):
+                snapshot["context_recent_tasks_budget"] = int(cc["recent_tasks_budget"])
+            if isinstance(cc.get("recent_reviews_budget"), int):
+                snapshot["context_recent_reviews_budget"] = int(cc["recent_reviews_budget"])
+        tools = provider_fixtures.get("available_tools")
+        if isinstance(tools, list):
+            snapshot["available_tools"] = [str(t) for t in tools]
+            # The PR-8 ToolRegistry reads available_tools_override directly
+            # (see _build_executor), but we still record it in available_tools
+            # for snapshot readability.
+        expected_citations = provider_fixtures.get("expected_citations")
+        if isinstance(expected_citations, list):
+            snapshot["expected_citations"] = [
+                str(c) for c in expected_citations if isinstance(c, str)
+            ]
+        if "tool_required" in provider_fixtures:
+            snapshot["tool_required"] = bool(provider_fixtures["tool_required"])
+        run.config_snapshot_json = snapshot
+
+    @staticmethod
+    def _derive_tool_override(
+        provider_fixtures: dict[str, object] | None,
+    ) -> set[str] | None:
+        """Translate the per-Case ``available_tools`` list into a ToolRegistry
+        allowlist. None means "no override" (legacy behaviour); an empty set
+        hides every tool from the model. The cf-tool-01 axis populates this
+        field directly from its dataset payload.
+        """
+
+        if not provider_fixtures:
+            return None
+        if "available_tools" not in provider_fixtures:
+            return None
+        tools = provider_fixtures.get("available_tools")
+        if not isinstance(tools, list):
+            return None
+        return {str(t) for t in tools if isinstance(t, str)}
 
     async def _drive_to_terminal(
         self,

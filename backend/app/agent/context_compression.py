@@ -24,12 +24,22 @@ def estimate_text_tokens(text: str) -> int:
     return non_ascii + ceil(ascii_chars / 4)
 
 
-def compress_context_history(context: PlanningContext) -> ContextCompressionResult:
+def compress_context_history(
+    context: PlanningContext,
+    *,
+    recent_tasks_budget: int = 5,
+    recent_reviews_budget: int = 2,
+) -> ContextCompressionResult:
+    """Compress history.
+
+    PR-8 exposes the per-context budget as kwargs. Pre-PR-8 callers see the
+    same defaults (5 tasks / 2 reviews) and identical behaviour.
+    """
     before_chars = len(context.model_dump_json())
-    recent_tasks = context.recent_tasks[:5]
-    older_tasks = context.recent_tasks[5:]
-    recent_reviews = context.recent_reviews[:2]
-    older_reviews = context.recent_reviews[2:]
+    recent_tasks = context.recent_tasks[:recent_tasks_budget]
+    older_tasks = context.recent_tasks[recent_tasks_budget:]
+    recent_reviews = context.recent_reviews[:recent_reviews_budget]
+    older_reviews = context.recent_reviews[recent_reviews_budget:]
     task_summary = _task_summary(older_tasks)
     review_summary = _review_summary(older_reviews)
     summarized_deliverables = {task.deliverable.strip() for task in context.recent_tasks}

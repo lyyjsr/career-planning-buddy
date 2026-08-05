@@ -112,6 +112,15 @@ class RuntimeConfigSnapshot(StrictModel):
     memory_min_similarity: float = Field(default=0.35, ge=0, le=1)
     memory_recency_half_life_days: int = Field(default=14, ge=1, le=365)
 
+    # PR-8 counterfactual knobs. All default to "no-op / legacy" so pre-PR-8
+    # AgentRuns continue to validate. The graph's ContextBuilder reads them
+    # to drive Memory / Context budget ablations.
+    exclude_memory_categories: list[str] = Field(default_factory=list, max_length=8)
+    context_recent_tasks_budget: int = Field(default=5, ge=0, le=30)
+    context_recent_reviews_budget: int = Field(default=2, ge=0, le=10)
+    tool_required: bool = False
+    expected_citations: list[str] = Field(default_factory=list, max_length=20)
+
 
 class RunRequestSnapshot(StrictModel):
     message: str = Field(min_length=1, max_length=2000)

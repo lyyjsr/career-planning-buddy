@@ -403,6 +403,9 @@ class FixedPlanningGraph:
                         max_chars=config.memory_context_max_chars,
                         min_similarity=config.memory_min_similarity,
                         half_life_days=config.memory_recency_half_life_days,
+                        exclude_categories=set(config.exclude_memory_categories)
+                        if config.exclude_memory_categories
+                        else None,
                     )
         except Exception:
             memory_selection = memory_selection.__class__(
@@ -444,7 +447,11 @@ class FixedPlanningGraph:
             planning_date=planning_date,
         )
         context = context.model_copy(update={"pinned_memories": selected_memories})
-        compression = compress_context_history(context)
+        compression = compress_context_history(
+            context,
+            recent_tasks_budget=config.context_recent_tasks_budget,
+            recent_reviews_budget=config.context_recent_reviews_budget,
+        )
         context = compression.context
         evidence_catalog = [
             EvidenceCatalogItem(

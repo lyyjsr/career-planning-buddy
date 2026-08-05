@@ -219,9 +219,13 @@ async def collect_evidence(
             projection=event,
         ))
     for tool_call in outcome.tool_calls:
+        # PCA-1 hotfix: prefer the projected ``id`` (unique per tool_call
+        # row) over ``tool_name`` so re-attempts of the same tool no longer
+        # collide on uq_eval_evidence_items_trial_kind_source.
+        source_id = str(tool_call.get("id") or tool_call.get("tool_name"))
         items.append(_item(
             trial_id=trial_id, kind=EvidenceKind.TOOL_CALL_PROJECTION,
-            source_type="tool_call", source_id=str(tool_call.get("tool_name")),
+            source_type="tool_call", source_id=source_id,
             projection=tool_call,
         ))
 

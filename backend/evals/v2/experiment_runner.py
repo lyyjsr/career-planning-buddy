@@ -39,6 +39,43 @@ class TrialSummary:
     error_code: str | None
     terminal_event_count: int
     tool_call_count: int
+    # PR-8: counterfactual pairing. Both default to None for back-compat with
+    # pre-PR-8 single-arm Trials.
+    variant: str | None = None
+    counterfactual_group_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VariantGradeDiff:
+    """Per-variant grade breakdown for paired-diff reporting."""
+
+    variant: str
+    trial_id: UUID | None
+    # ``grader_name -> (score, hard_gate_passed)`` for every EvalScore row
+    # that landed for this variant's Trial (None when the Trial was skipped
+    # or never graded).
+    grades: dict[str, dict[str, float]] = field(default_factory=dict)
+    tokens_in: int = 0
+    tool_call_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CounterfactualPairDiff:
+    """One paired comparison inside a counterfactual group.
+
+    ``baseline_variant`` is the canonical "control" arm (the variant name
+    we treat as the reference, e.g. ``no_memory`` / ``full_context`` /
+    ``tool_available`` / ``visible_evidence``). ``candidates`` holds one
+    VariantGradeDiff per non-baseline variant in the group. ``case_ids``
+    lists all the case_ids that contributed to this group (paired variants
+    may each carry a unique case_id in the dataset).
+    """
+
+    counterfactual_group_id: str
+    case_ids: list[str]
+    baseline_variant: str | None
+    baseline: VariantGradeDiff | None
+    candidates: list[VariantGradeDiff] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +89,9 @@ class ExperimentReport:
     # observing ``any_score_generated is False``.
     scored_trial_count: int = 0
     hard_gate_pass_fraction: float = 0.0
+    # PR-8: counterfactual paired diff. Empty when the Experiment had no
+    # ``counterfactual_group_id`` Trials.
+    counterfactual_pairs: list[CounterfactualPairDiff] = field(default_factory=list)
 
     @property
     def completed_trial_count(self) -> int:
@@ -71,6 +111,7 @@ class ExperimentReport:
             "hard_gate_pass_fraction": self.hard_gate_pass_fraction,
             "any_score_generated": self.any_score_generated,
             "trials": [asdict(trial) for trial in self.trials],
+            "counterfactual_pairs": [asdict(pair) for pair in self.counterfactual_pairs],
         }
 
 
@@ -175,6 +216,9 @@ class ExperimentRunner:
         cases_by_id = {case.case_id: case for case in dataset.cases}
         scored = 0
         passed = 0
+        # PR-8: map trial_id -> list of (grader_name, score, hard_gate).
+        # Used to assemble the counterfactual paired diffs below.
+        grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
 
         async with self._session_factory() as session:
             repo = EvalRepository(session)
@@ -190,9 +234,32 @@ class ExperimentRunner:
                         raise
                     # Already graded: still count it as scored below.
                 scored += 1
-                scores = await repo.list_scores(trial_summary.trial_id)
-                if scores and all(score.hard_gate for score in scores):
+                rows = await repo.list_scores(trial_summary.trial_id)
+                if rows:
+                    grade_lookup[trial_summary.trial_id] = [
+                        (
+                            row.grader_name,
+                            float(row.score) if row.score is not None else 0.0,
+                            bool(row.hard_gate),
+                        )
+                        for row in rows
+                    ]
+                if rows and all(score.hard_gate for score in rows):
                     passed += 1
+
+        # PR-8: assemble counterfactual paired diffs for any Trials sharing a
+        # non-NULL counterfactual_group_id. Group by group_id alone (paired
+        # variants each carry their own case_id in the dataset).
+        pairs: list[CounterfactualPairDiff] = []
+        grouped: dict[str, list[TrialSummary]] = {}
+        for summary in report.trials:
+            if not summary.counterfactual_group_id:
+                continue
+            grouped.setdefault(summary.counterfactual_group_id, []).append(summary)
+        for group_id, group_summaries in grouped.items():
+            pairs.append(
+                _build_counterfactual_pair(group_summaries, grade_lookup, group_id)
+            )
 
         completed = report.completed_trial_count or 1
         return ExperimentReport(
@@ -202,6 +269,7 @@ class ExperimentRunner:
             trials=list(report.trials),
             scored_trial_count=scored,
             hard_gate_pass_fraction=round(passed / completed, 6),
+            counterfactual_pairs=pairs,
         )
 
 
@@ -228,6 +296,72 @@ def _summarize(trial: EvalTrial, outcome: RunOutcome) -> TrialSummary:
         error_code=outcome.error_code,
         terminal_event_count=terminal_event_count(outcome),
         tool_call_count=len(outcome.tool_calls),
+        variant=trial.variant,
+        counterfactual_group_id=trial.counterfactual_group_id,
+    )
+
+
+_BASELINE_VARIANT_HINTS: tuple[str, ...] = (
+    "no_memory",
+    "full_context",
+    "tool_available",
+    "visible_evidence",
+    "baseline",
+)
+
+
+def _is_baseline_variant(variant: str | None) -> bool:
+    if not variant:
+        return True
+    return any(hint in variant for hint in _BASELINE_VARIANT_HINTS)
+
+
+def _build_counterfactual_pair(
+    summaries: list[TrialSummary],
+    grade_lookup: dict[UUID, list[tuple[str, float, bool]]],
+    group_id: str,
+) -> CounterfactualPairDiff:
+    """Assemble one paired diff row from the Trial summaries + grades.
+
+    The grouping is by ``counterfactual_group_id`` alone (paired variants
+    each carry their own case_id in the dataset, so we cannot key on
+    case_id).
+    """
+
+    def _grades_for(summary: TrialSummary) -> VariantGradeDiff:
+        rows = grade_lookup.get(summary.trial_id, [])
+        grades = {
+            grader: {
+                "score": float(score) if score is not None else 0.0,
+                "hard_gate": 1.0 if passed else 0.0,
+            }
+            for grader, score, passed in rows
+        }
+        return VariantGradeDiff(
+            variant=summary.variant or "",
+            trial_id=summary.trial_id,
+            grades=grades,
+            tokens_in=summary.tokens_in,
+            tool_call_count=summary.tool_call_count,
+        )
+
+    baseline_summary = next(
+        (s for s in summaries if _is_baseline_variant(s.variant)), None
+    )
+    baseline = _grades_for(baseline_summary) if baseline_summary else None
+    candidates = [
+        _grades_for(s)
+        for s in summaries
+        if not _is_baseline_variant(s.variant)
+        and s.counterfactual_group_id == group_id
+    ]
+    case_ids = sorted({s.case_id for s in summaries if s.counterfactual_group_id == group_id})
+    return CounterfactualPairDiff(
+        counterfactual_group_id=group_id,
+        case_ids=case_ids,
+        baseline_variant=baseline_summary.variant if baseline_summary else None,
+        baseline=baseline,
+        candidates=candidates,
     )
 
 
