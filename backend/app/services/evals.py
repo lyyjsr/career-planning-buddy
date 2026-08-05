@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +24,9 @@ from evals.v2.contracts import (
 from evals.v2.dataset_loader import DatasetBundle
 from evals.v2.graders.base import EvidenceItem
 from evals.v2.graders.registry import grade_all
+
+if TYPE_CHECKING:
+    from evals.v2.experiment_runner import ExperimentReport
 
 EXPERIMENT_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"running", "cancelled"},
@@ -323,9 +327,60 @@ class EvalService:
                     ) from exc
             return results
 
+    async def build_report(
+        self,
+        experiment_id: UUID,
+        dataset: DatasetBundle,
+    ) -> "ExperimentReport":
+        """Reconstruct an ``ExperimentReport`` from DB state without re-running.
+
+        Used by the HTTP GET report endpoint (and any future CLI ``--report``).
+        Reads ``EvalExperiment`` + ``EvalTrial`` rows + ``EvalScore`` rows for
+        every completed Trial and aggregates them into the same frozen
+        ``ExperimentReport`` shape that
+        ``ExperimentRunner.run_experiment_and_grade`` returns.
+        """
+
+        from evals.v2.experiment_runner import ExperimentReport, TrialSummary
+
+        async with session_transaction(self._session):
+            experiment = await self._evals.get_experiment(experiment_id)
+            if experiment is None:
+                raise AppError(
+                    code="EVAL_EXPERIMENT_NOT_FOUND",
+                    message="Eval Experiment was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            trials = await self._evals.list_trials(experiment_id)
+            cases_by_id = {case.case_id: case for case in dataset.cases}
+            summaries: list[TrialSummary] = []
+            scored = 0
+            passed = 0
+            for trial in trials:
+                case = cases_by_id.get(trial.case_id)
+                # Cases outside the provided dataset snapshot still get a
+                # TrialSummary -- the report must enumerate every persisted
+                # Trial even if the caller's dataset bundle is stale.
+                _ = case
+                summaries.append(_trial_summary_from_snapshot(trial))
+                if trial.status == "completed":
+                    scores = await self._evals.list_scores(trial.id)
+                    if scores:
+                        scored += 1
+                        if all(score.hard_gate for score in scores):
+                            passed += 1
+            completed = sum(1 for s in summaries if s.status == "completed") or 1
+            return ExperimentReport(
+                experiment_id=experiment.id,
+                experiment_status=experiment.status,
+                trial_count=len(trials),
+                trials=summaries,
+                scored_trial_count=scored,
+                hard_gate_pass_fraction=round(passed / completed, 6),
+            )
+
     @staticmethod
-    def _frozen_hash(experiment: EvalExperiment) -> str:
-        return canonical_sha256(
+    def _frozen_hash(experiment: EvalExperiment) -> str:        return canonical_sha256(
             {
                 "dataset_id": experiment.dataset_id,
                 "dataset_version": experiment.dataset_version,
@@ -345,3 +400,79 @@ class EvalService:
 
 def _trial_seed(fixture_hash: str, trial_index: int) -> int:
     return int(fixture_hash[:8], 16) ^ trial_index
+
+
+def _trial_summary_from_snapshot(trial: EvalTrial):  # type: ignore[no-untyped-def]
+    """Build a ``TrialSummary`` from a persisted Trial + its outcome snapshot.
+
+    Mirrors ``evals/v2/experiment_runner.py::_summarize`` but reads only DB
+    state (no live ``RunOutcome``). The snapshot was written by
+    ``TrialRunner._finalize_trial`` for completed / degraded trials; for
+    cancelled / failed / timed-out trials we fall back to ORM fields plus
+    the persisted ``error_code``.
+    """
+
+    from evals.v2.experiment_runner import TrialSummary
+
+    snapshot = trial.outcome_snapshot_json
+    run_status: str | None = None
+    result_kind: str | None = None
+    tokens_in = 0
+    tokens_out = 0
+    latency_ms = 0
+    terminal_events_count = 0
+    tool_call_count = 0
+    if snapshot:
+        run_block = snapshot.get("run")
+        if isinstance(run_block, dict):
+            run_status_raw = run_block.get("status")
+            run_status = str(run_status_raw) if run_status_raw is not None else None
+            result_kind_raw = run_block.get("result_kind")
+            result_kind = (
+                str(result_kind_raw) if result_kind_raw is not None else None
+            )
+            tokens_in = int(run_block.get("total_tokens_in", 0) or 0)
+            tokens_out = int(run_block.get("total_tokens_out", 0) or 0)
+            latency_ms = int(run_block.get("total_latency_ms", 0) or 0)
+        events = snapshot.get("events")
+        if isinstance(events, list):
+            # Snapshot events are dicts; terminal ones carry event_type in
+            # {"run.completed","run.degraded","run.failed","run.cancelled"}.
+            terminal_types = {
+                "run.completed",
+                "run.degraded",
+                "run.failed",
+                "run.cancelled",
+            }
+            terminal_events_count = sum(
+                1
+                for ev in events
+                if isinstance(ev, dict)
+                and ev.get("event_type") in terminal_types
+            )
+        tool_calls = snapshot.get("tool_calls")
+        if isinstance(tool_calls, list):
+            tool_call_count = len(tool_calls)
+
+    if trial.status == "completed" and run_status in {"completed", "degraded"}:
+        report_status = "completed"
+    elif run_status == "cancelled" or trial.status == "cancelled":
+        report_status = "cancelled"
+    elif trial.status in {"failed", "timed_out"}:
+        report_status = "failed"
+    else:
+        report_status = trial.status
+
+    return TrialSummary(
+        trial_id=trial.id,
+        case_id=trial.case_id,
+        status=report_status,
+        run_status=run_status,
+        result_kind=result_kind,
+        tokens_in=tokens_in or trial.tokens_in,
+        tokens_out=tokens_out or trial.tokens_out,
+        latency_ms=latency_ms or trial.latency_ms,
+        error_code=trial.error_code,
+        terminal_event_count=terminal_events_count,
+        tool_call_count=tool_call_count,
+    )

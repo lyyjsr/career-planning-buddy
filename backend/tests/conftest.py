@@ -14,11 +14,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.agent.eval_executor import EvalRunnerExecutor
 from app.agent.executor import AgentRunExecutor
-from app.api.dependencies import get_agent_run_executor
+from app.api.dependencies import get_agent_run_executor, get_eval_runner_executor
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.main import create_app
+from evals.v2.dataset_loader import DatasetBundle
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("LLM_PROVIDER", "mock")
@@ -44,6 +46,23 @@ class StubAgentRunExecutor(AgentRunExecutor):
 
     async def request_cancel(self, run_id: UUID) -> None:
         self.cancelled.append(run_id)
+
+
+class StubEvalRunnerExecutor(EvalRunnerExecutor):
+    """API-test eval executor that records submission without spawning a task."""
+
+    def __init__(self) -> None:
+        self.submitted: list[tuple[UUID, bool]] = []
+        self.cancelled: list[UUID] = []
+
+    def submit(
+        self, experiment_id: UUID, dataset: DatasetBundle, *, grade: bool = True
+    ) -> None:
+        _ = dataset  # not needed for the recorded submit signature
+        self.submitted.append((experiment_id, grade))
+
+    async def request_cancel(self, experiment_id: UUID) -> None:
+        self.cancelled.append(experiment_id)
 
 
 @pytest_asyncio.fixture
@@ -74,12 +93,14 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
 async def api_application(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     application = create_app()
     executor = StubAgentRunExecutor()
+    eval_executor = StubEvalRunnerExecutor()
 
     async def override_db_session() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     application.dependency_overrides[get_db_session] = override_db_session
     application.dependency_overrides[get_agent_run_executor] = lambda: executor
+    application.dependency_overrides[get_eval_runner_executor] = lambda: eval_executor
     try:
         yield application
     finally:

@@ -7,6 +7,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.eval_executor import EvalRunnerExecutor, eval_runner_executor
 from app.agent.executor import AgentRunExecutor, agent_run_executor
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
@@ -17,6 +18,7 @@ from app.repositories.users import UserRepository
 from app.services.agent_runs import AgentRunService
 from app.services.auth import AuthService
 from app.services.dev import DevTraceService
+from app.services.evals import EvalService
 from app.services.memories import MemoryService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
@@ -51,12 +53,22 @@ def get_agent_run_executor() -> AgentRunExecutor:
     return agent_run_executor
 
 
+def get_eval_runner_executor() -> EvalRunnerExecutor:
+    return eval_runner_executor
+
+
 def get_agent_run_service(
     session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
     settings: Annotated[Settings, Depends(get_settings)],
     executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> AgentRunService:
     return AgentRunService(session, settings, executor)
+
+
+def get_eval_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+) -> EvalService:
+    return EvalService(session)
 
 
 def get_plan_query_service(

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.eval_executor import eval_runner_executor
 from app.agent.executor import agent_run_executor
 from app.api.router import api_router
 from app.core.config import get_settings
@@ -23,9 +24,11 @@ from app.tools.registry import build_tool_registry
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Recover expired single-worker Runs and cancel local tasks on shutdown."""
     await agent_run_executor.recover_interrupted()
+    await eval_runner_executor.recover_interrupted()
     try:
         yield
     finally:
+        await eval_runner_executor.shutdown()
         await agent_run_executor.shutdown()
 
 

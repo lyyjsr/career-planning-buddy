@@ -70,6 +70,8 @@ async def request_validation_error_handler(request: Request, exc: Exception) -> 
         code = "VALIDATION_TASK_INVALID"
     elif "/reviews" in request.url.path:
         code = "VALIDATION_REVIEW_INVALID"
+    elif "/eval/" in request.url.path or "/eval-runs" in request.url.path:
+        code = "VALIDATION_EVAL_INVALID"
     else:
         code = "VALIDATION_REQUEST_INVALID"
     payload = ErrorResponse(

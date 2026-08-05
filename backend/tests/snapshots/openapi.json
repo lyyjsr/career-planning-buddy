@@ -1094,6 +1094,235 @@
         "title": "EvalExperimentResponse",
         "type": "object"
       },
+      "EvalRunCreateRequest": {
+        "additionalProperties": false,
+        "description": "Body of POST /api/v1/eval/runs.\n\nThe server loads the named dataset (mirroring the CLI) instead of asking\nthe caller to ship a fully-validated ``DatasetBundle`` over the wire.",
+        "properties": {
+          "baseline_experiment_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Experiment Id"
+          },
+          "cases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Subset of case_ids to keep (default: all cases in the dataset).",
+            "title": "Cases"
+          },
+          "dataset": {
+            "default": "stage5",
+            "enum": [
+              "stage5",
+              "runtime-smoke"
+            ],
+            "title": "Dataset",
+            "type": "string"
+          },
+          "grade": {
+            "default": true,
+            "title": "Grade",
+            "type": "boolean"
+          },
+          "provider_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mock",
+                  "fixture",
+                  "live"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Mode"
+          },
+          "trial_count": {
+            "default": 1,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Trial Count",
+            "type": "integer"
+          }
+        },
+        "title": "EvalRunCreateRequest",
+        "type": "object"
+      },
+      "EvalRunCreatedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "report_url": {
+            "title": "Report Url",
+            "type": "string"
+          },
+          "status": {
+            "const": "draft",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "status_url",
+          "report_url"
+        ],
+        "title": "EvalRunCreatedResponse",
+        "type": "object"
+      },
+      "EvalRunReportResponse": {
+        "additionalProperties": false,
+        "description": "Strongly-typed envelope for ``ExperimentReport.to_dict()`` (PR-6).",
+        "properties": {
+          "any_score_generated": {
+            "title": "Any Score Generated",
+            "type": "boolean"
+          },
+          "completed_trial_count": {
+            "title": "Completed Trial Count",
+            "type": "integer"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "experiment_status": {
+            "title": "Experiment Status",
+            "type": "string"
+          },
+          "hard_gate_pass_fraction": {
+            "title": "Hard Gate Pass Fraction",
+            "type": "number"
+          },
+          "scored_trial_count": {
+            "title": "Scored Trial Count",
+            "type": "integer"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trials": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Trials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "experiment_status",
+          "trial_count",
+          "completed_trial_count",
+          "scored_trial_count",
+          "hard_gate_pass_fraction",
+          "any_score_generated",
+          "trials"
+        ],
+        "title": "EvalRunReportResponse",
+        "type": "object"
+      },
+      "EvalRunStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trials": {
+            "items": {
+              "$ref": "#/components/schemas/TrialStatusSummary"
+            },
+            "title": "Trials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "dataset_id",
+          "trial_count",
+          "started_at",
+          "finished_at",
+          "trials"
+        ],
+        "title": "EvalRunStatusResponse",
+        "type": "object"
+      },
       "EvalStartRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2738,6 +2967,67 @@
         "title": "TerminalInvariant",
         "type": "object"
       },
+      "TrialStatusSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "result_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Kind"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trial_id": {
+            "format": "uuid",
+            "title": "Trial Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trial_id",
+          "case_id",
+          "status",
+          "run_status",
+          "result_kind",
+          "error_code"
+        ],
+        "title": "TrialStatusSummary",
+        "type": "object"
+      },
       "UserSummary": {
         "additionalProperties": false,
         "description": "Public user fields safe for client identity restoration.",
@@ -2934,7 +3224,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -3585,6 +3875,258 @@
         "summary": "Replay Run",
         "tags": [
           "developer"
+        ]
+      }
+    },
+    "/api/v1/eval/runs": {
+      "post": {
+        "operationId": "create_eval_run_api_v1_eval_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunCreatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Eval Run",
+        "tags": [
+          "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{experiment_id}": {
+      "get": {
+        "operationId": "get_eval_run_status_api_v1_eval_runs__experiment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Eval Run Status",
+        "tags": [
+          "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{experiment_id}/report": {
+      "get": {
+        "operationId": "get_eval_run_report_api_v1_eval_runs__experiment_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Eval Run Report",
+        "tags": [
+          "eval-runs"
         ]
       }
     },
@@ -4654,7 +5196,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -4741,7 +5283,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -4830,7 +5372,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
@@ -5028,7 +5570,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           }
         },
         "security": [
