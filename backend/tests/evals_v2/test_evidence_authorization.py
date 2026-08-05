@@ -40,6 +40,7 @@ EXPECTED_ALLOWED_KINDS = {
         EvidenceKind.TOOL_SPEC,
         EvidenceKind.TRAJECTORY_POLICY,
         EvidenceKind.EVIDENCE_VISIBLE_REFS,
+        EvidenceKind.PROVIDER_CALL_PROJECTION,
     }),
     "behavioral": frozenset({
         EvidenceKind.STEP_PROJECTION,
@@ -60,6 +61,7 @@ EXPECTED_ALLOWED_KINDS = {
         EvidenceKind.EVIDENCE_VISIBLE_REFS,
         EvidenceKind.RUN_METRICS,
         EvidenceKind.REPAIR_SIGNAL,
+        EvidenceKind.PROVIDER_CALL_PROJECTION,
     }),
 }
 

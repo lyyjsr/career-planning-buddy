@@ -296,6 +296,63 @@ async def collect_evidence(
             projection=companion_proj,
         ))
 
-    # Sanity: any item without a content_hash boundary was filtered above.
+    # PR-5: aggregate provider-call audit rows into a single structured
+    # evidence item. Raw transcripts are NOT included (issue #6 + spec
+    # Model-domain "raw Provider transcript" denied list) -- the projection
+    # carries the deterministic metadata a grader needs without leaking PII.
+    provider_calls = outcome.provider_calls
+    if provider_calls:
+        per_method_counts: dict[str, int] = {}
+        per_kind_counts: dict[str, int] = {}
+        total_in = 0
+        total_out = 0
+        failed = 0
+        max_latency = 0
+        for call in provider_calls:
+            kind = str(call.get("provider_kind"))
+            method = str(call.get("provider_method"))
+            per_kind_counts[kind] = per_kind_counts.get(kind, 0) + 1
+            per_method_counts[method] = per_method_counts.get(method, 0) + 1
+            ti = call.get("tokens_in")
+            to = call.get("tokens_out")
+            if isinstance(ti, int):
+                total_in += ti
+            if isinstance(to, int):
+                total_out += to
+            if str(call.get("status")) == "error":
+                failed += 1
+            lat = call.get("latency_ms")
+            if isinstance(lat, int) and lat > max_latency:
+                max_latency = lat
+        items.append(_item(
+            trial_id=trial_id,
+            kind=EvidenceKind.PROVIDER_CALL_PROJECTION,
+            source_type="provider_calls",
+            source_id=str(outcome.run_id),
+            projection={
+                "call_count": len(provider_calls),
+                "per_method_counts": per_method_counts,
+                "per_kind_counts": per_kind_counts,
+                "total_tokens_in": total_in,
+                "total_tokens_out": total_out,
+                "failed_calls": failed,
+                "latency_ms_max": max_latency,
+                "calls": [
+                    {
+                        "sequence": c.get("sequence"),
+                        "kind": c.get("provider_kind"),
+                        "method": c.get("provider_method"),
+                        "retry_attempt": c.get("retry_attempt"),
+                        "status": c.get("status"),
+                        "error_code": c.get("error_code"),
+                        "tokens_in": c.get("tokens_in"),
+                        "tokens_out": c.get("tokens_out"),
+                        "model_id": c.get("model_id"),
+                    }
+                    for c in provider_calls
+                ],
+            },
+        ))
+
     return items
 

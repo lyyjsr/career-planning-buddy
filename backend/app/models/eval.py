@@ -248,7 +248,8 @@ class EvalEvidenceItem(Base):
             "'event_projection','tool_call_projection','tool_spec',"
             "'run_metrics','outcome_status','evidence_visible_refs',"
             "'transcript_hash','risk_signals','redacted_output',"
-            "'cross_user_signal','tool_allowlist','repair_signal')",
+            "'cross_user_signal','tool_allowlist','repair_signal',"
+            "'provider_call_projection')",
             name="ck_eval_evidence_items_kind",
         ),
         CheckConstraint(

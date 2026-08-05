@@ -31,6 +31,7 @@ ALLOWED_KINDS = frozenset({
     EvidenceKind.EVIDENCE_VISIBLE_REFS,
     EvidenceKind.RUN_METRICS,
     EvidenceKind.REPAIR_SIGNAL,
+    EvidenceKind.PROVIDER_CALL_PROJECTION,
 })
 
 

@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import (
 from app.agent.executor import AgentRunExecutor
 from app.core.config import get_settings
 from app.core.database import session_transaction
+from app.harness.provider_calls import FixtureStore
 from app.models.agent_run import AgentEvent, AgentRun, AgentStep
 from app.models.eval import EvalExperiment, EvalScore, EvalTrial
 from app.models.plan import Plan, Task
@@ -439,7 +440,13 @@ async def test_run_that_never_reaches_terminal_marks_trial_timed_out(
     # executor whose ``execute`` hangs forever (simulating an unresponsive
     # graph). We subclass TrialRunner to swap that one method.
     class HangingRunner(TrialRunner):
-        def _build_executor(self) -> AgentRunExecutor:
+        def _build_executor(
+            self,
+            *,
+            trial_id: UUID,
+            run_id: UUID,
+            fixture_store: FixtureStore | None = None,
+        ) -> AgentRunExecutor:
             from app.providers.embedding import MockEmbeddingProvider
             from app.providers.llm import MockPlanningProvider
             from app.providers.search import MockSearchProvider

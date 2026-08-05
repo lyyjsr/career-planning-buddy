@@ -43,10 +43,22 @@ class EvalRepository:
         )
         return list(result.scalars())
 
-    async def get_trial(self, trial_id: UUID, *, for_update: bool = False) -> EvalTrial | None:
-        statement: Select[tuple[EvalTrial]] = select(EvalTrial).where(EvalTrial.id == trial_id)
+    async def get_trial(
+        self, trial_id: UUID, *, for_update: bool = False
+    ) -> EvalTrial | None:
+        statement: Select[tuple[EvalTrial]] = select(EvalTrial).where(
+            EvalTrial.id == trial_id
+        )
         if for_update:
-            statement = statement.with_for_update()
+            # ``with_for_update`` writes ``FOR UPDATE``. Combine with
+            # ``populate_existing`` so the row is re-loaded from the DB rather
+            # than served from the session identity map -- otherwise a Trial
+            # committed via a different session (TrialRunner's own factory)
+            # stays invisible to the caller. PR-5 fix: clears the cached
+            # ``status='pending'`` image that pre-dates the attach step.
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 

@@ -60,6 +60,7 @@ class EvidenceKind(StrEnum):
     CROSS_USER_SIGNAL = "cross_user_signal"
     TOOL_ALLOWLIST = "tool_allowlist"
     REPAIR_SIGNAL = "repair_signal"
+    PROVIDER_CALL_PROJECTION = "provider_call_projection"
 
 
 @dataclass(frozen=True, slots=True)

@@ -137,6 +137,7 @@ def _outcome(
     events: list[dict[str, object]] | None = None,
     tool_calls: list[dict[str, object]] | None = None,
     transcript_hash: str = "0" * 64,
+    provider_calls: list[dict[str, object]] | None = None,
 ) -> RunOutcome:
     return RunOutcome(
         run_id=uuid4(),
@@ -155,6 +156,7 @@ def _outcome(
         events=events if events is not None else [],
         tool_calls=tool_calls if tool_calls is not None else [],
         transcript_hash=transcript_hash,
+        provider_calls=provider_calls if provider_calls is not None else [],
     )
 
 

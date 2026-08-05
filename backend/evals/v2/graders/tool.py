@@ -25,6 +25,7 @@ ALLOWED_KINDS = frozenset({
     EvidenceKind.TOOL_SPEC,
     EvidenceKind.TRAJECTORY_POLICY,
     EvidenceKind.EVIDENCE_VISIBLE_REFS,
+    EvidenceKind.PROVIDER_CALL_PROJECTION,
 })
 REGISTERED_TOOL_NAMES = frozenset({"memory_lookup", "rag_retrieve", "web_search"})
 

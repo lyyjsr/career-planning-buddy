@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     rag_min_similarity: float = Field(default=0.35, ge=0, le=1)
     embedding_provider: Literal["mock", "local"] = "mock"
     embedding_model_path: Path | None = None
+
+    # PR-5: per-process eval provider mode. TrialRunner honours "fixture" /
+    # "mock" / "live" when building the executor's providers (LLM + Search +
+    # Embedding). Prod HTTP path ignores this field entirely.
+    eval_provider_mode: Literal["mock", "fixture", "live"] = "mock"
     embedding_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     embedding_dim: int = Field(
         default=1024,

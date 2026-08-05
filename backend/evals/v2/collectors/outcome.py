@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_run import AgentEvent, AgentRun, AgentStep, ToolCall
 from app.models.plan import Plan, Task
+from app.models.provider_call import ProviderCall
 from app.repositories.plans import PlanRepository
 from evals.v2.contracts import canonical_sha256
 
@@ -43,6 +44,7 @@ class RunOutcome:
     steps: list[dict[str, object]]
     events: list[dict[str, object]]
     tool_calls: list[dict[str, object]]
+    provider_calls: list[dict[str, object]]
     transcript_hash: str
 
 
@@ -73,6 +75,33 @@ async def collect_outcome(
     )
     tool_call_rows = list(tool_rows)
 
+    # PR-5: pull provider-call audit rows. They may be absent on prod live
+    # Runs (no recorder is installed there); treat that as an empty projection.
+    provider_call_rows_raw = await session.scalars(
+        select(ProviderCall)
+        .where(ProviderCall.run_id == run.id)
+        .order_by(ProviderCall.sequence)
+    )
+    provider_call_rows = list(provider_call_rows_raw)
+    provider_calls_proj: list[dict[str, object]] = [
+        {
+            "sequence": c.sequence,
+            "provider_kind": c.provider_kind,
+            "provider_method": c.provider_method,
+            "logical_call_index": c.logical_call_index,
+            "retry_attempt": c.retry_attempt,
+            "status": c.status,
+            "error_code": c.error_code,
+            "tokens_in": c.tokens_in,
+            "tokens_out": c.tokens_out,
+            "latency_ms": c.latency_ms,
+            "model_id": c.model_id,
+            "request_projection_hash": c.request_projection_hash,
+            "response_projection_hash": c.response_projection_hash,
+        }
+        for c in provider_call_rows
+    ]
+
     plan_dict: dict[str, object] | None = None
     tasks_list: list[dict[str, object]] = []
     if run.final_plan_id is not None:
@@ -101,6 +130,7 @@ async def collect_outcome(
         steps=[_step_projection(step) for step in step_rows],
         events=[_event_projection(event) for event in event_rows],
         tool_calls=[_tool_call_projection(tc) for tc in tool_call_rows],
+        provider_calls=provider_calls_proj,
         transcript_hash=_compute_transcript_hash(
             run=run,
             steps=step_rows,

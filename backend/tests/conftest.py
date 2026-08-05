@@ -22,6 +22,7 @@ from app.main import create_app
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("LLM_PROVIDER", "mock")
+os.environ.setdefault("EVAL_PROVIDER_MODE", "fixture")
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://career_buddy:career_buddy_local@localhost:5432/career_buddy",

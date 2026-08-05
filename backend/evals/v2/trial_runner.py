@@ -24,6 +24,7 @@ call happens inside the real ``AgentRunExecutor``.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -31,11 +32,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent.executor import AgentRunExecutor
 from app.core.config import Settings
 from app.core.database import AsyncSessionFactory, session_transaction
+from app.harness.provider_calls import (
+    AuditEmbeddingProvider,
+    AuditPlanningProvider,
+    AuditSearchProvider,
+    FixtureEmbeddingProvider,
+    FixtureEntry,
+    FixturePlanningProvider,
+    FixtureSearchProvider,
+    FixtureStore,
+    ProviderCallRecorder,
+    ProviderCallRepository,
+)
 from app.models.agent_run import AgentRun
 from app.models.eval import EvalTrial
-from app.providers.embedding import MockEmbeddingProvider
-from app.providers.llm import MockPlanningProvider
-from app.providers.search import MockSearchProvider
+from app.models.provider_call import EvalProviderFixtureItem
+from app.providers.embedding import MockEmbeddingProvider, build_embedding_provider
+from app.providers.llm import MockPlanningProvider, build_planning_provider
+from app.providers.search import MockSearchProvider, build_search_provider
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
 from app.schemas.agent_runs import AgentRunCancelRequest
@@ -116,12 +130,106 @@ class TrialRunner:
             source_plan_id=source_plan_id,
             review_id=review_id,
         )
-        executor = self._build_executor()
         run_id = await self._launch_run(user_id, launch)
+        # Replay path: if a prior bundle exists for this Trial, preload the
+        # store so the executor replays the recorded responses rather than
+        # re-invoking the Mock.
+        replay_store = await self._load_existing_fixture_store(trial.id)
+        record_store: FixtureStore | None = None
+        active_store: FixtureStore | None
+        if replay_store is None and self._settings.eval_provider_mode == "fixture":
+            # Record mode: a fresh store attached to the executor; persist it
+            # at finalize time.
+            record_store = FixtureStore(trial_id=trial.id)
+            active_store = record_store
+        else:
+            active_store = replay_store
+        executor = self._build_executor(
+            trial_id=trial.id, run_id=run_id, fixture_store=active_store,
+        )
         wait = await self._drive_to_terminal(
             run_id=run_id, user_id=user_id, executor=executor, scenario=scenario
         )
+        if record_store is not None and record_store.entries_by_sequence:
+            await self._persist_bundle(record_store)
         return await self._finalize_trial(trial.id, run_id, user_id, wait)
+
+    async def _load_existing_fixture_store(
+        self, trial_id: UUID
+    ) -> FixtureStore | None:
+        """If a fixture bundle for this Trial already exists, load it as a
+        frozen store for replay. Returns None when no bundle is found or when
+        the eval mode does not request fixture playback.
+        """
+
+        if self._settings.eval_provider_mode != "fixture":
+            return None
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                repo = ProviderCallRepository(session)
+                bundles = await repo.list_bundles_for_trial(trial_id)
+                if not bundles:
+                    return None
+                # Latest bundle wins; future runs can pin a specific one if
+                # reproducibility requires it.
+                items = await repo.list_fixture_items(bundles[-1].id)
+        store = FixtureStore(trial_id=trial_id)
+        entries = [
+            FixtureEntry(
+                sequence=item.sequence,
+                provider_kind=item.provider_kind,
+                provider_method=item.provider_method,
+                retry_attempt=item.retry_attempt,
+                request_projection_hash=item.request_projection_hash,
+                response_projection=item.response_projection,
+                response_projection_hash=item.response_projection_hash,
+                fixture_hash=item.fixture_hash,
+            )
+            for item in items
+        ]
+        store.freeze_for_replay(entries)
+        return store
+
+    async def _persist_bundle(self, store: FixtureStore) -> None:
+        """Persist the record-mode bundle to DB so the next run for this Trial
+        replays deterministically.
+        """
+
+        bundle_hash, fixture_count = store.finalize_bundle_hash()
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                repo = ProviderCallRepository(session)
+                await repo.create_bundle(
+                    trial_id=store.trial_id,
+                    bundle_hash=bundle_hash,
+                    fixture_count=fixture_count,
+                )
+                # Flush to materialise the bundle id, then insert items.
+                items = []
+                # NOTE: create_bundle returns the row with id populated.
+                # We re-read via repo (the items reference this new bundle).
+                bundles = await repo.list_bundles_for_trial(store.trial_id)
+                if not bundles:
+                    raise RuntimeError("fixture bundle went missing after insert")
+                bundle_id = bundles[-1].id
+                for entry in [
+                    store.entries_by_sequence[s]
+                    for s in sorted(store.entries_by_sequence)
+                ]:
+                    items.append(
+                        EvalProviderFixtureItem(
+                            bundle_id=bundle_id,
+                            sequence=entry.sequence,
+                            provider_kind=entry.provider_kind,
+                            provider_method=entry.provider_method,
+                            retry_attempt=entry.retry_attempt,
+                            request_projection_hash=entry.request_projection_hash,
+                            response_projection=entry.response_projection,
+                            response_projection_hash=entry.response_projection_hash,
+                            fixture_hash=entry.fixture_hash,
+                        )
+                    )
+                await repo.create_fixture_items(items)
 
     async def _mark_running(self, trial: EvalTrial) -> None:
         async with self._session_factory() as session:
@@ -153,12 +261,79 @@ class TrialRunner:
                         source_plan_id = plan.id
                 return user_id, source_plan_id, review_id
 
-    def _build_executor(self) -> AgentRunExecutor:
-        # Explicit providers (revision #4) — no env / Settings default reliance.
-        # ``self._settings`` already has the Tool budget forced open in ``__init__``.
-        planning_provider = MockPlanningProvider()
-        embedding_provider = MockEmbeddingProvider()
-        search_provider = MockSearchProvider()
+    def _build_executor(
+        self,
+        *,
+        trial_id: UUID,
+        run_id: UUID,
+        fixture_store: FixtureStore | None,
+    ) -> AgentRunExecutor:
+        """Build the executor for one Run, honouring ``settings.eval_provider_mode``.
+
+        Three modes:
+          • ``mock``    -- Mock providers + Audit wrapper (audit rows persisted).
+          • ``fixture`` -- Mock providers + Fixture wrapper (lazy record + replay
+                           on a 2nd Run with the same Trial, audit rows still
+                           persisted via the recorder inside the Fixture wrapper).
+          • ``live``    -- real providers without Audit (prod path; ``trial_id``
+                            is NULL on every persisted row so providers stay
+                            untouched -- the recorder is simply not installed).
+
+        ``self._settings`` already has the Tool budget forced open in ``__init__``.
+        ``trial_id`` / ``run_id`` are needed so each ProviderCall row can be
+        joinable from ``eval_trials``.
+        """
+
+        mode = self._settings.eval_provider_mode
+
+        # Build the base (seed) providers; the wrappers below decorate them.
+        base_planning: Any
+        base_embedding: Any
+        base_search: Any
+        if mode == "live":
+            base_planning = build_planning_provider(self._settings)
+            base_embedding = build_embedding_provider(self._settings)
+            base_search = build_search_provider(self._settings)
+        else:  # mock or fixture
+            base_planning = MockPlanningProvider()
+            base_embedding = MockEmbeddingProvider()
+            base_search = MockSearchProvider()
+
+        planning_provider = base_planning
+        embedding_provider = base_embedding
+        search_provider = base_search
+
+        if mode != "live":
+            recorder = ProviderCallRecorder(
+                session_factory=self._session_factory,
+                run_id=run_id,
+                trial_id=trial_id,
+            )
+            if mode == "fixture":
+                # ``fixture_store`` is None on the first Run for a Trial
+                # (lazy record path); a pre-populated store is supplied by
+                # the TrialRunner when it re-runs a Trial whose bundle exists.
+                store = fixture_store or FixtureStore(trial_id=trial_id)
+                planning_provider = FixturePlanningProvider(
+                    base_planning, recorder=recorder, store=store,
+                )
+                embedding_provider = FixtureEmbeddingProvider(
+                    base_embedding, recorder=recorder, store=store,
+                )
+                search_provider = FixtureSearchProvider(
+                    base_search, recorder=recorder, store=store,
+                )
+            else:  # mock wrapper only
+                planning_provider = AuditPlanningProvider(
+                    base_planning, recorder,
+                )
+                embedding_provider = AuditEmbeddingProvider(
+                    base_embedding, recorder,
+                )
+                search_provider = AuditSearchProvider(
+                    base_search, recorder,
+                )
+
         tool_registry = build_tool_registry(
             settings=self._settings,
             session_factory=self._session_factory,
