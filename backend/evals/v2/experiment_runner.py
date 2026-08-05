@@ -9,13 +9,14 @@ token / tool / latency / state contents all come from real Runtime traces.
 No Scores are produced -- grading is PR-4.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.database import session_transaction
+from app.core.exceptions import AppError
 from app.models.eval import EvalExperiment, EvalTrial
 from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
@@ -46,6 +47,11 @@ class ExperimentReport:
     experiment_status: str
     trial_count: int
     trials: list[TrialSummary] = field(default_factory=list)
+    # PR-6: populated by ``run_experiment_and_grade``; left at default by the
+    # grading-unaware ``run_experiment`` so existing callers (and tests) keep
+    # observing ``any_score_generated is False``.
+    scored_trial_count: int = 0
+    hard_gate_pass_fraction: float = 0.0
 
     @property
     def completed_trial_count(self) -> int:
@@ -53,9 +59,19 @@ class ExperimentReport:
 
     @property
     def any_score_generated(self) -> bool:
-        # PR-3 contract: no fake scores. This is structurally guaranteed
-        # because the ExperimentRunner never inserts an EvalScore row.
-        return False
+        return self.scored_trial_count > 0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "experiment_id": str(self.experiment_id),
+            "experiment_status": self.experiment_status,
+            "trial_count": self.trial_count,
+            "completed_trial_count": self.completed_trial_count,
+            "scored_trial_count": self.scored_trial_count,
+            "hard_gate_pass_fraction": self.hard_gate_pass_fraction,
+            "any_score_generated": self.any_score_generated,
+            "trials": [asdict(trial) for trial in self.trials],
+        }
 
 
 class ExperimentRunner:
@@ -116,6 +132,76 @@ class ExperimentRunner:
             experiment_status=status,
             trial_count=len(trials),
             trials=summaries,
+        )
+
+    async def run_experiment_and_grade(
+        self,
+        experiment_id: UUID,
+        dataset: DatasetBundle,
+        *,
+        grade: bool = True,
+    ) -> ExperimentReport:
+        """Run an Experiment and (optionally) grade every completed Trial.
+
+        Stage 1 (``run_experiment``) drives the real Runtime execute per
+        Trial and flips the Experiment ``running`` -> ``completed``.
+        Stage 2 (only when ``grade=True``) opens a fresh session, calls
+        ``EvalService.grade_trial`` per completed Trial, and recomputes the
+        report's score aggregates. Re-grade attempts surface as
+        ``AppError(code="EVAL_SCORE_ALREADY_GRADED")`` inside ``grade_trial``;
+        we swallow that specific code (treating the Trial as already scored)
+        but let any other exception abort the grading pass.
+        """
+
+        try:
+            report = await self.run_experiment(experiment_id, dataset)
+        except Exception:
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    try:
+                        await EvalService(session).transition_experiment(
+                            experiment_id, "failed"
+                        )
+                    except Exception:
+                        # The transition itself may be illegal if the
+                        # Experiment never reached ``running``; never mask
+                        # the original failure.
+                        pass
+            raise
+
+        if not grade:
+            return report
+
+        cases_by_id = {case.case_id: case for case in dataset.cases}
+        scored = 0
+        passed = 0
+
+        async with self._session_factory() as session:
+            repo = EvalRepository(session)
+            service = EvalService(session)
+            for trial_summary in report.trials:
+                case = cases_by_id.get(trial_summary.case_id)
+                if case is None or trial_summary.status != "completed":
+                    continue
+                try:
+                    await service.grade_trial(trial_summary.trial_id, case)
+                except AppError as exc:
+                    if exc.code != "EVAL_SCORE_ALREADY_GRADED":
+                        raise
+                    # Already graded: still count it as scored below.
+                scored += 1
+                scores = await repo.list_scores(trial_summary.trial_id)
+                if scores and all(score.hard_gate for score in scores):
+                    passed += 1
+
+        completed = report.completed_trial_count or 1
+        return ExperimentReport(
+            experiment_id=report.experiment_id,
+            experiment_status=report.experiment_status,
+            trial_count=report.trial_count,
+            trials=list(report.trials),
+            scored_trial_count=scored,
+            hard_gate_pass_fraction=round(passed / completed, 6),
         )
 
 

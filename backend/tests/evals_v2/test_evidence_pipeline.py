@@ -206,6 +206,44 @@ async def test_grade_trial_rejects_invalid_trial_id(db_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
+async def test_grade_trial_rejects_duplicate_grading(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    """Re-grading the same (trial, grader_name, grader_version) is rejected.
+
+    The unique constraint ``uq_eval_scores_grader_version`` makes any second
+    grade_trial raise IntegrityError; PR-6 maps that to
+    ``AppError(code="EVAL_SCORE_ALREADY_GRADED")`` with HTTP 409.
+    """
+
+    settings = get_settings()
+    case, trial_id = await _provision_run(
+        db_session, db_connection, settings=settings, case_id="create-01"
+    )
+
+    # First grading succeeds and persists scores.
+    first = await EvalService(db_session).grade_trial(trial_id, case)
+    assert len(first) > 0
+    async with session_transaction(db_session):
+        first_scores = await EvalRepository(db_session).list_scores(trial_id)
+    first_count = len(first_scores)
+    assert first_count > 0
+
+    # Second grading is rejected; the new AppError surfaces, not raw
+    # IntegrityError.
+    with pytest.raises(AppError) as error:
+        await EvalService(db_session).grade_trial(trial_id, case)
+    assert error.value.code == "EVAL_SCORE_ALREADY_GRADED"
+    assert error.value.status_code == 409
+
+    # Score rows are unchanged -- the rejected attempt did not double the set.
+    async with session_transaction(db_session):
+        second_scores = await EvalRepository(db_session).list_scores(trial_id)
+    assert len(second_scores) == first_count
+
+
+@pytest.mark.asyncio
 async def test_grade_trial_rejects_pending_trial(
     db_connection: AsyncConnection,
     db_session: AsyncSession,

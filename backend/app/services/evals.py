@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
@@ -312,7 +313,14 @@ class EvalService:
                 expected=case,
             )
             for result in results:
-                await self.add_grade(trial_id, result)
+                try:
+                    await self.add_grade(trial_id, result)
+                except IntegrityError as exc:
+                    raise AppError(
+                        code="EVAL_SCORE_ALREADY_GRADED",
+                        message="Trial has already been graded for this grader/version.",
+                        status_code=HTTPStatus.CONFLICT,
+                    ) from exc
             return results
 
     @staticmethod
