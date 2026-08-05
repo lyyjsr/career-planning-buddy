@@ -410,6 +410,18 @@ class EvalService:
                 for group_id, group_summaries in grouped.items()
             ]
             _ = VariantGradeDiff  # re-export for future typed callers
+            # PR-9a: compute per-case + per-experiment stats. Re-uses the
+            # grade_lookup already built for counterfactual pairs so the
+            # hard-gate verdicts stay consistent across the report shape.
+            from evals.v2.stats import (
+                compute_case_stats as _cf_stats,
+            )
+            from evals.v2.stats import (
+                compute_experiment_stats as _cf_exp_stats,
+            )
+
+            case_stats = _cf_stats(summaries, grade_lookup)
+            experiment_stats = _cf_exp_stats(case_stats)
             completed = sum(1 for s in summaries if s.status == "completed") or 1
             return ExperimentReport(
                 experiment_id=experiment.id,
@@ -419,6 +431,8 @@ class EvalService:
                 scored_trial_count=scored,
                 hard_gate_pass_fraction=round(passed / completed, 6),
                 counterfactual_pairs=pairs,
+                case_stats=case_stats,
+                experiment_stats=experiment_stats,
             )
 
     @staticmethod
@@ -529,4 +543,5 @@ def _trial_summary_from_snapshot(trial: EvalTrial):  # type: ignore[no-untyped-d
         tool_call_count=tool_call_count,
         variant=trial.variant,
         counterfactual_group_id=trial.counterfactual_group_id,
+        trial_index=trial.trial_index,
     )

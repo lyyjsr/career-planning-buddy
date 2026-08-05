@@ -1205,6 +1205,14 @@
             "title": "Any Score Generated",
             "type": "boolean"
           },
+          "case_stats": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Case Stats",
+            "type": "object"
+          },
           "completed_trial_count": {
             "title": "Completed Trial Count",
             "type": "integer"
@@ -1213,6 +1221,18 @@
             "format": "uuid",
             "title": "Experiment Id",
             "type": "string"
+          },
+          "experiment_stats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Stats"
           },
           "experiment_status": {
             "title": "Experiment Status",

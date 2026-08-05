@@ -215,6 +215,21 @@ async def get_eval_run_report(
     trials_list: list[dict[str, object]] = (
         trials_value if isinstance(trials_value, list) else []
     )
+    # PR-9a: pass-through case_stats + experiment_stats derived in
+    # build_report. Both default empty for back-compat with pre-PR-9a
+    # consumers of the report response schema.
+    case_stats_value = payload.get("case_stats") or {}
+    case_stats_dict: dict[str, dict[str, object]] = {
+        str(key): value
+        for key, value in case_stats_value.items()
+        if isinstance(value, dict)
+    } if isinstance(case_stats_value, dict) else {}
+    experiment_stats_value = payload.get("experiment_stats")
+    experiment_stats_dict: dict[str, object] | None = (
+        experiment_stats_value
+        if isinstance(experiment_stats_value, dict)
+        else None
+    )
     return EvalRunReportResponse(
         experiment_id=UUID(str(payload["experiment_id"])),
         experiment_status=str(payload["experiment_status"]),
@@ -224,4 +239,6 @@ async def get_eval_run_report(
         hard_gate_pass_fraction=hard_gate_val,
         any_score_generated=bool(payload["any_score_generated"]),
         trials=trials_list,
+        case_stats=case_stats_dict,
+        experiment_stats=experiment_stats_dict,
     )

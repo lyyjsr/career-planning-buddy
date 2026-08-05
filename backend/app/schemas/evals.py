@@ -64,3 +64,7 @@ class EvalRunReportResponse(StrictModel):
     hard_gate_pass_fraction: float
     any_score_generated: bool
     trials: list[dict[str, object]]
+    # PR-9a: per-case + per-experiment statistics. Both default-empty so
+    # pre-PR-9a consumers continue to deserialise cleanly.
+    case_stats: dict[str, dict[str, object]] = Field(default_factory=dict)
+    experiment_stats: dict[str, object] | None = None

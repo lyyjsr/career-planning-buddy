@@ -23,6 +23,7 @@ from app.services.evals import EvalService
 from evals.v2.collectors.outcome import RunOutcome
 from evals.v2.contracts import EvalCase
 from evals.v2.dataset_loader import DatasetBundle
+from evals.v2.stats import CaseStat, ExperimentStat, compute_case_stats, compute_experiment_stats
 from evals.v2.trial_runner import TrialRunner
 
 
@@ -43,6 +44,9 @@ class TrialSummary:
     # pre-PR-8 single-arm Trials.
     variant: str | None = None
     counterfactual_group_id: str | None = None
+    # PR-9a: identifies the first attempt (index 0) per case for
+    # ``first_attempt_success`` statistics. Defaults to 0 for back-compat.
+    trial_index: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +96,10 @@ class ExperimentReport:
     # PR-8: counterfactual paired diff. Empty when the Experiment had no
     # ``counterfactual_group_id`` Trials.
     counterfactual_pairs: list[CounterfactualPairDiff] = field(default_factory=list)
+    # PR-9a: per-case statistics (variant=None trials only, keyed by case_id).
+    case_stats: dict[str, CaseStat] = field(default_factory=dict)
+    # PR-9a: experiment-level aggregate. None when no variant=None trials.
+    experiment_stats: ExperimentStat | None = None
 
     @property
     def completed_trial_count(self) -> int:
@@ -112,6 +120,15 @@ class ExperimentReport:
             "any_score_generated": self.any_score_generated,
             "trials": [asdict(trial) for trial in self.trials],
             "counterfactual_pairs": [asdict(pair) for pair in self.counterfactual_pairs],
+            "case_stats": {
+                case_id: asdict(stat)
+                for case_id, stat in self.case_stats.items()
+            },
+            "experiment_stats": (
+                asdict(self.experiment_stats)
+                if self.experiment_stats is not None
+                else None
+            ),
         }
 
 
@@ -261,6 +278,11 @@ class ExperimentRunner:
                 _build_counterfactual_pair(group_summaries, grade_lookup, group_id)
             )
 
+        # PR-9a: per-case + per-experiment statistics. Variant-tagged trials
+        # are excluded from the rollup (see stats.compute_case_stats).
+        case_stats = compute_case_stats(list(report.trials), grade_lookup)
+        experiment_stats = compute_experiment_stats(case_stats)
+
         completed = report.completed_trial_count or 1
         return ExperimentReport(
             experiment_id=report.experiment_id,
@@ -270,6 +292,8 @@ class ExperimentRunner:
             scored_trial_count=scored,
             hard_gate_pass_fraction=round(passed / completed, 6),
             counterfactual_pairs=pairs,
+            case_stats=case_stats,
+            experiment_stats=experiment_stats,
         )
 
 
@@ -298,6 +322,7 @@ def _summarize(trial: EvalTrial, outcome: RunOutcome) -> TrialSummary:
         tool_call_count=len(outcome.tool_calls),
         variant=trial.variant,
         counterfactual_group_id=trial.counterfactual_group_id,
+        trial_index=trial.trial_index,
     )
 
 
