@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.eval import EvalExperiment, EvalScore, EvalTrial
+from app.models.eval import EvalEvidenceItem, EvalExperiment, EvalScore, EvalTrial
 
 
 class EvalRepository:
@@ -135,3 +135,34 @@ class EvalRepository:
             .order_by(EvalScore.domain, EvalScore.grader_name)
         )
         return list(result.scalars())
+
+    async def delete_evidence_for_trial(self, trial_id: UUID) -> None:
+        """Remove any previously-collected evidence so the next collect can
+        re-insert rows whose ids differ if content changed.
+
+        Used before ``create_evidence_items`` to make re-collection
+        deterministic; the foreign key ON DELETE CASCADE would otherwise
+        orphan rows that no longer match the projection.
+        """
+
+        from sqlalchemy import delete
+
+        await self._session.execute(
+            delete(EvalEvidenceItem).where(EvalEvidenceItem.trial_id == trial_id)
+        )
+
+    async def create_evidence_items(
+        self, items: Sequence[EvalEvidenceItem]
+    ) -> list[EvalEvidenceItem]:
+        self._session.add_all(items)
+        await self._session.flush()
+        return list(items)
+
+    async def list_evidence_items(self, trial_id: UUID) -> list[EvalEvidenceItem]:
+        result = await self._session.execute(
+            select(EvalEvidenceItem)
+            .where(EvalEvidenceItem.trial_id == trial_id)
+            .order_by(EvalEvidenceItem.kind, EvalEvidenceItem.source_type)
+        )
+        return list(result.scalars())
+

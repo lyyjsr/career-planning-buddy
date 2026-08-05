@@ -8,10 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
-from app.models.eval import EvalExperiment, EvalScore, EvalTrial
+from app.models.eval import EvalEvidenceItem, EvalExperiment, EvalScore, EvalTrial
+from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
-from evals.v2.contracts import ExperimentCreate, GradeResult, canonical_sha256
+from evals.v2.collectors.evidence import collect_evidence
+from evals.v2.collectors.outcome import collect_outcome
+from evals.v2.contracts import (
+    EvalCase,
+    ExperimentCreate,
+    GradeResult,
+    canonical_sha256,
+)
 from evals.v2.dataset_loader import DatasetBundle
+from evals.v2.graders.base import EvidenceItem
+from evals.v2.graders.registry import grade_all
 
 EXPERIMENT_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"running", "cancelled"},
@@ -188,6 +198,122 @@ class EvalService:
                 rationale=result.rationale,
             )
             return await self._evals.create_score(score)
+
+    async def attach_evidence(
+        self, trial_id: UUID, items: list[EvidenceItem]
+    ) -> list[EvalEvidenceItem]:
+        """Persist a fresh evidence catalog for one Trial.
+
+        Pre-existing rows for this Trial are deleted first so the new set's
+        ids (and therefore the scores' ``evidence_item_ids``) reflect the
+        current projection. If a caller tries to attach evidence to a Trial
+        that hasn't been marked ``completed`` with a run_id, the rows would
+        be unreachable by graders anyway -- but we accept the call here so
+        that ``collect_evidence`` plus ``attach_evidence`` can run before
+        grading, mirroring the TrialRunner's own ``attach_trial_outcome``
+        pattern.
+        """
+
+        async with session_transaction(self._session):
+            await self._evals.delete_evidence_for_trial(trial_id)
+            rows = [
+                EvalEvidenceItem(
+                    trial_id=trial_id,
+                    kind=item.kind.value,
+                    source_type=item.source_type,
+                    source_id=item.source_id,
+                    content_hash=item.content_hash,
+                    projection_json=item.projection,
+                    sensitivity=item.sensitivity,
+                )
+                for item in items
+            ]
+            return await self._evals.create_evidence_items(rows)
+
+    async def grade_trial(
+        self,
+        trial_id: UUID,
+        case: EvalCase,
+    ) -> list[GradeResult]:
+        """Collect evidence and run every registered Grader for one Trial.
+
+        Steps:
+        1. Load the Trial; require ``completed`` + run_id (same gate as
+           ``add_grade``: a non-completed Trial cannot be graded).
+        2. Re-read the runtime Run + outcome from PostgreSQL (the Trial's
+           ``outcome_snapshot_json`` is informational; for grading we want
+           the freshest Plan/Tasks/Step/Event rows to construct the
+           projected catalog).
+        3. ``collect_evidence`` -> ``EvidenceItem`` list.
+        4. Persist them via ``attach_evidence`` (replaces any stale rows).
+        5. ``grade_all`` (Registry) -> ``GradeResult`` list, persisted via
+           ``add_grade`` per row.
+
+        Returns the list of ``GradeResult`` objects. DB-level score uniqueness
+        on (trial_id, grader_name, grader_version) prevents silent re-grading;
+        callers that want to re-grade after content change must first clear
+        scores at the Repository layer.
+        """
+
+        async with session_transaction(self._session):
+            trial = await self._evals.get_trial(trial_id, for_update=True)
+            if trial is None:
+                raise AppError(
+                    code="EVAL_TRIAL_NOT_FOUND",
+                    message="Eval Trial was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if trial.status != "completed" or trial.run_id is None:
+                raise AppError(
+                    code="EVAL_TRIAL_NOT_GRADEABLE",
+                    message="Only a completed Trial backed by a real Agent Run can be graded",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            run = await AgentRunRepository(self._session).get_by_id(trial.run_id)
+            if run is None:
+                raise AppError(
+                    code="EVAL_TRIAL_NOT_GRADEABLE",
+                    message="the Trial's Agent Run was not found",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            user_id = run.user_id
+            # Outcome snapshot is recomputed in-session so the evidence rows
+            # reflect the freshest Plan/Task/Step state rather than the frozen
+            # json dropped into the Trial row at execute time.
+            outcome = await collect_outcome(self._session, run, user_id=user_id)
+            items = await collect_evidence(
+                self._session,
+                trial_id=trial_id,
+                run=run,
+                outcome=outcome,
+                case=case,
+            )
+            # Persist evidence inline (NOT via attach_evidence, which opens
+            # its own transaction and would conflict with this one). The
+            # delete+create pair is identical to attach_evidence's body.
+            await self._evals.delete_evidence_for_trial(trial_id)
+            rows = [
+                EvalEvidenceItem(
+                    trial_id=trial_id,
+                    kind=item.kind.value,
+                    source_type=item.source_type,
+                    source_id=item.source_id,
+                    content_hash=item.content_hash,
+                    projection_json=item.projection,
+                    sensitivity=item.sensitivity,
+                )
+                for item in items
+            ]
+            await self._evals.create_evidence_items(rows)
+            results = await grade_all(
+                trial_id=trial_id,
+                outcome=outcome,
+                evidence_items=items,
+                expected=case,
+            )
+            for result in results:
+                await self.add_grade(trial_id, result)
+            return results
 
     @staticmethod
     def _frozen_hash(experiment: EvalExperiment) -> str:

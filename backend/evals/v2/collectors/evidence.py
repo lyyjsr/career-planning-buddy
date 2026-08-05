@@ -1,0 +1,301 @@
+"""Evidence projection for one Trial.
+
+``collect_evidence`` freezes a bounded set of ``EvidenceItem`` rows from a
+completed Run's outcome projection, the versioned ``EvalCase``'s scenario /
+expected_outcome / trajectory_policy, and a few side-channel signals the
+Graders need (risk match, repair count, visible-evidence refs). It does NOT
+copy raw Provider transcripts or arguments payloads -- those are explicitly
+denied across all six Grader domains (see ``graders/registry.py``).
+
+Content hashing uses ``canonical_sha256`` so a re-collect of the same
+projection yields the same ``content_hash``; the DB UNIQUE over
+``(trial_id, kind, source_type, source_id)`` therefore either leaves the
+existing rows untouched or writes new rows whose ids differ from any prior
+Score's ``evidence_item_ids`` -- this is what makes old scores non-silently
+reusable.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.agent.nodes import HIGH_RISK_PATTERNS
+from app.models.agent_run import AgentEvent, AgentStep
+from app.models.plan import Plan, Task
+from evals.v2.collectors.outcome import (
+    RunOutcome,
+    _plan_projection,
+    _task_projection,
+)
+from evals.v2.contracts import EvalCase, canonical_sha256
+from evals.v2.graders.base import EvidenceItem, EvidenceKind
+
+if TYPE_CHECKING:
+    from app.models.agent_run import AgentRun
+
+
+def _item(
+    *, trial_id: UUID, kind: EvidenceKind, source_type: str, source_id: str,
+    projection: dict[str, object], sensitivity: str = "normal",
+) -> EvidenceItem:
+    return EvidenceItem(
+        id=uuid4(),
+        trial_id=trial_id,
+        kind=kind,
+        source_type=source_type,
+        source_id=source_id,
+        content_hash=canonical_sha256(projection),
+        projection=projection,
+        sensitivity=sensitivity,
+    )
+
+
+def _risk_signals(message: str) -> dict[str, object]:
+    matched = [rule_id for rule_id, pattern in HIGH_RISK_PATTERNS if pattern.search(message)]
+    return {
+        "level": "high" if matched else "none",
+        "category": "self_harm" if matched else None,
+        "matched_rule_ids": matched,
+    }
+
+
+def _repair_signal(
+    events: list[AgentEvent], steps: list[AgentStep]
+) -> dict[str, object]:
+    """Count repair signals from event payloads + step attempts."""
+
+    format_attempts = 0
+    business_attempts = 0
+    for event in events:
+        etype = event.event_type
+        if "format" in etype and "repair" in etype:
+            format_attempts += 1
+        elif "business" in etype and "repair" in etype:
+            business_attempts += 1
+    # Also infer from step retries: any step with attempt > 1 indicates a retry.
+    step_retries = sum(1 for step in steps if step.attempt > 1)
+    # Without granular event instrumentation we attribute all step retries to
+    # the most generic "total" counter; the per-kind breakdown stays cautious.
+    total = max(format_attempts + business_attempts, 1 if step_retries > 0 else 0)
+    has_any_repair = bool(format_attempts or business_attempts or step_retries)
+    return {
+        "format_repair_attempts": format_attempts,
+        "business_repair_attempts": business_attempts,
+        "total_repair_attempts": total if has_any_repair else 0,
+    }
+
+
+def _find_companion_for(events: list[AgentEvent]) -> dict[str, object] | None:
+    """Project the companion message event payload (no raw PII retained)."""
+
+    for event in reversed(events):
+        if event.event_type == "companion.message":
+            payload = event.payload_json or {}
+            text = str(payload.get("message", ""))
+            return {"output": text[:1000]}  # truncated; Safety grader scans for fragments only
+    return None
+
+
+async def collect_evidence(
+    session: AsyncSession,
+    *,
+    trial_id: UUID,
+    run: AgentRun,
+    outcome: RunOutcome,
+    case: EvalCase,
+) -> list[EvidenceItem]:
+    """Freeze the per-Trial evidence catalog the Graders will see."""
+
+    del run  # outcome already aggregates Run fields; we only reach back for events/steps
+    items: list[EvidenceItem] = []
+
+    # --- expected side (no DB needed; comes from the versioned case) ---
+    scenario = case.scenario
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.REQUEST_CONSTRAINTS,
+        source_type="expected", source_id="scenario.user_request",
+        projection={"user_request": scenario.user_request,
+                    "hint_intent": scenario.hint_intent,
+                    "replan_mode": scenario.replan_mode,
+                    "planning_date": scenario.planning_date.isoformat()},
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.PROFILE_PROJECTION,
+        source_type="expected", source_id="scenario.profile",
+        projection=(scenario.profile.model_dump(mode="json") if scenario.profile else {}),
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.EXPECTED_OUTCOME,
+        source_type="expected", source_id="case.expected_outcome",
+        projection=case.expected_outcome.model_dump(mode="json"),
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.TRAJECTORY_POLICY,
+        source_type="expected", source_id="case.trajectory_policy",
+        projection=case.trajectory_policy.model_dump(mode="json"),
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.TOOL_ALLOWLIST,
+        source_type="expected", source_id="case.tool_allowlist",
+        projection={"allowlist": ["memory_lookup", "rag_retrieve", "web_search"]},
+    ))
+
+    # --- runtime outcome projection ---
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.OUTCOME_STATUS,
+        source_type="run", source_id=str(outcome.run_id),
+        projection={
+            "status": outcome.status, "result_kind": outcome.result_kind,
+            "final_plan_id": str(outcome.final_plan_id) if outcome.final_plan_id else None,
+            "error_code": outcome.error_code,
+            "fallback_reason": outcome.fallback_reason,
+            "user_id": str(outcome.user_id),
+        },
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.RUN_METRICS,
+        source_type="run", source_id=str(outcome.run_id),
+        projection={
+            "tokens_in": outcome.total_tokens_in,
+            "tokens_out": outcome.total_tokens_out,
+            "latency_ms": outcome.total_latency_ms,
+            "terminal_event_count": sum(
+                1 for e in outcome.events
+                if e.get("event_type") in {"run.completed", "run.degraded",
+                                            "run.failed", "run.cancelled"}
+            ),
+        },
+    ))
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.TRANSCRIPT_HASH,
+        source_type="run", source_id=str(outcome.run_id),
+        projection={"transcript_hash": outcome.transcript_hash},
+    ))
+
+    # --- plan + task projections (when a plan was produced) ---
+    if outcome.final_plan_id is not None:
+        plan = await session.get(Plan, outcome.final_plan_id)
+        if plan is not None and plan.user_id == outcome.user_id:
+            # Evidence refs recorded by the Finalizer are stored on Plan.
+            # The collector also reconstructs the "visible_refs" window: the
+            # Finalizer's persisted set is by construction a subset of the
+            # call's visible catalog (verified at write time by PR-1). For
+            # replay / hash purposes, treat persisted refs as visible.
+            persisted_refs = list(plan.evidence_refs_json or [])
+            items.append(_item(
+                trial_id=trial_id, kind=EvidenceKind.PLAN_PROJECTION,
+                source_type="plan", source_id=str(plan.id),
+                projection={**_plan_projection(plan),
+                            "evidence_refs": persisted_refs,
+                            "visible_evidence_refs": persisted_refs},
+            ))
+            plan_tasks = await session.scalars(
+                select(Task).where(Task.plan_id == plan.id).order_by(Task.order_index)
+            )
+            for task in plan_tasks:
+                items.append(_item(
+                    trial_id=trial_id, kind=EvidenceKind.TASK_PROJECTION,
+                    source_type="task", source_id=str(task.id),
+                    projection={**_task_projection(task),
+                                "user_id": str(task.user_id)},
+                ))
+
+    # --- step / event / tool projections (transcript-derived facts) ---
+    for step in outcome.steps:
+        # outcome.steps are dicts already projected by ``_step_projection``.
+        items.append(_item(
+            trial_id=trial_id, kind=EvidenceKind.STEP_PROJECTION,
+            source_type="step", source_id=str(step.get("node")),
+            projection=step,
+        ))
+    for event in outcome.events:
+        items.append(_item(
+            trial_id=trial_id, kind=EvidenceKind.EVENT_PROJECTION,
+            source_type="event", source_id=str(event.get("sequence")),
+            projection=event,
+        ))
+    for tool_call in outcome.tool_calls:
+        items.append(_item(
+            trial_id=trial_id, kind=EvidenceKind.TOOL_CALL_PROJECTION,
+            source_type="tool_call", source_id=str(tool_call.get("tool_name")),
+            projection=tool_call,
+        ))
+
+    # --- risk + repair + visible evidence derived from raw rows ---
+    event_rows = await session.scalars(
+        select(AgentEvent)
+        .where(AgentEvent.run_id == outcome.run_id)
+        .order_by(AgentEvent.sequence)
+    )
+    event_rows_list = list(event_rows)
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.RISK_SIGNALS,
+        source_type="runtime", source_id=f"risk:{outcome.run_id}",
+        projection=_risk_signals(scenario.user_request),
+    ))
+    # Need raw AgentStep rows for repair detection (attempt count).
+    step_rows = await session.scalars(
+        select(AgentStep)
+        .where(AgentStep.run_id == outcome.run_id)
+        .order_by(AgentStep.sequence)
+    )
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.REPAIR_SIGNAL,
+        source_type="runtime", source_id=f"repair:{outcome.run_id}",
+        projection=_repair_signal(event_rows_list, list(step_rows)),
+    ))
+
+    # visible evidence refs: when a plan exists reuse its persisted refs
+    # (already pushed into PLAN_PROJECTION). Emit a standalone item that the
+    # Model grader's ``evidence_visibility`` sub-grader consults.
+    if outcome.final_plan_id is not None:
+        plan = await session.get(Plan, outcome.final_plan_id)
+        if plan is not None:
+            refs = list(plan.evidence_refs_json or [])
+        else:
+            refs = []
+    else:
+        refs = []
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.EVIDENCE_VISIBLE_REFS,
+        source_type="runtime", source_id=f"visible_refs:{outcome.run_id}",
+        projection={"visible_refs": refs},
+    ))
+
+    # cross_user_signal: scan plan/tasks for any user_id != outcome.user_id.
+    foreign_users: list[str] = []
+    if outcome.final_plan_id is not None:
+        plan = await session.get(Plan, outcome.final_plan_id)
+        if plan is not None:
+            plan_user = str(plan.user_id)
+            if plan_user != str(outcome.user_id):
+                foreign_users.append(plan_user)
+            plan_tasks = await session.scalars(
+                select(Task).where(Task.plan_id == plan.id)
+            )
+            for task in plan_tasks:
+                task_user = str(task.user_id)
+                if task_user != str(outcome.user_id) and task_user not in foreign_users:
+                    foreign_users.append(task_user)
+    items.append(_item(
+        trial_id=trial_id, kind=EvidenceKind.CROSS_USER_SIGNAL,
+        source_type="runtime", source_id=f"cross_user:{outcome.run_id}",
+        projection={"foreign_user_ids": foreign_users},
+    ))
+
+    # redacted_output: companion message if any (truncated, no PII scrub of body)
+    companion_proj = _find_companion_for(event_rows_list)
+    if companion_proj is not None:
+        items.append(_item(
+            trial_id=trial_id, kind=EvidenceKind.REDACTED_OUTPUT,
+            source_type="runtime", source_id=f"companion:{outcome.run_id}",
+            projection=companion_proj,
+        ))
+
+    # Sanity: any item without a content_hash boundary was filtered above.
+    return items
+

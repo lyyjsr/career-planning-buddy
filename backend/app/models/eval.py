@@ -221,3 +221,65 @@ class EvalScore(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class EvalEvidenceItem(Base):
+    """One piece of frozen evidence fed to a V2 Grader.
+
+    The (trial_id, kind, source_type, source_id) tuple is unique: if the
+    underlying projection changed, the new content_hash must NOT silently
+    overwrite the old row -- the collector inserts new rows whose ids differ
+    from any prior Score's evidence_item_ids, forcing a re-grade.
+    """
+
+    __tablename__ = "eval_evidence_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "trial_id",
+            "kind",
+            "source_type",
+            "source_id",
+            name="uq_eval_evidence_items_trial_kind_source",
+        ),
+        CheckConstraint(
+            "kind IN ('request_constraints','profile_projection',"
+            "'expected_outcome','trajectory_policy','rubric',"
+            "'plan_projection','task_projection','step_projection',"
+            "'event_projection','tool_call_projection','tool_spec',"
+            "'run_metrics','outcome_status','evidence_visible_refs',"
+            "'transcript_hash','risk_signals','redacted_output',"
+            "'cross_user_signal','tool_allowlist','repair_signal')",
+            name="ck_eval_evidence_items_kind",
+        ),
+        CheckConstraint(
+            "sensitivity IN ('normal','sensitive')",
+            name="ck_eval_evidence_items_sensitivity",
+        ),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_evidence_items_content_hash",
+        ),
+        Index("ix_eval_evidence_items_trial_kind", "trial_id", "kind"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trials.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(128))
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    projection_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    sensitivity: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="normal"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
