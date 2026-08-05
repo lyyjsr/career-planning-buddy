@@ -36,6 +36,9 @@ registered_models = (
     application_models.SearchSource,
     application_models.ExperienceAtom,
     application_models.ExperienceAtomCandidate,
+    application_models.EvalExperiment,
+    application_models.EvalTrial,
+    application_models.EvalScore,
 )
 
 

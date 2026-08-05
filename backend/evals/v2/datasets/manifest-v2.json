@@ -1,0 +1,10 @@
+{
+  "manifest_version": "2",
+  "dataset_id": "stage5",
+  "dataset_version": "v1",
+  "case_schema_version": "2",
+  "source_path": "datasets/stage5-v1.jsonl",
+  "source_format": "legacy_stage5_jsonl",
+  "source_sha256": "a19cfc403d0bb94aa5beed3f4ca06605aa54970c62cbd9e02ad95f6e866cda64",
+  "case_count": 30
+}
