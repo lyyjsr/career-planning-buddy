@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     eval_provider_seed_mode: Literal["none", "provider_seed", "local_seed"] = (
         "provider_seed"
     )
+    # PR-9c.2 Commit 3.4 (Stage A, Option E′): when set, TrialRunner
+    # substitutes MockPlanningProvider with PairSmokePlanningProvider
+    # bound to this profile, producing two fixture profiles
+    # (compact_v1 / structured_v1) that are byte-different on
+    # PLAN_PROJECTION. ``None`` = legacy MockPlanningProvider path.
+    # Bound through a Settings-style switch (not execution_mode) so the
+    # DB CHECK on eval_experiments.execution_mode does not need to grow.
+    eval_pair_smoke_planning_profile: (
+        Literal["compact_v1", "structured_v1"] | None
+    ) = None
     embedding_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     embedding_dim: int = Field(
         default=1024,

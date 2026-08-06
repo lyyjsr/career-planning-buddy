@@ -48,7 +48,11 @@ from app.models.agent_run import AgentRun
 from app.models.eval import EvalTrial
 from app.models.provider_call import EvalProviderFixtureItem
 from app.providers.embedding import MockEmbeddingProvider, build_embedding_provider
-from app.providers.llm import MockPlanningProvider, build_planning_provider
+from app.providers.llm import (
+    MockPlanningProvider,
+    PairSmokePlanningProvider,
+    build_planning_provider,
+)
 from app.providers.search import MockSearchProvider, build_search_provider
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
@@ -307,7 +311,19 @@ class TrialRunner:
             base_embedding = build_embedding_provider(self._settings)
             base_search = build_search_provider(self._settings)
         else:  # mock or fixture
-            base_planning = MockPlanningProvider()
+            # PR-9c.2 Commit 3.4 (Stage A E′): optional Pair-Smoke
+            # planning profile substitution. Defaulting to None yields
+            # the legacy MockPlanningProvider; setting the field to
+            # compact_v1 / structured_v1 swaps in a deterministic
+            # two-profile provider that produces byte-different
+            # PLAN_PROJECTION summaries for the same PlanningContext.
+            pair_smoke_profile = getattr(
+                self._settings, "eval_pair_smoke_planning_profile", None
+            )
+            if pair_smoke_profile is not None:
+                base_planning = PairSmokePlanningProvider(pair_smoke_profile)
+            else:
+                base_planning = MockPlanningProvider()
             base_embedding = MockEmbeddingProvider()
             base_search = MockSearchProvider()
 

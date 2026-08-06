@@ -731,6 +731,202 @@ class MockPlanningProvider:
         )
 
 
+class PairSmokePlanningProvider(MockPlanningProvider):
+    """Two deterministic, semantically-comparable fixture profiles used
+    ONLY by Stage A pairwise smoke verification (PR-9c.2 Commit 3.4 / E′).
+
+    Invariants (per reviewer-approved design):
+
+    * same ``PlanningContext`` + same profile  → byte-identical output
+    * same ``PlanningContext`` + diff profile  → byte-different output
+    * no experiment-identity leakage (no UUID / baseline/candidate
+      strings / "[candidate-variant]" markers / thread-local / global)
+    * no ``PlanningContext`` mutation
+    * safety/System/Tool-marker semantics unchanged vs MockPlanningProvider
+    * no import of ``evals.*`` (provider layer stays below evals runtime)
+
+    Two profiles:
+      * ``compact_v1``  — single high-leverage task, terse summary,
+                          aggressive horizon focus.
+      * ``structured_v1``— three explicitly-staged tasks, verbose
+                           summary anchoring the structure, longer
+                           horizon narrative.
+
+    Differences are REAL (actionability, clarity, decomposition), not
+    numeric noise. Both summaries differ in wording so ``PLAN_PROJECTION``
+    (which includes ``summary``) produces byte-different ``output_hash``
+    via the loader's ``canonical_sha256({request, plan})`` formula.
+
+    The profile choice is sourced from ``Settings.eval_pair_smoke_planning_profile``
+    — the only construction-side input.
+    """
+
+    model_id = "pair-smoke-career-planner-v1"
+
+    _ALLOWED_PROFILES = frozenset({"compact_v1", "structured_v1"})
+
+    def __init__(self, profile: str) -> None:
+        super().__init__()
+        if profile not in self._ALLOWED_PROFILES:
+            raise ValueError(
+                f"PairSmokePlanningProvider: unknown profile {profile!r}; "
+                f"expected one of {sorted(self._ALLOWED_PROFILES)}"
+            )
+        self._profile = profile
+
+    def _candidate(
+        self, context: PlanningContext, replan_mode: ReplanMode
+    ) -> PlanCandidate:
+        """Profile-specific candidate builder.
+
+        Reuses the parent's weekly-focus + horizon scaffolding so the
+        planner-side invariants (contiguous ``week_index``, identical
+        ``plan_date`` / ``horizon_start`` / ``horizon_end`` across
+        profiles) are preserved; only the profile-visible parts
+        (``summary``, ``rationale``, ``tasks``) differ.
+        """
+
+        # Shared scaffolding (identical across profiles for comparability).
+        window = context.planning_window
+        if replan_mode == ReplanMode.CONTINUE and context.source_plan is not None:
+            weekly = [
+                WeeklyFocusCandidate.model_validate(item.model_dump())
+                for item in context.source_plan.weekly_focus[
+                    : window.horizon_weeks
+                ]
+            ]
+            while len(weekly) < window.horizon_weeks:
+                index = len(weekly) + 1
+                weekly.append(
+                    WeeklyFocusCandidate(
+                        week_index=index,
+                        focus=f"第 {index} 周继续推进可验证的求职准备成果",
+                        success_signal=f"第 {index} 周产出可展示证据",
+                    )
+                )
+        else:
+            weekly = [
+                WeeklyFocusCandidate(
+                    week_index=index,
+                    focus=f"第 {index} 周完成一个可验证的求职准备增量",
+                    success_signal=f"第 {index} 周产出可展示证据",
+                )
+                for index in range(1, window.horizon_weeks + 1)
+            ]
+
+        # Replan adjustment reason (identical across profiles — keeps
+        # safety/replan semantics neutral).
+        adjustment_reason = None
+        if replan_mode == ReplanMode.ADJUST:
+            review = context.source_review
+            adjustment_reason = (
+                review.adjustment_request
+                if review and review.adjustment_request
+                else review.replan_reason
+                if review and review.replan_reason
+                else review.blockers
+                if review and review.blockers
+                else "根据当前阻碍采用更小的行动步长"
+            )
+
+        overall_direction = (
+            context.source_plan.overall_direction
+            if context.source_plan is not None
+            else "在规划窗口内形成可展示项目证据并推进面试准备"
+        )
+
+        if self._profile == "compact_v1":
+            tasks = [
+                TaskCandidate(
+                    title="闭环一个可展示求职准备增量",
+                    task_type=TaskType.PROJECT,
+                    scheduled_date=window.planning_date,
+                    starter_action="选择一个能在今天闭环的小改动并执行",
+                    deliverable="一个可运行且有测试结果的项目增量",
+                    estimated_minutes=max(
+                        5, min(30, context.time_budget_minutes)
+                    ),
+                    rationale="把准备动作压缩为最小可展示单位",
+                )
+            ]
+            summary = (
+                f"[compact_v1] 单任务版本:本周聚焦一次可闭环的项目增量,"
+                f"在 {window.horizon_weeks} 周窗口内形成一条清晰的证据线"
+            )
+            rationale = (
+                "compact_v1 用单一高杠杆任务压缩决策开销,"
+                "牺牲分解粒度换取执行确定性"
+            )
+        else:  # structured_v1
+            first_minutes = max(
+                5, min(15, context.time_budget_minutes // 3)
+            )
+            second_minutes = max(
+                5, min(15, context.time_budget_minutes // 3)
+            )
+            third_minutes = max(
+                5,
+                min(
+                    15,
+                    context.time_budget_minutes
+                    - first_minutes
+                    - second_minutes,
+                ),
+            )
+            tasks = [
+                TaskCandidate(
+                    title="梳理目标岗位能力差距",
+                    task_type=TaskType.LEARNING,
+                    scheduled_date=window.planning_date,
+                    starter_action="打开岗位描述并标出三个高频能力词",
+                    deliverable="一份包含三个能力差距的清单",
+                    estimated_minutes=first_minutes,
+                    rationale="先明确可验证的准备重点",
+                ),
+                TaskCandidate(
+                    title="完成最小项目增量",
+                    task_type=TaskType.PROJECT,
+                    scheduled_date=window.planning_date,
+                    starter_action="选择一个能在今天闭环的小改动并执行",
+                    deliverable="一个可运行且有测试结果的项目增量",
+                    estimated_minutes=second_minutes,
+                    rationale="把学习内容转成可展示证据",
+                ),
+                TaskCandidate(
+                    title="复盘并产出可复用笔记",
+                    task_type=TaskType.LEARNING,
+                    scheduled_date=window.planning_date,
+                    starter_action="把今天的进展写成可复用的复盘要点",
+                    deliverable="一份三句话的可复用复盘笔记",
+                    estimated_minutes=third_minutes,
+                    rationale="为下一轮迭代沉淀明确输入",
+                ),
+            ]
+            summary = (
+                f"[structured_v1] 三任务分解版本:本周按学习→项目→复盘"
+                f"的显式链条推进,在 {window.horizon_weeks} 周窗口内形成"
+                "可追溯的多步证据链"
+            )
+            rationale = (
+                "structured_v1 用三阶段任务链显式承担能力差距→证据"
+                "→沉淀,换取清晰度但增加协调开销"
+            )
+
+        return PlanCandidate(
+            plan_date=window.planning_date,
+            horizon_start=window.horizon_start,
+            horizon_end=window.horizon_end,
+            overall_direction=overall_direction,
+            weekly_focus=weekly,
+            summary=summary,
+            rationale=rationale,
+            adjustment_reason=adjustment_reason,
+            assumptions=[],
+            tasks=tasks,
+            evidence_refs=[],
+        )
+
+
 def build_planning_provider(settings: Settings) -> PlanningProvider:
     """Build exactly the configured Provider; never silently substitute Mock."""
     if settings.llm_provider == "mock":
