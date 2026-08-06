@@ -22,12 +22,13 @@ Coverage (Commit 3.1 revised semantics):
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.database import session_transaction
 from app.harness.pairwise_sweep_executor import (
@@ -98,6 +99,21 @@ async def _persist(
     async with session_transaction(db_session):
         await EvalRepository(db_session).create_sweep(sweep_row)
         await EvalRepository(db_session).create_sweep_items(items)
+
+
+def _executor_factory(db_session: AsyncSession) -> PairwiseSweepExecutor:
+    """Build an Executor whose recovery path uses a session bound to the
+    test's rollback-root connection. ``_recover_running_items`` opens
+    its own AsyncSession; we hand it a factory bound to the same
+    underlying connection so writes participate in the test's rollback
+    and are visible to subsequent assertions."""
+    factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    return PairwiseSweepExecutor(session_factory=factory, engine=None)
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +400,9 @@ async def test_interrupted_running_item_without_result_is_requeued(
         status="running",
     )
     await _persist(db_session=db_session, sweep_row=sweep_row, items=[orphan])
-    executor = PairwiseSweepExecutor(session_factory=None)  # type: ignore[arg-type]
+    executor = _executor_factory(db_session)
     async with session_transaction(db_session):
-        await executor._recover_running_items(db_session, sweep_row.id)  # noqa: SLF001
+        await executor._recover_running_items_in_session(db_session, sweep_row.id)  # noqa: SLF001
     async with session_transaction(db_session):
         refetched = await EvalRepository(db_session).list_sweep_items(sweep_row.id)
     assert len(refetched) == 1
@@ -418,9 +434,9 @@ async def test_interrupted_running_item_with_existing_result_reconciles_without_
         judge_run_id=result_row.judge_run_id,
     )
     await _persist(db_session=db_session, sweep_row=sweep_row, items=[orphan])
-    executor = PairwiseSweepExecutor(session_factory=None)  # type: ignore[arg-type]
+    executor = _executor_factory(db_session)
     async with session_transaction(db_session):
-        await executor._recover_running_items(db_session, sweep_row.id)  # noqa: SLF001
+        await executor._recover_running_items_in_session(db_session, sweep_row.id)  # noqa: SLF001
     async with session_transaction(db_session):
         refetched = await EvalRepository(db_session).list_sweep_items(sweep_row.id)
     assert len(refetched) == 1
@@ -478,10 +494,10 @@ async def test_recovery_does_not_recount_terminal_pair(
         ),
     ]
     await _persist(db_session=db_session, sweep_row=sweep_row, items=items)
-    executor = PairwiseSweepExecutor(session_factory=None)  # type: ignore[arg-type]
+    executor = _executor_factory(db_session)
 
     async with session_transaction(db_session):
-        await executor._recover_running_items(db_session, sweep_row.id)  # noqa: SLF001
+        await executor._recover_running_items_in_session(db_session, sweep_row.id)  # noqa: SLF001
     after_first = await EvalRepository(db_session).get_sweep(sweep_row.id)
     assert after_first is not None
     assert after_first.completed_pair_count == 1
@@ -490,7 +506,7 @@ async def test_recovery_does_not_recount_terminal_pair(
     # Idempotent: re-running recovery on the now-fully-terminal sweep
     # MUST NOT move counters.
     async with session_transaction(db_session):
-        await executor._recover_running_items(db_session, sweep_row.id)  # noqa: SLF001
+        await executor._recover_running_items_in_session(db_session, sweep_row.id)  # noqa: SLF001
     after_second = await EvalRepository(db_session).get_sweep(sweep_row.id)
     assert after_second is not None
     assert after_second.completed_pair_count == 1
@@ -515,3 +531,231 @@ def test_provider_error_code_classifies_known_exceptions() -> None:
     assert _provider_error_code(FakeTimeout()) == "PROVIDER_TIMEOUT"
     assert _provider_error_code(FakeAuth()) == "PROVIDER_AUTH"
     assert _provider_error_code(Exception("generic")) == "PROVIDER_HARD_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Commit 3.2 — advisory lock on a dedicated raw connection (#2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_advisory_lock_unlock_use_same_connection(
+    db_session: AsyncSession,
+) -> None:
+    """Two ``_drive_sweep`` calls in sequence on the SAME Sweep MUST
+    both succeed — proving the first released its advisory lock on its
+    dedicated raw connection rather than leaking it (Commit 3.2 issue
+    #2). The lock is held by the FIRST call only for the duration of
+    that call; a second call immediately afterward acquires it fresh.
+    """
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        executor = PairwiseSweepExecutor(
+            session_factory=factory, engine=engine
+        )
+        sweep_id = uuid4()
+        # First call: lock acquired, no sweep exists → early-return
+        # after _pump_one_item sees sweep=None.
+        await executor._drive_sweep(sweep_id)  # noqa: SLF001
+        # Second call: SAME sweep_id, MUST also acquire the lock (the
+        # first call released it in finally on its dedicated connection).
+        # No assertion needed beyond "did not hang" — pg_try_advisory_lock
+        # returning False with no other holder would silently no-op, so
+        # we directly probe the lock state via PG:
+        key1, key2 = _advisory_key_parts(sweep_id)
+        async with engine.connect() as probe:
+            taken = (
+                await probe.execute(
+                    text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+                    {"k1": key1, "k2": key2},
+                )
+            ).scalar_one()
+            # Cleanup so the test is hermetic.
+            await probe.execute(
+                text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                {"k1": key1, "k2": key2},
+            )
+        assert taken is True, "first _drive_sweep leaked its advisory lock"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_second_executor_cannot_drive_locked_sweep(
+    db_session: AsyncSession,
+) -> None:
+    """When one executor holds the advisory lock on a sweep, a second
+    executor's ``_drive_sweep`` returns immediately without pumping
+    (``pg_try_advisory_lock`` returns False)."""
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        sweep_id = uuid4()
+        key1, key2 = _advisory_key_parts(sweep_id)
+        # Pre-acquire the lock on a separate connection — simulates a
+        # concurrent worker already driving the sweep.
+        async with engine.connect() as holder:
+            await holder.execute(
+                text("SELECT pg_advisory_lock(:k1, :k2)"),
+                {"k1": key1, "k2": key2},
+            )
+            try:
+                executor = PairwiseSweepExecutor(
+                    session_factory=factory, engine=engine
+                )
+                # Should NOT raise and should NOT pump. We assert by
+                # checking that the worker did NOT try to acquire: that
+                # would deadlock if implemented as blocking
+                # pg_advisory_lock; the test passing proves the
+                # non-blocking variant was used.
+                await asyncio.wait_for(
+                    executor._drive_sweep(sweep_id),  # noqa: SLF001
+                    timeout=2.0,
+                )
+            finally:
+                await holder.execute(
+                    text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                    {"k1": key1, "k2": key2},
+                )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_lock_released_after_executor_exception(
+    db_session: AsyncSession,
+) -> None:
+    """If ``_pump_one_item`` raises, the finally block MUST still unlock
+    on the same dedicated connection — otherwise the Sweep is stuck."""
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        sweep_id = uuid4()
+        executor = PairwiseSweepExecutor(
+            session_factory=factory, engine=engine
+        )
+
+        # Inject a failing _pump_one_item so the drive path raises
+        # mid-flight and triggers the finally.
+        async def _boom(_sid: UUID, _judge: object) -> bool:
+            raise RuntimeError("simulated provider hard error")
+
+        executor._pump_one_item = _boom  # type: ignore[assignment]
+        # The outer ``_execute`` swallows exceptions, so call
+        # _drive_sweep directly and expect the RuntimeError to bubble.
+        try:
+            await executor._drive_sweep(sweep_id)  # noqa: SLF001
+            raise AssertionError("expected RuntimeError to propagate")
+        except RuntimeError:
+            pass
+
+        # Lock MUST be released — probe it.
+        key1, key2 = _advisory_key_parts(sweep_id)
+        async with engine.connect() as probe:
+            taken = (
+                await probe.execute(
+                    text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+                    {"k1": key1, "k2": key2},
+                )
+            ).scalar_one()
+            await probe.execute(
+                text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                {"k1": key1, "k2": key2},
+            )
+        assert taken is True, "lock leaked after exception in pump"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_lock_released_after_cancelled_sweep(
+    db_session: AsyncSession,
+) -> None:
+    """When a Sweep reaches a terminal/cancelled state mid-drive, the
+    lock MUST still be released so the next recovery cycle can take it
+    on a different worker (if needed)."""
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        sweep_row = await _make_sweep(
+            db_session, requested_pair_count=1, status="cancelled"
+        )
+        # Manually mark terminal AND set cancel_requested_at — DDL CHECK
+        # ``ck_eval_pairwise_sweeps_cancelled_implies_both_timestamps``
+        # requires both timestamps when status='cancelled'.
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        sweep_row.terminal_at = _dt.now(UTC)
+        sweep_row.cancel_requested_at = _dt.now(UTC)
+        pair = await _seed_pair(db_session, 1)
+        items = [
+            _make_item(sweep_id=sweep_row.id, pair=pair, position="baseline"),
+            _make_item(sweep_id=sweep_row.id, pair=pair, position="swapped"),
+        ]
+        await _persist(
+            db_session=db_session, sweep_row=sweep_row, items=items
+        )
+
+        executor = PairwiseSweepExecutor(
+            session_factory=factory, engine=engine
+        )
+        await executor._drive_sweep(sweep_row.id)  # noqa: SLF001
+
+        # Lock MUST be released.
+        key1, key2 = _advisory_key_parts(sweep_row.id)
+        async with engine.connect() as probe:
+            taken = (
+                await probe.execute(
+                    text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+                    {"k1": key1, "k2": key2},
+                )
+            ).scalar_one()
+            await probe.execute(
+                text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                {"k1": key1, "k2": key2},
+            )
+        assert taken is True, "lock leaked after cancelled sweep drive"
+    finally:
+        await engine.dispose()

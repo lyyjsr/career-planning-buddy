@@ -37,7 +37,12 @@ from collections.abc import Callable
 from uuid import UUID
 
 from sqlalchemy import func, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config import Settings, get_settings
 from app.core.database import AsyncSessionFactory, session_transaction
@@ -59,10 +64,21 @@ _SWEEP_LOCK_NAMESPACE = 0x9C20
 
 
 def _advisory_key_parts(sweep_id: UUID) -> tuple[int, int]:
-    """Decompose a UUID into (namespace, sweep-hashed-key32) for
-    ``pg_advisory_xact_lock``."""
+    """Decompose a UUID into ``(namespace, sweep-hashed-key32)`` for
+    ``pg_try_advisory_lock`` / ``pg_advisory_unlock``.
 
-    return _SWEEP_LOCK_NAMESPACE, int.from_bytes(sweep_id.bytes[-4:], "big")
+    Both Postgres advisory-lock arguments are ``int4`` (signed 32-bit).
+    The 4-byte slice of the UUID is unsigned by ``int.from_bytes`` —
+    values in the high bit (≥ 2**31) overflow the int4 bound and
+    asyncpg rejects them. Reinterpret as signed so any sweep id is a
+    legal key. The mapping stays 1:1 onto a full int4 range, just
+    expressed as Postgres-native signed integers.
+    """
+
+    key2 = int.from_bytes(sweep_id.bytes[-4:], "big")
+    if key2 >= 0x80000000:
+        key2 -= 0x100000000  # reinterpret high bit as negative
+    return _SWEEP_LOCK_NAMESPACE, key2
 
 
 class PairwiseSweepExecutor:
@@ -75,10 +91,30 @@ class PairwiseSweepExecutor:
         *,
         session_factory: async_sessionmaker[AsyncSession] = AsyncSessionFactory,
         settings: Settings | None = None,
+        engine: AsyncEngine | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings or get_settings()
+        # Dedicated engine for the advisory-lock carrier connection.
+        # IMPORTANT (Commit 3.2 issue #2): the advisory lock is held on a
+        # RAW connection from this engine for the whole ``_drive_sweep``
+        # lifetime; using an AsyncSession for the lock carrier instead
+        # would let SQLAlchemy rotate the underlying pooled connection
+        # between the lock statement's implicit commit and the unlock,
+        # silently leaking the lock on a different backend session.
+        # The engine is lazily built so tests can inject a custom one
+        # (bound to the test's rollback root) without touching prod
+        # settings.
+        self._engine = engine
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
+
+    @property
+    def _lock_engine(self) -> AsyncEngine:
+        if self._engine is None:
+            self._engine = create_async_engine(
+                self._settings.database_url, pool_pre_ping=True
+            )
+        return self._engine
 
     # ----------------------------------------------------------- public
 
@@ -144,43 +180,57 @@ class PairwiseSweepExecutor:
         """Lock-and-pump loop. Repeats until every Item is terminal OR a
         cancel drains the remaining Items.
 
-        Commit 3.1 revision (issue #6): the advisory lock is now held at
-        SESSION level for the whole ``_drive_sweep`` lifetime, NOT
-        transaction level. This removes the prior coupling where the LLM
-        Provider call ran inside the advisory-lock transaction (long
-        transaction + DB connection pinned during a slow network call).
-        Each Item's claim/process/mark sequence now runs in its own short
-        transaction; the lock prevents a second worker from acting on the
-        same Sweep in the meantime.
+        Commit 3.2 revision (issue #2): the advisory lock is now held on
+        a DEDICATED raw connection from ``self._lock_engine`` for the
+        whole ``_drive_sweep`` lifetime. Previously the lock was carried
+        on an ``AsyncSession`` whose pooled connection could rotate
+        between the lock statement's implicit commit and the unlock,
+        silently leaking the lock on a different backend session. Using
+        a raw ``AsyncConnection`` scope guarantees acquire and unlock
+        hit the SAME physical connection.
 
-        Commit 3.1 revision (issue #3): on each entry we call
-        ``_recover_running_items`` *under* the advisory lock. Items left
-        ``running`` by a previous crash are either re-queued (no
-        persisted JudgeResult) or reconciled straight to ``completed``
-        (result already exists) — they cannot stay stuck.
+        Commit 3.2 revision (issue #2): use ``pg_try_advisory_lock``
+        (non-blocking). The first worker that wins drives the Sweep to
+        terminal; a concurrent ``submit``/``recover_interrupted`` for
+        the same Sweep returns immediately without pumping — the holder
+        is responsible.
         """
 
         judge = build_pairwise_judge(self._settings)
-        # Session-level advisory lock. Acquired at the start, released in
-        # finally. Other workers converging on this Sweep block here (or
-        # on the same key on another connection) until we release.
         key1, key2 = _advisory_key_parts(sweep_id)
-        async with self._session_factory() as lock_session:
-            await lock_session.execute(
-                text("SELECT pg_advisory_lock(:k1, :k2)"),
-                {"k1": key1, "k2": key2},
-            )
+        async with self._lock_engine.connect() as lock_conn:
+            acquired = (
+                await lock_conn.execute(
+                    text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+                    {"k1": key1, "k2": key2},
+                )
+            ).scalar_one()
+            if not acquired:
+                # Another executor owns this Sweep — let it drive.
+                # This is the expected path for concurrent submit /
+                # recovery on the same Sweep.
+                return
             try:
-                await self._recover_running_items(lock_session, sweep_id)
+                await self._recover_running_items(sweep_id)
                 while True:
                     done = await self._pump_one_item(sweep_id, judge)
                     if done:
                         return
             finally:
-                await lock_session.execute(
-                    text("SELECT pg_advisory_unlock(:k1, :k2)"),
-                    {"k1": key1, "k2": key2},
-                )
+                unlocked = (
+                    await lock_conn.execute(
+                        text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                        {"k1": key1, "k2": key2},
+                    )
+                ).scalar_one()
+                # NEVER silently lose the lock. If unlock returned False
+                # the lock was never held by THIS session, which would be
+                # a serious invariant violation (we just acquired it).
+                if unlocked is not True:
+                    raise RuntimeError(
+                        f"advisory lock leak: pg_advisory_unlock returned "
+                        f"{unlocked!r} for sweep {sweep_id}"
+                    )
 
     async def _pump_one_item(
         self, sweep_id: UUID, judge: PairwiseJudge
@@ -207,13 +257,17 @@ class PairwiseSweepExecutor:
                 await self._process_item(session, sweep, item, judge)
                 return False
 
-    async def _recover_running_items(
-        self, session: AsyncSession, sweep_id: UUID
-    ) -> None:
+    async def _recover_running_items(self, sweep_id: UUID) -> None:
         """Requeue / reconcile Items left ``running`` by a crash.
 
-        Under the session-level advisory lock (so no other worker is
-        racing), we partition the running Item set:
+        Runs under the dedicated advisory-lock connection held by
+        ``_drive_sweep`` (so no other worker is racing), but inside its
+        OWN short ``AsyncSession`` transaction. The session is created
+        here rather than threaded through from ``_drive_sweep`` because
+        the lock carrier is a raw connection (Commit 3.2 issue #2), not
+        a session.
+
+        Partition the running Item set:
 
         * Item has NO persisted ``EvalPairwiseJudgeResult`` for its
           deterministic ``judge_run_id`` → flip back to ``queued``. The
@@ -232,45 +286,59 @@ class PairwiseSweepExecutor:
         attempt deterministically re-resolves to the same id.
         """
 
-        async with session_transaction(session):
-            sweep = await EvalRepository(session).get_sweep(sweep_id)
-            if sweep is None:
-                return
-            running_items = await EvalRepository(
-                session
-            ).list_running_sweep_items(sweep_id)
-            for item in running_items:
-                existing = await EvalRepository(session).get_judge_result_by_run(
-                    item.judge_run_id
-                )
-                if existing is None:
-                    # No result yet — requeue (CAS: only running → queued).
-                    # Use ORM update() with synchronize_session so that
-                    # Item rows already loaded in this Session's identity
-                    # map reflect the new status; raw text() would leave
-                    # them stale (Issue #7).
-                    await session.execute(
-                        update(EvalPairwiseSweepItem)
-                        .where(
-                            EvalPairwiseSweepItem.id == item.id,
-                            EvalPairwiseSweepItem.status == "running",
-                        )
-                        .values(status="queued")
-                        .execution_options(synchronize_session="fetch")
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                await self._recover_running_items_in_session(session, sweep_id)
+
+    async def _recover_running_items_in_session(
+        self, session: AsyncSession, sweep_id: UUID
+    ) -> None:
+        """In-session implementation of :meth:`_recover_running_items`.
+
+        Exposed so unit tests can drive the recovery path against an
+        outer ``db_session`` fixture (sharing the rollback-root
+        connection) without spawning a parallel session that would land
+        writes outside the test's transaction.
+        """
+
+        sweep = await EvalRepository(session).get_sweep(sweep_id)
+        if sweep is None:
+            return
+        running_items = await EvalRepository(
+            session
+        ).list_running_sweep_items(sweep_id)
+        for item in running_items:
+            existing = await EvalRepository(session).get_judge_result_by_run(
+                item.judge_run_id
+            )
+            if existing is None:
+                # No result yet — requeue (CAS: only running → queued).
+                # Use ORM update() with synchronize_session so that
+                # Item rows already loaded in this Session's identity
+                # map reflect the new status; raw text() would leave
+                # them stale (Issue #7).
+                await session.execute(
+                    update(EvalPairwiseSweepItem)
+                    .where(
+                        EvalPairwiseSweepItem.id == item.id,
+                        EvalPairwiseSweepItem.status == "running",
                     )
-                    continue
-                # Result already persisted — reconcile to completed.
-                transitioned = await EvalRepository(
-                    session
-                ).mark_sweep_item_completed(
-                    item.id, judge_result_id=existing.id
+                    .values(status="queued")
+                    .execution_options(synchronize_session="fetch")
                 )
-                if not transitioned:
-                    continue
-                # Apply the same per-Pair delta accounting as the happy
-                # path so counter invariants hold across recovery.
-                await session.refresh(item)
-                await self._apply_pair_deltas(session, sweep, item)
+                continue
+            # Result already persisted — reconcile to completed.
+            transitioned = await EvalRepository(
+                session
+            ).mark_sweep_item_completed(
+                item.id, judge_result_id=existing.id
+            )
+            if not transitioned:
+                continue
+            # Apply the same per-Pair delta accounting as the happy
+            # path so counter invariants hold across recovery.
+            await session.refresh(item)
+            await self._apply_pair_deltas(session, sweep, item)
 
     async def _claim_one_item(
         self, session: AsyncSession, sweep_id: UUID

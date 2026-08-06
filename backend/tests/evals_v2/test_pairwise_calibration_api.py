@@ -266,5 +266,216 @@ async def test_annotation_submit_with_tampered_review_token_returns_422(
             },
         )
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "EVAL_REVIEW_TOKEN_MISMATCH"
+    assert response.json()["error"]["code"] == "EVAL_REVIEW_TOKEN_INVALID"
+
+
+# ============================================================================
+# Commit 3.2 — review_token is now REQUIRED (issue #1)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_annotation_without_review_token_is_rejected(
+    api_application: FastAPI, db_session: AsyncSession,
+) -> None:
+    """Missing review_token is rejected at the Pydantic layer with a
+    422 — the reviewer CANNOT submit a primary annotation without
+    first fetching the GET review surface."""
+
+    from app.core.database import session_transaction
+    from app.repositories.evals import EvalRepository
+    from tests.evals_v2.test_pairwise_calibration_repository import (
+        _make_sweep,
+        _seed_pair,
+    )
+
+    pair = await _seed_pair(db_session, 1)
+    sweep_row = await _make_sweep(db_session, requested_pair_count=1)
+    async with session_transaction(db_session):
+        await EvalRepository(db_session).create_sweep(sweep_row)
+
+    transport = ASGITransport(app=api_application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token = await _dev_login(client, db_session)
+        response = await client.post(
+            "/api/v1/eval/runs/pairwise/annotations",
+            headers=bearer(token),
+            json={
+                "pair_id": str(pair.id),
+                "sweep_id": str(sweep_row.id),
+                "raw_winner": "a",
+                "raw_dimension_verdicts": {
+                    "actionability": "a", "alignment": "b",
+                    "personalization": "tie", "clarity": "a",
+                    "consistency": "b",
+                },
+                # review_token deliberately OMITTED
+            },
+        )
+    assert response.status_code == 422
+    # Pydantic validation error — custom error envelope.
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_EVAL_INVALID"
+    # The missing field is named in the details.
+    details_text = str(body)
+    assert "review_token" in details_text
+
+
+@pytest.mark.asyncio
+async def test_annotation_with_token_for_other_pair_is_rejected(
+    api_application: FastAPI, db_session: AsyncSession,
+) -> None:
+    """A review_token freshly fetched for pair A MUST be rejected when
+    POSTed against pair B — server-authoritative PositionSurface can't
+    be repurposed across pairs."""
+
+    from app.core.database import session_transaction
+    from app.repositories.evals import EvalRepository
+    from tests.evals_v2.test_pairwise_calibration_repository import (
+        _make_sweep,
+        _seed_pair,
+    )
+
+    pair_a = await _seed_pair(db_session, 1)
+    pair_b = await _seed_pair(db_session, 2)
+    sweep_row = await _make_sweep(db_session, requested_pair_count=1)
+    async with session_transaction(db_session):
+        await EvalRepository(db_session).create_sweep(sweep_row)
+
+    transport = ASGITransport(app=api_application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token = await _dev_login(client, db_session)
+        # Fetch surface + token for pair A.
+        surf = await client.get(
+            f"/api/v1/eval/runs/pairwise/pairs/{pair_a.id}/review-surface",
+            params={"sweep_id": str(sweep_row.id)},
+            headers=bearer(token),
+        )
+        assert surf.status_code == 200, surf.text
+        token_for_a = surf.json()["review_token"]
+        # POST token against pair B → reject.
+        response = await client.post(
+            "/api/v1/eval/runs/pairwise/annotations",
+            headers=bearer(token),
+            json={
+                "pair_id": str(pair_b.id),  # different pair
+                "sweep_id": str(sweep_row.id),
+                "raw_winner": "a",
+                "raw_dimension_verdicts": {
+                    "actionability": "a", "alignment": "b",
+                    "personalization": "tie", "clarity": "a",
+                    "consistency": "b",
+                },
+                "review_token": token_for_a,
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "EVAL_REVIEW_TOKEN_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_annotation_token_for_other_reviewer_is_rejected(
+    api_application: FastAPI, db_session: AsyncSession,
+) -> None:
+    """review_token binds (pair, reviewer, surface). Two reviewers
+    fetching the same pair get DIFFERENT tokens; submitting one with
+    the other's session must 422."""
+
+    from app.core.database import session_transaction
+    from app.repositories.evals import EvalRepository
+    from tests.evals_v2.test_pairwise_calibration_repository import (
+        _make_sweep,
+        _seed_pair,
+    )
+
+    pair = await _seed_pair(db_session, 1)
+    sweep_row = await _make_sweep(db_session, requested_pair_count=1)
+    async with session_transaction(db_session):
+        await EvalRepository(db_session).create_sweep(sweep_row)
+
+    transport = ASGITransport(app=api_application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token_r1 = await _dev_login(client, db_session)
+        surf = await client.get(
+            f"/api/v1/eval/runs/pairwise/pairs/{pair.id}/review-surface",
+            params={"sweep_id": str(sweep_row.id)},
+            headers=bearer(token_r1),
+        )
+        assert surf.status_code == 200
+        token_for_r1 = surf.json()["review_token"]
+        # Now act as a DIFFERENT reviewer (fresh guest login).
+        token_r2_login = await _dev_login(client, db_session)
+        response = await client.post(
+            "/api/v1/eval/runs/pairwise/annotations",
+            headers=bearer(token_r2_login),
+            json={
+                "pair_id": str(pair.id),
+                "sweep_id": str(sweep_row.id),
+                "raw_winner": "a",
+                "raw_dimension_verdicts": {
+                    "actionability": "a", "alignment": "b",
+                    "personalization": "tie", "clarity": "a",
+                    "consistency": "b",
+                },
+                "review_token": token_for_r1,  # token for r1, not r2
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "EVAL_REVIEW_TOKEN_INVALID"
+
+
+# ============================================================================
+# Commit 3.2 — calibration status now computed (issue #3)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_calibration_report_status_is_data_driven(
+    api_application: FastAPI, db_session: AsyncSession,
+) -> None:
+    """Calibration report MUST compute calibration_status from inputs —
+    not hard-default to 'insufficient'. On a fresh sweep with zero
+    annotations and zero results, status is (legitimately) insufficient,
+    but the report_payload must carry the real metric values back (0
+    counts) proving it WAS computed rather than defaulted."""
+
+    from app.core.database import session_transaction
+    from app.repositories.evals import EvalRepository
+    from tests.evals_v2.test_pairwise_calibration_repository import (
+        _make_sweep,
+    )
+
+    sweep_row = await _make_sweep(db_session, requested_pair_count=1)
+    async with session_transaction(db_session):
+        await EvalRepository(db_session).create_sweep(sweep_row)
+
+    transport = ASGITransport(app=api_application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        token = await _dev_login(client, db_session)
+        response = await client.post(
+            "/api/v1/eval/pairwise/calibration",
+            headers=bearer(token),
+            json={
+                "dataset_id": sweep_row.dataset_id,
+                "dataset_version": sweep_row.dataset_version,
+                "sweep_ids": [str(sweep_row.id)],
+            },
+        )
+    assert response.status_code in (200, 201), response.text
+    body = response.json()
+    payload = body["report_payload"]
+    # Real computed fields present, NOT missing or defaulted.
+    assert "calibration_status" in payload
+    assert "agreement" in payload
+    assert "position_bias" in payload
+    assert "valid_human_pair_count" in payload
+    assert "position_pair_count" in payload
+    # The metric denominator — distinct from the structural counter.
+    assert "position_metric_sample_count" in payload
+    # Empty inputs → insufficient, but the fields prove computation ran.
+    assert payload["valid_human_pair_count"] == 0
+    assert payload["position_metric_sample_count"] == 0
+    assert payload["position_pair_count"] == 0
+    assert body["calibration_status"] == "insufficient"
+    assert body["usage_mode"] == "diagnostic_only"
 

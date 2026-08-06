@@ -1,20 +1,20 @@
 """PR-9c.2 Pairwise Calibration HTTP control plane.
 
-Ten endpoints under ``/api/v1/eval`` (separate router, not nested under
+Nine endpoints under ``/api/v1/eval`` (separate router, not nested under
 ``/eval/runs/{id}`` because calibration is cross-experiment). All require
 ``require_dev`` (same as the rest of the eval control plane) and pull
 ``reviewer_id`` from JWT subject — never from the request body
-(supplementary constraint #6 + Commit 3.1 issue #4 review-token binding).
+(supplementary constraint #6 + Commit 3.2 issue #1 review-token binding,
+which is REQUIRED on every annotation POST).
 
-Endpoints:
+Endpoints (Commit 3.2 count fix — was incorrectly listed as 10 in 3.1):
 
 * POST /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run
 * GET  /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}
 * POST /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}/cancel
-* GET  /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface?sweep_id=...    (3.1)
+* GET  /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface?sweep_id=...
 * POST /api/v1/eval/runs/pairwise/annotations
 * GET  /api/v1/eval/runs/pairwise/annotations/{pair_id}
-* GET  /api/v1/eval/runs/pairwise/annotations?sweep_id=...
 * POST /api/v1/eval/pairwise/calibration
 * GET  /api/v1/eval/pairwise/calibration/{dataset_id}/{dataset_version}/latest
 * GET  /api/v1/eval/pairwise/calibration/{dataset_id}/{dataset_version}/history
@@ -497,29 +497,29 @@ async def submit_annotation(
         rubric=[],
     )
 
-    # Issue #4 / Commit 3.1: tamper-protection via review_token. If the
-    # caller supplied one (i.e. they first fetched the GET review-surface
-    # endpoint as the workflow requires), re-derive and reject on mismatch.
-    # The mismatch signals that they are submitting against a different
-    # surface than the one they were shown (different reviewer, stale
-    # rubric version, or a deliberate forgery attempt).
-    if body.review_token is not None:
-        from evals.v2.pairwise_review_surface import derive_review_token
+    # Issue #1 / Commit 3.2: review_token is now REQUIRED. Pydantic
+    # already rejected the missing-token case as a 422 validation error
+    # before reaching here. We always re-derive and reject on mismatch
+    # — covers wrong-reviewer, wrong-pair, stale-tamper, and any other
+    # context drift. Applies identically to primary AND adjudication
+    # submissions (the adjudicator must also GET the surface to see what
+    # they are adjudicating).
+    from evals.v2.pairwise_review_surface import derive_review_token
 
-        expected = derive_review_token(
-            pair_id=body.pair_id,
-            reviewer_id=str(reviewer.id),
-            frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
+    expected = derive_review_token(
+        pair_id=body.pair_id,
+        reviewer_id=str(reviewer.id),
+        frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
+    )
+    if body.review_token != expected:
+        raise AppError(
+            code="EVAL_REVIEW_TOKEN_INVALID",
+            message=(
+                "review_token does not match the server-derived token "
+                "for this (pair, reviewer, frozen_review_surface)"
+            ),
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
         )
-        if body.review_token != expected:
-            raise AppError(
-                code="EVAL_REVIEW_TOKEN_MISMATCH",
-                message=(
-                    "review_token does not match the server-derived token "
-                    "for this (pair, reviewer, frozen_review_surface)"
-                ),
-                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            )
 
     # Compute normalized verdicts from raw + position variant.
     from evals.v2.pairwise_review_surface import (
@@ -637,6 +637,171 @@ async def list_pairwise_annotations(
 # ===========================================================================
 
 
+def _compute_calibration_status_from_snapshots(
+    *,
+    sweeps: list[EvalPairwiseSweep],
+    judge_result_snapshot: list[dict[str, object]],
+    annotation_snapshot: list[dict[str, object]],
+) -> dict[str, object]:
+    """Issue #3 / Commit 3.2: turn the raw snapshots into the metric
+    inputs ``compute_calibration_status`` expects, then compute the
+    real ``CalibrationOutcome``. Also returns the structural + metric
+    counts so the report payload exposes the position_pair_count vs
+    position_metric_sample_count distinction explicitly.
+
+    Definitions (per Commit 3.2 plan):
+
+    * ``valid_human_pair_count`` — pairs with at least 2 distinct
+      PRIMARY reviewers (adjudication rows excluded). Pairs with only
+      one primary reviewer count as ``single`` and do NOT enter this
+      set; this matches the inter-rater denominator.
+    * ``position_pair_count`` — sweep structural counter summed across
+      the input sweeps (both required Items completed WITH
+      judge_result_id, per executor semantics).
+    * ``position_metric_sample_count`` — pairs where BOTH required
+      Judge results exist AND ``judge_run_status='completed'`` AND
+      ``normalized_winner IS NOT NULL``. This is the actual metric
+      denominator for position-bias / position-consistency analysis:
+      an ``invalid_structured_output`` Judge result row exists
+      structurally but does NOT contribute a position sample.
+    * ``agreement`` — exact-match between judge normalized_winner and a
+      single human-primary consensus label, over the intersection.
+    * ``position_bias`` — fraction of decisive pairs (filter tie /
+      both_unacceptable) where swapping the position flipped the
+      judge's verdict.
+
+    ``compute_calibration_status`` is invoked with the METRIC sample
+    count, not the structural count.
+    """
+
+    from collections import defaultdict
+
+    from evals.v2.calibration_metrics import compute_calibration_status
+
+    # ---- valid_human_pair_count ----------------------------------------
+    primaries_by_pair: dict[str, set[str]] = defaultdict(set)
+    for ann in annotation_snapshot:
+        if ann.get("is_adjudication"):
+            continue
+        if not ann.get("normalized_winner"):
+            continue
+        primaries_by_pair[str(ann["pair_id"])].add(str(ann["reviewer_id"]))
+    valid_human_pair_count = sum(
+        1 for reviewers in primaries_by_pair.values() if len(reviewers) >= 2
+    )
+
+    # ---- position_pair_count (structural, sweep counter) ----------------
+    position_pair_count = sum(s.position_pair_count for s in sweeps)
+
+    # ---- position_metric_sample_count (results with valid winners) -----
+    # For each pair, count Completed-with-winner results: position
+    # metric needs BOTH required variants (baseline + swapped) to be
+    # present and Completed-with-winner. The judge_result_snapshot
+    # does not currently expose position_variant directly (the result
+    # row has it); we group per pair and require len>=2 distinct
+    # position_variant entries both Completed-with-winner.
+    by_pair_results: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for jr in judge_result_snapshot:
+        by_pair_results[str(jr["pair_id"])].append(jr)
+    position_metric_sample_count = 0
+    for _, jrs in by_pair_results.items():
+        valid = [
+            j
+            for j in jrs
+            if j.get("judge_run_status") == "completed"
+            and j.get("normalized_winner") is not None
+        ]
+        if len(valid) >= 2:
+            position_metric_sample_count += 1
+
+    # ---- agreement + position_bias在实际数据上的计算 ------------------
+    # Pair the judge's normalized_winner with a single consensus human
+    # label per pair (the dominant primary label, or first-seen).
+    judge_winner_by_pair: dict[str, str] = {}
+    for jr in judge_result_snapshot:
+        if (
+            jr.get("judge_run_status") == "completed"
+            and jr.get("normalized_winner") is not None
+        ):
+            # Multiple results per pair (baseline + swapped) — pick the
+            # baseline one for the agreement axis (they share the same
+            # normalized_winner in baseline/candidate vocabulary by
+            # construction).
+            judge_winner_by_pair.setdefault(
+                str(jr["pair_id"]), str(jr["normalized_winner"])
+            )
+    human_label_by_pair: dict[str, str] = {}
+    for pair_id, reviewers in primaries_by_pair.items():
+        if len(reviewers) < 2:
+            continue
+        labels = [
+            str(a["normalized_winner"])
+            for a in annotation_snapshot
+            if str(a["pair_id"]) == pair_id
+            and not a.get("is_adjudication")
+            and a.get("normalized_winner")
+        ]
+        if labels:
+            # Mode + first-seen tiebreak: pick any consistent label.
+            try:
+                from collections import Counter
+
+                human_label_by_pair[pair_id] = Counter(labels).most_common(1)[0][0]
+            except Exception:
+                human_label_by_pair[pair_id] = labels[0]
+
+    common_pairs = sorted(
+        set(judge_winner_by_pair) & set(human_label_by_pair)
+    )
+    agreement_value: float | None = None
+    if common_pairs:
+        matches = sum(
+            1
+            for p in common_pairs
+            if judge_winner_by_pair[p] == human_label_by_pair[p]
+        )
+        agreement_value = matches / len(common_pairs)
+
+    # Position bias: of the decisive completed-with-winner pairs
+    # (excluding tie / both_unacceptable), the fraction where baseline
+    # and swapped Judge verdicts differ. This captures how often
+    # re-ordering the display flips the Judge's pick.
+    decisive_pair_verdicts: dict[str, set[str]] = defaultdict(set)
+    for jr in judge_result_snapshot:
+        if (
+            jr.get("judge_run_status") == "completed"
+            and jr.get("normalized_winner")
+            in ("baseline", "candidate")
+        ):
+            decisive_pair_verdicts[str(jr["pair_id"])].add(
+                str(jr["normalized_winner"])
+            )
+    position_bias_value: float | None = None
+    decisive_count = sum(1 for s in decisive_pair_verdicts.values() if len(s) >= 1)
+    if decisive_count > 0:
+        flipped = sum(
+            1 for s in decisive_pair_verdicts.values() if len(s) >= 2
+        )
+        position_bias_value = flipped / decisive_count
+
+    outcome = compute_calibration_status(
+        agreement=agreement_value,
+        position_bias=position_bias_value,
+        valid_human_pair_count=valid_human_pair_count,
+        position_pair_count=position_metric_sample_count,
+    )
+    return {
+        "calibration_status": outcome.calibration_status,
+        "usage_mode": outcome.usage_mode,
+        "agreement": agreement_value,
+        "position_bias": position_bias_value,
+        "valid_human_pair_count": valid_human_pair_count,
+        "position_pair_count": position_pair_count,
+        "position_metric_sample_count": position_metric_sample_count,
+        "agreement_sample_count": len(common_pairs),
+    }
+
+
 @router.post(
     "/pairwise/calibration",
     response_model=PairwiseCalibrationReportResponse,
@@ -693,6 +858,7 @@ async def create_calibration_report(
         )
         for jr in results.scalars():
             judge_result_snapshot.append({
+                "pair_id": str(jr.pair_id),
                 "judge_run_id": str(jr.judge_run_id),
                 "judge_result_id": str(jr.id),
                 "judge_model_id": jr.model_id,
@@ -709,9 +875,20 @@ async def create_calibration_report(
                 "reviewer_role": ann.reviewer_role,
                 "is_adjudication": ann.is_adjudication,
                 "normalized_winner": ann.normalized_winner,
+                "position_variant": ann.position_variant,
                 "submission_hash": ann.submission_hash,
                 "review_input_hash": ann.review_input_hash,
             })
+
+    # Issue #3 / Commit 3.2: compute the real calibration status from the
+    # snapshots (replaces the prior hard-default ``insufficient``). The
+    # outcome lives inside ``report_payload`` so the GET endpoints read
+    # the real value rather than .get(..., "insufficient").
+    status_metrics = _compute_calibration_status_from_snapshots(
+        sweeps=sweeps,
+        judge_result_snapshot=judge_result_snapshot,
+        annotation_snapshot=annotation_snapshot,
+    )
 
     report_payload: dict[str, object] = {
         "sweep_ids": [str(sid) for sid in body.sweep_ids],
@@ -720,6 +897,21 @@ async def create_calibration_report(
         "judge_model_id": first.judge_model_id,
         "judge_prompt_version": first.judge_prompt_version,
         "judge_rubric_version": first.judge_rubric_version,
+        # Real calibration outcome + the four metric invariants.
+        "calibration_status": status_metrics["calibration_status"],
+        "usage_mode": status_metrics["usage_mode"],
+        "agreement": status_metrics["agreement"],
+        "position_bias": status_metrics["position_bias"],
+        "valid_human_pair_count": status_metrics["valid_human_pair_count"],
+        "position_pair_count": status_metrics["position_pair_count"],
+        # Distinct from position_pair_count: counts ONLY pairs whose
+        # BOTH required JudgeResult rows are Completed-with-winner.
+        # This is the denominator position-bias / position-consistency
+        # metrics are computed over, and the threshold the gate uses.
+        "position_metric_sample_count": status_metrics[
+            "position_metric_sample_count"
+        ],
+        "agreement_sample_count": status_metrics["agreement_sample_count"],
     }
 
     service = PairwiseCalibrationService(session)

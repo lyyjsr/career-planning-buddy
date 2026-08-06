@@ -204,15 +204,16 @@ class PairwiseAnnotationSubmitRequest(StrictModel):
     ]
     rationale: str | None = None
     is_adjudication: bool = False
-    review_token: str | None = Field(
-        default=None,
+    review_token: str = Field(
         description=(
-            "Optional tamper-protection token returned by the GET "
-            "review-surface endpoint. The server re-derives it from "
-            "(pair_id, reviewer_id, frozen_review_surface_sha256) and "
-            "rejects on mismatch (422). May be omitted for backward-"
-            "compatibility with existing callers that did not first "
-            "fetch the surface."
+            "REQUIRED (Commit 3.2 issue #1). Tamper-protection token "
+            "returned by the GET review-surface endpoint. The server "
+            "re-derives it from (pair_id, reviewer_id, "
+            "frozen_review_surface_sha256) and rejects on mismatch or "
+            "absence. A reviewer cannot submit a primary or "
+            "adjudication annotation without first fetching the "
+            "server-rendered Review Surface — closing the server-"
+            "authoritative blinded-evaluation invariant."
         ),
     )
 
