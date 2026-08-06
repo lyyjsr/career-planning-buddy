@@ -458,4 +458,122 @@ cd .. && mv .env.backup .env && rm -f .env.bak
 
 ---
 
+## 9. PR-9c.2 Commit 3.3 — Stage A plumbing(2026-08-05)
+
+> 状态:Stage A 的 **plumbing** 已交付(commit `cced011`),但**真实 graded Trial pair dataset 的实际导出**尚未执行。Commit 3.3 落地了使 dataset 端到端可被消费的 3 个先决条件;真实数据导出 + HTTP 端到端验证(handoff §8.9 阶段 A 的 runbook)是下一会话的入口。
+
+### 9.1 Commit 3.3 SHA & 改动概要
+
+```
+cced011 PR-9c.2 Commit 3.3 — Stage A: real pairwise-calibration-v0-dev-smoke plumbing
+```
+
+| 文件 | 改动 |
+|---|---|
+| `alembic/versions/20260815_0016_eval_pairwise_sweep_fixture_mapping.py` | 新增 `eval_pairwise_sweeps.fixture_mapping JSONB NULL` 列 |
+| `app/api/pairwise_calibration.py` | `_materialize_sweep` 真正调用 `materialize_sweep_items`,把 `bundle.lines` 转成 `EvalTrialPair` + 2 个 `SweepItemSeed` per line |
+| `app/harness/pairwise_sweep_executor.py` | `_drive_sweep` 进入处 load sweep 一次,把 `sweep.fixture_mapping` 反序列化为 `PairwiseJudgeOutput` 后传给 `build_pairwise_judge` |
+| `app/models/eval.py` | + `fixture_mapping` JSONB 列 |
+| `app/schemas/evals.py` | `PairwiseRunRequest` 加可选 `fixture_mapping` |
+| `scripts/export_pairwise_dataset.py` | 新增 — 从 DB 的 `EvalTrialPair` + `EvalEvidenceItem` 导出 loader 兼容的 JSONL + manifest,导出后立刻 reciprocal load 验证 hash 一致 |
+| `tests/evals_v2/test_pairwise_calibration_smoke_e2e.py` | 新增 4 测试(service-layer 验证) |
+
+Commit 3.3 新增测试:**4 条**(非 11;handoff §8.5 至前报告的 8/11 校正延续,本 commit 净增 4)。pytest 总数 `496 passed`。
+
+### 9.2 Recon 揭示的 3 个 Stage A 阻塞缺陷(已修复)
+
+| Gap | 修复前行为 | 修复后 |
+|---|---|---|
+| Gap 1 | 无 exporter(`pairwise_sampler.py` 是纯 fn,无 IO) | `scripts/export_pairwise_dataset.py` 读 `EvalTrialPair` + `EvalEvidenceItem` → 生成 loader 兼容的 JSONL/manifest |
+| Gap 2 | `_materialize_sweep` 只 build Sweep row 不 build SweepItem(Commit 3.1 报告显式遗留) | 现在每 line → idempotent `get_or_create_pair` + 2 个 `SweepItemSeed`(baseline + swapped) |
+| Gap 3 | Executor `build_pairwise_judge(settings)` 空 mapping → 全部 pair fail-closed `invalid_structured_output` | 新增 `sweep.fixture_mapping` JSONB(executor 读一次);fixture-mode smoke 现可注入 mapping → 真 winner |
+
+### 9.3 数据库迁移
+
+```
+alembic current:   20260815_0016 (PR-9c.2 Commit 3.3)
+HEAD lineage:      20260812_0014 (PR-9c.1)
+                   20260815_0015 (PR-9c.2 Commit 2)
+                   20260815_0016 (PR-9c.2 Commit 3.3)  ← 新增
+```
+
+### 9.4 下一会话入口 — Stage A 端到端 runbook(手动执行)
+
+```bash
+cd "/Users/huanqi/Accompany Project/career-planning-buddy-ly"
+
+# 1. 准备两个真实 graded baseline / candidate experiments。
+#    使用 fixture mode 不调外部 LLM:
+#    在已有 EvalService.create_experiment 路径下各跑 1 个
+#    (eval_provider_mode=fixture / judge_llm_provider=fixture)。
+#    记录 baseline_experiment_id 和 candidate_experiment_id。
+
+# 2. 导出真实 v0-dev-smoke dataset
+cd backend
+PYTHONPATH=. /opt/anaconda3/envs/cp/bin/python scripts/export_pairwise_dataset.py \
+    --baseline-experiment-id <BASELINE_UUID> \
+    --candidate-experiment-id <CANDIDATE_UUID> \
+    --output-dataset-id pairwise-calibration-v0-dev-smoke \
+    --output-dataset-version 1
+
+# 3. 校验:loader 收得到,内容是 20-30 pair(条件下界)
+#    实际输出文件:
+#    evals/v2/datasets/pairwise-calibration-v0-dev-smoke.jsonl
+#    evals/v2/datasets/manifest-pairwise-calibration-v0-dev-smoke-1.json
+
+# 4. HTTP 端到端(需 dev JWT):
+#    登录拿 token,i.e. POST /api/v1/auth/dev-login
+#    POST /api/v1/eval/runs/{baseline_exp}/pairwise/run
+#         body 含 fixture_mapping{pair_hash: {output-payload}} 让 FixtureJudge
+#         返回 completed-winner(真实 LLM 场景 mapping 留空)。
+#    GET  /api/v1/eval/runs/{baseline_exp}/pairwise/run/{sweep_id}
+#         轮询直到 status ∈ {completed, failed, cancelled}。
+#    GET  /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface
+#         拿 review_token(REQUIRED)。
+#    POST /api/v1/eval/runs/pairwise/annotations   (token 必填)
+#         两名 reviewer 各一次 primary。
+#    POST /api/v1/eval/pairwise/calibration
+#         sweep_ids=[...]
+
+# 5. 期望断言(CI 测试覆盖不到,只有手动 run 才能算 Stage A closed):
+#    response.calibration_status == "insufficient"
+#    response.usage_mode        == "diagnostic_only"
+#    response.report_payload.valid_human_pair_count       >= 1
+#    response.report_payload.position_metric_sample_count >= 0
+#    (>=100 才会晋升 passing/failing,但 v0-dev-smoke 总是 < 100。)
+```
+
+### 9.5 为什么 Commit 3.3 没有提交真实 dataset 文件
+
+仅 `plumbing` 进 commit。真实 `pairwise-calibration-v0-dev-smoke.jsonl` + manifest 的 commit 留到下一会话,因为它们依赖具体 experiment UUID(各自环境不同),且产出属于 Stage A 的"执行"动作,不属于"工程能力"动作。提交阶段参考 §9.4 step 2 后:`git add evals/v2/datasets/pairwise-calibration-v0-dev-smoke.*`。
+
+### 9.6 仍 BLOCKED 的门禁(原始声明)
+
+```
+PR-9c.2 engineering gate                 = PASS  (Commit 3.2 closed)
+Stage A 端到端 smoke 验证               = PENDING  (Commit 3.3 落 plumbing,
+                                                    实际 dataset 导出 +
+                                                    HTTP 端到端 run 待手动执行)
+PR-9 formal human-calibration gate       = BLOCKED
+Overall PR-9                             = NOT CLOSED
+```
+
+### 9.7 命令快速验证基线(下一会话首跑)
+
+```bash
+cd "/Users/huanqi/Accompany Project/career-planning-buddy-ly"
+git fetch && git checkout feat/eval && git pull
+git rev-parse HEAD  # 期望 cced011...
+git status --short  # 期望空
+cd backend && /opt/anaconda3/envs/cp/bin/alembic current  # 期望 20260815_0016
+
+cp .env .env.backup
+sed -i.bak 's/^AGENT_FEATURE_STAGE=/#AGENT_FEATURE_STAGE=/; s/^AGENT_MAX_TOOL_ROUNDS=/#AGENT_MAX_TOOL_ROUNDS=/' .env
+/opt/anaconda3/envs/cp/bin/python -m pytest tests/ -q
+# 期望 496/496 passed
+cd .. && mv .env.backup .env && rm -f .env.bak
+```
+
+---
+
 END
