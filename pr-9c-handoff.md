@@ -1,7 +1,50 @@
 # PR-9c Handoff — Pairwise Judge + Calibration
 
-> 状态：交接文档。PR-9a / PR-9b 已合入 `origin/feat/eval`；PR-9c 尚未开工。
+> 状态：交接文档。PR-9c.1 已实现但未 push（local `feat/eval`）；PR-9a / PR-9b 已合入 `origin/feat/eval`；PR-9c.2 尚未开工。
 > 作者意图：下一会话以此文档作为入口，**不要靠聊天历史翻找上下文**。
+
+## PR-9c.1 实现进度（本会话新增）
+
+| 项目 | 值 |
+|---|---|
+| Commit 1 SHA | `ffd0d95` — Pairwise Judge domain core（51 单测） |
+| Commit 2 SHA | local 未 push — alembic 0014 + 双表 ORM + repo（7 方法）+ service.run_pairwise_judge + config.judge_llm_* + 21 DB 测试 |
+| Alembic head | `20260812_0014`（独立可 revert：up + down 均通过）|
+| 测试 | `350/350 passed`（278 旧 + 51 commit1 + 21 commit2，含两个 pair_hash 语义保护测试）|
+| 新文件 | `evals/v2/pairwise.py`、`evals/v2/judge.py`、`evals/v2/calibration.py`、`evals/v2/judge_factory.py`、`app/prompts/pairwise_judge.py`、`alembic/versions/20260812_0014_eval_pairwise_core.py`、5 测试文件 |
+
+**Pair vs comparison_group 语义（push 前重点）**：
+- `pair_hash` = stable Pair business identity。EXCLUDES `comparison_group_id` / `judge_run_id` / `judge_model` / prompt+rubric versions / display 顺序。INCLUDES：`schema_version="eval-trial-pair/v1"` + `case_id` + role-determined trial refs + baseline/candidate output hashes。任意 re-evaluation（新 prompt / model / comparison_group_id）若 outputs 未变 → 复用同一 Pair row。
+- `comparison_group_id` = per-execution attribute，记录在 `EvalPairwiseJudgeResult.comparison_group_id` 列上（不在 pair 表上），tie together 一次 original+swapped 调用。
+- `eval_trial_pairs` UNIQUE pair_hash + **非唯一** 复合索引 `(baseline_trial_id, candidate_trial_id)`：
+  * same trials + same outputs  → pair_hash collide → 复用 Pair row
+  * same trials + 变 outputs    → pair_hash 变化  → 新 Pair row 与旧 row 共存 attributable
+- 保护测试：`test_pair_hash_excludes_comparison_group`、`test_same_pair_reuses_trial_pair_row_across_comparison_groups`。
+
+**实际落地与原 plan 的偏差**：
+- 原 plan 写的是单表 `eval_pairwise_scores`；最终落地为**双表**（`eval_trial_pairs` 与 `eval_pairwise_judge_results`），与 recon 报告一致（option C，user-mandated）。
+- dimension 评分从 1-5 数字改为 **categorical verdicts**（a/b/tie/both_unacceptable），user-corrected。
+- `invalid` 不是 winner 值；invalidity 落在 `judge_run_status='invalid_structured_output'`。
+- `position_bias_rate = 1 - position_consistency_rate`（用户校正：balanced 50/50 ≠ bias=0）。
+- 空输入 / 无 signal 返回 `MetricResult(value=None, sample_count=N)`，不返回 0.0。
+- `FixturePairwiseJudge` 显式 mapping + fail-closed，无 pseudorandom fallback。
+- **9c.1 不含 calibration 阈值 / κ / HTTP endpoint**（属 9c.2）。
+
+**架构 invariant 守住**：
+1. `evals/v2/*` 不 import `app/agent/*` / `app/harness/*`（依赖方向 Eval Harness → Agent Runtime；Judge 也是）。
+2. Judge 只读 `JUDGE_ALLOWED_KINDS = {REQUEST_CONSTRAINTS, PLAN_PROJECTION, RUBRIC}` 的 AuthorizedView。
+3. `PairwiseJudgeInput.display_a/display_b` 不含 baseline/candidate/model/auto-score 字段。
+4. A/B 顺序由 `PositionVariant` 持久化（`raw_display_winner` + `normalized_winner` 都存）；`comparison_group_id` 在 Result 行上，不污染 Pair。
+5. `input_hash` swap-invariant（先按 canonical_sha256 排序 outputs 再哈希）。
+6. invalid output 一次 repair 后落 `invalid_structured_output`。
+7. `JUDGE_PROMPT_VERSION`/`JUDGE_RUBRIC_VERSION` 锁 v1；版本变更会使旧 calibration 失效。
+8. 无 calibration 工作流时，Judge 仅做诊断（9c.2 加 status 门禁）。
+9. 无 model-generated human labels（无 `human_label` 字段；9c.2 引入）。
+10. 0014 迁移独立可 revert（FK CASCADE：pair → results）。
+
+---
+
+
 
 ---
 

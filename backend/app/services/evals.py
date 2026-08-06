@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
-from app.models.eval import EvalEvidenceItem, EvalExperiment, EvalScore, EvalTrial
+from app.models.eval import (
+    EvalEvidenceItem,
+    EvalExperiment,
+    EvalPairwiseJudgeResult,
+    EvalScore,
+    EvalTrial,
+    EvalTrialPair,
+)
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
 from evals.v2.collectors.evidence import collect_evidence
@@ -22,8 +29,18 @@ from evals.v2.contracts import (
     canonical_sha256,
 )
 from evals.v2.dataset_loader import DatasetBundle
-from evals.v2.graders.base import EvidenceItem
+from evals.v2.graders.base import (
+    EvidenceItem,
+    authorize,
+)
 from evals.v2.graders.registry import grade_all
+from evals.v2.judge import PairwiseJudge
+from evals.v2.pairwise import (
+    JUDGE_ALLOWED_KINDS,
+    PositionVariant,
+    build_judge_input,
+    build_pair,
+)
 
 if TYPE_CHECKING:
     from evals.v2.experiment_runner import ExperimentReport
@@ -518,6 +535,126 @@ class EvalService:
                 case_stats=case_stats,
                 experiment_stats=experiment_stats,
             )
+
+    async def run_pairwise_judge(
+        self,
+        *,
+        baseline_trial_id: UUID,
+        candidate_trial_id: UUID,
+        case_id: str,
+        comparison_group_id: str,
+        judge_run_id: UUID,
+        judge: PairwiseJudge,
+        position_variant: PositionVariant = PositionVariant.BASELINE,
+    ) -> tuple[EvalTrialPair, EvalPairwiseJudgeResult]:
+        """Run one Pairwise Judge execution between two Trials.
+
+        Loads the persisted ``EvalEvidenceItem`` rows for both Trials,
+        converts them back to in-memory ``EvidenceItem`` rows and builds
+        ``AuthorizedView``s filtered to ``JUDGE_ALLOWED_KINDS``. The
+        ``Pair`` is idempotently persisted via ``get_or_create_pair``
+        (UNIQUE pair_hash) so a re-run for the same baseline/candidate
+        trial tuple with unchanged output bytes re-uses the existing Pair
+        row — even across different ``comparison_group_id`` / Judge
+        versions. ``comparison_group_id`` is recorded on the Result row,
+        NOT on the Pair row.
+
+        This method deliberately does NOT re-collect evidence: it consumes
+        whatever the Trial's last ``attach_evidence``/``grade_trial`` pass
+        already persisted. The caller is responsible for ensuring both
+        Trials have been graded first.
+
+        Returns the persisted (pair, result) tuple.
+        """
+
+        async with session_transaction(self._session):
+            baseline_view = await self._build_judge_view(baseline_trial_id)
+            candidate_view = await self._build_judge_view(candidate_trial_id)
+            pair_domain = build_pair(
+                baseline_trial_id=baseline_trial_id,
+                candidate_trial_id=candidate_trial_id,
+                case_id=case_id,
+                baseline_view=baseline_view,
+                candidate_view=candidate_view,
+            )
+            judge_input = build_judge_input(
+                pair=pair_domain,
+                judge_run_id=judge_run_id,
+                baseline_view=baseline_view,
+                candidate_view=candidate_view,
+                position_variant=position_variant,
+            )
+            pair_row = await self._evals.get_or_create_pair(
+                EvalTrialPair(
+                    baseline_trial_id=baseline_trial_id,
+                    candidate_trial_id=candidate_trial_id,
+                    case_id=case_id,
+                    pair_hash=pair_domain.pair_hash(),
+                    input_hash=judge_input.input_hash,
+                    allowed_evidence_kinds=sorted(
+                        kind.value for kind in JUDGE_ALLOWED_KINDS
+                    ),
+                    judge_prompt_version=judge_input.judge_prompt_version,
+                    judge_rubric_version=judge_input.judge_rubric_version,
+                )
+            )
+
+            result = await judge.judge(judge_input)
+            result_row = await self._evals.create_judge_result(
+                EvalPairwiseJudgeResult(
+                    pair_id=pair_row.id,
+                    judge_run_id=result.judge_run_id,
+                    judge_run_status=result.judge_run_status,
+                    position_variant=position_variant.value,
+                    comparison_group_id=comparison_group_id,
+                    raw_display_winner=result.raw_display_winner,
+                    normalized_winner=result.normalized_winner,
+                    raw_dimension_verdicts=result.raw_dimension_verdicts,
+                    normalized_dimension_verdicts=result.normalized_dimension_verdicts,
+                    confidence=result.confidence,
+                    rationale=result.rationale,
+                    model_id=result.model_id,
+                    prompt_version=result.prompt_config.prompt_version,
+                    rubric_version=result.prompt_config.rubric_version,
+                    input_hash=result.input_hash,
+                    raw_output_hash=result.usage.raw_output_hash if result.usage else None,
+                    tokens_in=result.usage.tokens_in if result.usage else 0,
+                    tokens_out=result.usage.tokens_out if result.usage else 0,
+                    latency_ms=result.usage.latency_ms if result.usage else 0,
+                    calibrated=False,
+                )
+            )
+            return pair_row, result_row
+
+    async def _build_judge_view(self, trial_id: UUID):  # type: ignore[no-untyped-def]
+        """Re-hydrate the authorized evidence view for one Trial.
+
+        Loads the persisted ``EvalEvidenceItem`` rows and converts them to
+        in-memory ``EvidenceItem`` rows (the ``AuthorizedView`` payload).
+        The view is then filtered to ``JUDGE_ALLOWED_KINDS`` via
+        ``authorize``. ``EvidenceKind`` is imported lazily so the module
+        top stays clean of pairwise-only symbols.
+        """
+
+        from evals.v2.graders.base import EvidenceKind
+
+        rows = await self._evals.list_evidence_items(trial_id)
+        items = [
+            EvidenceItem(
+                id=row.id,
+                trial_id=row.trial_id,
+                kind=EvidenceKind(row.kind),
+                source_type=row.source_type,
+                source_id=row.source_id or "",
+                content_hash=row.content_hash,
+                projection=row.projection_json,
+                sensitivity=row.sensitivity,
+            )
+            for row in rows
+        ]
+        return authorize(
+            trial_id=trial_id, items=items, allowed_kinds=JUDGE_ALLOWED_KINDS
+        )
 
     @staticmethod
     def _frozen_hash(experiment: EvalExperiment) -> str:

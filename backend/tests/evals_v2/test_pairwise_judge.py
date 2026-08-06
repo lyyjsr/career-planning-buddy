@@ -66,7 +66,6 @@ def _pair() -> Pair:
         baseline_trial_id=b,
         candidate_trial_id=c,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_projection=TrialEvidenceProjection(
             request_constraints={"expect_constraint": "求职"},
             plan_projection={"summary": "b"},

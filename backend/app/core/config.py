@@ -93,6 +93,20 @@ class Settings(BaseSettings):
     agent_poll_interval_seconds: float = Field(default=0.05, gt=0, le=5)
     agent_heartbeat_seconds: float = Field(default=15, gt=0, le=60)
 
+    # PR-9c.1: Pairwise Judge LLM credentials. The Judge is a separate
+    # model from the agent-under-test by default (``judge_llm_*`` are
+    # distinct from ``llm_*``) so a system cannot self-judge. Blank values
+    # mean "fall back to the agent LLM" --- callers that explicitly need a
+    # distinct judge must populate these. PR-9c.1 ships NO calibration
+    # thresholds here; threshold gating lives in PR-9c.2.
+    judge_llm_provider: Literal["mock", "fixture", "openai_compatible"] = "fixture"
+    judge_llm_api_key: SecretStr | None = Field(default=None, min_length=1)
+    judge_llm_base_url: AnyHttpUrl | None = None
+    judge_llm_model: str | None = Field(default=None, min_length=1, max_length=128)
+    judge_llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    judge_llm_max_output_tokens: int = Field(default=800, ge=64, le=4096)
+    judge_llm_temperature: float = Field(default=0.0, ge=0, le=2)
+
     @field_validator("database_url")
     @classmethod
     def require_async_postgresql(cls, value: str) -> str:

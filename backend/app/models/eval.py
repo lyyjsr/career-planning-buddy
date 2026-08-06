@@ -326,3 +326,185 @@ class EvalEvidenceItem(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class EvalTrialPair(Base):
+    """Stable identity of one baseline-vs-candidate comparison (PR-9c.1).
+
+    One row per *Pair* (NOT per per-execution group). ``pair_hash`` is the
+    lookup key the service uses to idempotently re-attach Judge runs to an
+    existing Pair. ``comparison_group_id`` deliberately lives on Result
+    rows, not Pair rows: a re-evaluation that changes Judge model / prompt
+    / comparison_group should NOT create a new Pair, only a new Result.
+    """
+
+    __tablename__ = "eval_trial_pairs"
+    __table_args__ = (
+        CheckConstraint(
+            "baseline_trial_id <> candidate_trial_id",
+            name="ck_eval_trial_pairs_distinct_trials",
+        ),
+        CheckConstraint(
+            "pair_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_trial_pairs_pair_hash",
+        ),
+        CheckConstraint(
+            "input_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_trial_pairs_input_hash",
+        ),
+        CheckConstraint(
+            "case_id <> ''",
+            name="ck_eval_trial_pairs_nonempty_keys",
+        ),
+        UniqueConstraint(
+            "pair_hash", name="uq_eval_trial_pairs_pair_hash"
+        ),
+        # NON-UNIQUE composite index on the ordered (baseline, candidate)
+        # trial tuple. The Pair's stable identity is ``pair_hash`` (which
+        # is content-aware); the trial-tuple alone is NOT unique because a
+        # re-collect that moves output bytes is allowed to create a SECOND
+        # Pair row with the SAME trial ids but a DIFFERENT pair_hash. The
+        # old row stays attributable to the old bytes; the new row
+        # attributes the new bytes. Together with ``UNIQUE(pair_hash)``
+        # this gives:
+        #   * same trials + same outputs  → same pair_hash → reuse row
+        #   * same trials + changed      → new pair_hash  → new Pair
+        #                                  row coexists with the old one
+        # This index only accelerates lookup-by-trial-tuple.
+        Index(
+            "ix_eval_trial_pairs_trial_ids",
+            "baseline_trial_id",
+            "candidate_trial_id",
+        ),
+        Index("ix_eval_trial_pairs_case", "case_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    baseline_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trials.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    candidate_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trials.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    case_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    pair_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    allowed_evidence_kinds: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    judge_prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class EvalPairwiseJudgeResult(Base):
+    """One physical Pairwise Judge execution for one ``EvalTrialPair``.
+
+    Winner values are constrained to {a, b, tie, both_unacceptable} and
+    are NULL iff ``judge_run_status='invalid_structured_output'``. The
+    ``invalid`` value is deliberately NOT a winner — invalidity lives in
+    ``judge_run_status`` per the user's PR-9c.1 correction. Both display-
+    side (``raw_display_winner``) and baseline-relative
+    (``normalized_winner``) winners are persisted so downstream analysis
+    can audit position bias without re-running the Judge.
+
+    ``comparison_group_id`` is recorded HERE, not on the Pair: a
+    re-evaluation that bumps the prompt / model or re-runs the swap
+    produces a new ``comparison_group_id`` and a new Result row, but
+    reuses the SAME ``EvalTrialPair`` so historical Runs aggregate
+    cleanly under one Pair identity.
+    """
+
+    __tablename__ = "eval_pairwise_judge_results"
+    __table_args__ = (
+        CheckConstraint(
+            "judge_run_status IN ('completed','invalid_structured_output')",
+            name="ck_eval_pairwise_judge_results_status",
+        ),
+        CheckConstraint(
+            "position_variant IN ('baseline','swapped')",
+            name="ck_eval_pairwise_judge_results_position_variant",
+        ),
+        CheckConstraint(
+            "raw_display_winner IS NULL OR "
+            "raw_display_winner IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_judge_results_raw_winner",
+        ),
+        CheckConstraint(
+            "normalized_winner IS NULL OR "
+            "normalized_winner IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_judge_results_normalized_winner",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR confidence IN ('low','medium','high')",
+            name="ck_eval_pairwise_judge_results_confidence",
+        ),
+        CheckConstraint(
+            "(judge_run_status='completed') = (raw_display_winner IS NOT NULL "
+            "AND normalized_winner IS NOT NULL)",
+            name="ck_eval_pairwise_judge_results_completed_carries_verdict",
+        ),
+        CheckConstraint(
+            "input_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_judge_results_input_hash",
+        ),
+        CheckConstraint(
+            "comparison_group_id <> ''",
+            name="ck_eval_pairwise_judge_results_group",
+        ),
+        UniqueConstraint(
+            "pair_id", "judge_run_id",
+            name="uq_eval_pairwise_judge_results_pair_run",
+        ),
+        Index("ix_eval_pairwise_judge_results_pair", "pair_id"),
+        Index("ix_eval_pairwise_judge_results_run", "judge_run_id"),
+        Index(
+            "ix_eval_pairwise_judge_results_group",
+            "comparison_group_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    pair_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trial_pairs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    judge_run_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    judge_run_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    position_variant: Mapped[str] = mapped_column(String(16), nullable=False)
+    comparison_group_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    raw_display_winner: Mapped[str | None] = mapped_column(String(32))
+    normalized_winner: Mapped[str | None] = mapped_column(String(32))
+    raw_dimension_verdicts: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+    normalized_dimension_verdicts: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    rationale: Mapped[str | None] = mapped_column(Text)
+    model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_output_hash: Mapped[str | None] = mapped_column(String(64))
+    tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    calibrated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )

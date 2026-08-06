@@ -127,7 +127,6 @@ def test_projection_extracts_only_authorized_kinds() -> None:
         baseline_trial_id=trial_id,
         candidate_trial_id=uuid4(),
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_view=view,
         candidate_view=_view(uuid4(), _candidate_items(uuid4())),
     )
@@ -158,7 +157,6 @@ def test_pair_hash_is_role_determined_not_sort_determined() -> None:
         baseline_trial_id=b,
         candidate_trial_id=c,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_projection=TrialEvidenceProjection(None, None),
         candidate_projection=TrialEvidenceProjection(None, None),
     )
@@ -166,7 +164,6 @@ def test_pair_hash_is_role_determined_not_sort_determined() -> None:
         baseline_trial_id=c,
         candidate_trial_id=b,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_projection=TrialEvidenceProjection(None, None),
         candidate_projection=TrialEvidenceProjection(None, None),
     )
@@ -186,8 +183,8 @@ def test_pair_hash_stable_for_same_role_inputs() -> None:
         request_constraints={"expect_constraint": "x"},
         plan_projection={"summary": "y"},
     )
-    pair_a = Pair(b, c, "case-1", "grp", projection, projection)
-    pair_b = Pair(b, c, "case-1", "grp", projection, projection)
+    pair_a = Pair(b, c, "case-1", projection, projection)
+    pair_b = Pair(b, c, "case-1", projection, projection)
     assert pair_a.pair_hash() == pair_b.pair_hash()
 
 
@@ -203,7 +200,6 @@ def test_input_hash_is_swap_invariant() -> None:
         baseline_trial_id=baseline_id,
         candidate_trial_id=candidate_id,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_view=baseline_view,
         candidate_view=candidate_view,
     )
@@ -239,7 +235,6 @@ def test_display_slots_follow_position_variant() -> None:
         baseline_trial_id=baseline_id,
         candidate_trial_id=candidate_id,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_view=baseline_view,
         candidate_view=candidate_view,
     )
@@ -277,7 +272,6 @@ def test_input_hash_changes_when_plan_changes() -> None:
         baseline_trial_id=b,
         candidate_trial_id=c,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_view=baseline_view,
         candidate_view=candidate_view,
     )
@@ -288,7 +282,6 @@ def test_input_hash_changes_when_plan_changes() -> None:
         baseline_trial_id=b,
         candidate_trial_id=c,
         case_id="case-1",
-        comparison_group_id="grp",
         baseline_view=baseline_view,
         candidate_view=_view(c, alt_candidate_items),
     )
@@ -313,7 +306,7 @@ def test_input_carries_versions_and_allowed_kinds() -> None:
     candidate_view = _view(c, _candidate_items(c))
     pair = build_pair(
         baseline_trial_id=b, candidate_trial_id=c,
-        case_id="case-1", comparison_group_id="grp",
+        case_id="case-1",
         baseline_view=baseline_view, candidate_view=candidate_view,
     )
     judge_input = build_judge_input(
@@ -350,7 +343,7 @@ def test_rubric_extracted_only_from_authorized_evidence() -> None:
     candidate_view = _view(c, candidate_items)
     pair = build_pair(
         baseline_trial_id=b, candidate_trial_id=c,
-        case_id="case-x", comparison_group_id="grp",
+        case_id="case-x",
         baseline_view=baseline_view, candidate_view=candidate_view,
     )
     judge_input = build_judge_input(
@@ -361,13 +354,42 @@ def test_rubric_extracted_only_from_authorized_evidence() -> None:
     assert judge_input.rubric == []
 
 
-def test_pair_hash_includes_comparison_group() -> None:
+def test_pair_hash_excludes_comparison_group() -> None:
+    """``pair_hash`` MUST NOT depend on the comparison_group_id, the Judge
+    prompt/model, or any other per-execution attribute. The Pair row is
+    the stable business Pair entity; comparison_group_id lives on
+    ``EvalPairwiseJudgeResult`` rows.
+
+    Concretely: two re-evaluations of the same trial pair with the same
+    output bytes (one each at G1 and G2) MUST produce equal pair_hashes.
+    Otherwise ``eval_trial_pairs`` would duplicate the Pair row, breaking
+    ``UNIQUE(pair_hash)`` and PR-9c.2 calibration binding.
+    """
+
     b = uuid4()
     c = uuid4()
-    projection = TrialEvidenceProjection(None, None)
-    pair_g1 = Pair(b, c, "case-1", "grp-1", projection, projection)
-    pair_g2 = Pair(b, c, "case-1", "grp-2", projection, projection)
-    assert pair_g1.pair_hash() != pair_g2.pair_hash()
+    projection = TrialEvidenceProjection(
+        request_constraints={"expect_constraint": "求职"},
+        plan_projection={"summary": "stable"},
+    )
+    pair_g1 = Pair(b, c, "case-1", projection, projection)
+    pair_g2 = Pair(b, c, "case-1", projection, projection)
+    assert pair_g1.pair_hash() == pair_g2.pair_hash()
+
+
+def test_pair_hash_changes_when_output_bytes_change() -> None:
+    """``pair_hash`` IS sensitive to actual output content. A re-collect
+    that moves the plan bytes must produce a different pair_hash so that
+    ``eval_trial_pairs`` can carry both old + new outputs as separate
+    Pair rows attributable to their respective bytes."""
+
+    b = uuid4()
+    c = uuid4()
+    base_proj = TrialEvidenceProjection(None, {"summary": "v1"})
+    pair_v1 = Pair(b, c, "case-1", base_proj, base_proj)
+    base_proj_v2 = TrialEvidenceProjection(None, {"summary": "v2"})
+    pair_v2 = Pair(b, c, "case-1", base_proj_v2, base_proj_v2)
+    assert pair_v1.pair_hash() != pair_v2.pair_hash()
 
 
 def test_pair_hash_is_not_influenced_by_unrelated_view_kinds() -> None:
@@ -390,7 +412,7 @@ def test_pair_hash_is_not_influenced_by_unrelated_view_kinds() -> None:
     )
     pair = build_pair(
         baseline_trial_id=b, candidate_trial_id=c,
-        case_id="case-1", comparison_group_id="grp",
+        case_id="case-1",
         baseline_view=wide_view_b, candidate_view=wide_view_c,
     )
     # Projection will contain only PLAN_PROJECTION (RUN_METRICS not extracted).

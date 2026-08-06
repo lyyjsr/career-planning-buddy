@@ -5,9 +5,17 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import Select, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.eval import EvalEvidenceItem, EvalExperiment, EvalScore, EvalTrial
+from app.models.eval import (
+    EvalEvidenceItem,
+    EvalExperiment,
+    EvalPairwiseJudgeResult,
+    EvalScore,
+    EvalTrial,
+    EvalTrialPair,
+)
 
 
 class EvalRepository:
@@ -202,4 +210,101 @@ class EvalRepository:
             .order_by(EvalEvidenceItem.kind, EvalEvidenceItem.source_type)
         )
         return list(result.scalars())
+
+    # ---------------------------------------------------------- PR-9c.1
+    # Pairwise Judge persistence. Two tables: ``eval_trial_pairs`` (stable
+    # pair identity, UNIQUE on pair_hash) and ``eval_pairwise_judge_results``
+    # (one row per physical Judge execution, carries comparison_group_id).
+    # ``get_or_create_pair`` is idempotent: an IntegrityError on the UNIQUE
+    # pair_hash means another session raced ahead, so we re-read. The
+    # comparison_group_id lives on Result rows only.
+
+    async def get_or_create_pair(self, pair: EvalTrialPair) -> EvalTrialPair:
+        """Idempotently insert a Pair, returning the persisted row.
+
+        On a concurrent insert by another session (UNIQUE pair_hash
+        collision), this rolls back the pending INSERT and re-reads the
+        existing row. Callers that need a transactional savepoint should
+        bracket this with ``session.begin_nested()``.
+        """
+
+        existing = await self.get_pair_by_hash(pair.pair_hash)
+        if existing is not None:
+            return existing
+        self._session.add(pair)
+        try:
+            await self._session.flush()
+        except IntegrityError:
+            await self._session.rollback()
+            existing = await self.get_pair_by_hash(pair.pair_hash)
+            if existing is None:
+                raise
+            return existing
+        return pair
+
+    async def get_pair(self, pair_id: UUID) -> EvalTrialPair | None:
+        result = await self._session.execute(
+            select(EvalTrialPair).where(EvalTrialPair.id == pair_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_pair_by_hash(self, pair_hash: str) -> EvalTrialPair | None:
+        result = await self._session.execute(
+            select(EvalTrialPair).where(EvalTrialPair.pair_hash == pair_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_judge_result(
+        self, result: EvalPairwiseJudgeResult
+    ) -> EvalPairwiseJudgeResult:
+        self._session.add(result)
+        await self._session.flush()
+        return result
+
+    async def get_judge_result(
+        self, pair_id: UUID, judge_run_id: UUID
+    ) -> EvalPairwiseJudgeResult | None:
+        result = await self._session.execute(
+            select(EvalPairwiseJudgeResult).where(
+                EvalPairwiseJudgeResult.pair_id == pair_id,
+                EvalPairwiseJudgeResult.judge_run_id == judge_run_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_judge_results_by_pair(
+        self, pair_id: UUID
+    ) -> list[EvalPairwiseJudgeResult]:
+        result = await self._session.execute(
+            select(EvalPairwiseJudgeResult)
+            .where(EvalPairwiseJudgeResult.pair_id == pair_id)
+            .order_by(EvalPairwiseJudgeResult.created_at)
+        )
+        return list(result.scalars())
+
+    async def list_judge_results_by_comparison_group(
+        self, comparison_group_id: str
+    ) -> list[tuple[EvalTrialPair, EvalPairwiseJudgeResult]]:
+        """Join through ``eval_trial_pairs`` to surface every Judge row in a
+        comparison group. ``comparison_group_id`` is recorded on the Result
+        row (not the Pair row), so the filter is on
+        ``EvalPairwiseJudgeResult.comparison_group_id``. Returns (pair,
+        result) tuples so the caller can group by pair without a second
+        lookup."""
+
+        result = await self._session.execute(
+            select(EvalTrialPair, EvalPairwiseJudgeResult)
+            .join(
+                EvalPairwiseJudgeResult,
+                EvalPairwiseJudgeResult.pair_id == EvalTrialPair.id,
+            )
+            .where(
+                EvalPairwiseJudgeResult.comparison_group_id == comparison_group_id
+            )
+            .order_by(EvalTrialPair.case_id, EvalPairwiseJudgeResult.created_at)
+        )
+        return [
+            (pair, judge_result)
+            for pair, judge_result in result.all()
+        ]
 

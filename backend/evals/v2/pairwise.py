@@ -97,27 +97,71 @@ class Pair:
     """Stable identity of one baseline-vs-candidate Pair.
 
     The ``pair_hash`` is computed from *role-determined* (not sorted) trial
-    ids so the same two trials always produce the same Pair row regardless
-    of which side is currently shown as A. A Pair is unique per ordered
-    baseline/candidate trial tuple plus comparison group (PR-9c.1 commit 2
-    enforces this via ``UNIQUE (baseline_trial_id, candidate_trial_id,
-    comparison_group_id)``).
+    ids, the case_id, and stable output content hashes, so the same two
+    trials with equivalent outputs always produce the same Pair row
+    regardless of which side is currently shown as A or which comparison
+    group / Judge version is running. ``comparison_group_id`` is NOT part
+    of Pair identity — it lives on ``EvalPairwiseJudgeResult`` rows.
     """
 
     baseline_trial_id: UUID
     candidate_trial_id: UUID
     case_id: str
-    comparison_group_id: str
     baseline_projection: TrialEvidenceProjection
     candidate_projection: TrialEvidenceProjection
 
+    def baseline_output_hash(self) -> str:
+        """Stable content fingerprint of the baseline projection payload.
+
+        Computed over the same bytes the Judge would see; if a re-collect
+        changes the plan content, the fingerprint changes, and the Pair is
+        treated as a different Pair. This is the contract that lets
+        ``eval_trial_pairs`` stay unique per *equivalent* comparison
+        rather than per trial-id pair.
+        """
+
+        return canonical_sha256(self.baseline_projection.as_display())
+
+    def candidate_output_hash(self) -> str:
+        """Stable content fingerprint of the candidate projection payload."""
+
+        return canonical_sha256(self.candidate_projection.as_display())
+
     def pair_hash(self) -> str:
-        """Role-determined hash — identical for the same baseline/candidate."""
+        """Stable identity hash for one baseline-vs-candidate Pair.
+
+        Deliberately EXCLUDES any per-execution field — ``comparison_group_id``,
+        ``judge_run_id``, ``position_variant``, ``judge_model``, prompt /
+        rubric versions — so that the same baseline/candidate trial pair
+        with the same outputs keeps a stable identity across:
+
+        * multiple ``comparison_group_id`` runs (a re-evaluation with a
+          new Judge prompt / model should NOT create a new Pair row);
+        * PR-9c.2's human-label attaching workflow;
+        * cross-prompt / cross-model consistency analysis.
+
+        What IS included:
+
+        * ``schema_version`` — bump when the hashing algorithm changes, so
+          old Pairs do not silently alias to new ones;
+        * ``case_id`` — two Trials from different cases are not a Pair;
+        * role-determined trial refs — swapping baseline/candidate is a
+          different Pair (verdict semantics are baseline-relative);
+        * baseline/candidate output hashes — if a re-collect moves output
+          bytes, the old Pair row stays attributable to the old bytes and
+          the new run gets a new Pair row, which is what we want.
+
+        ``comparison_group_id`` is recorded on ``EvalPairwiseJudgeResult``
+        rows instead, where it ties together one original+swapped run pair.
+        """
 
         return canonical_sha256({
+            "schema_version": "eval-trial-pair/v1",
+            "case_id": self.case_id,
             "baseline_trial_id": str(self.baseline_trial_id),
             "candidate_trial_id": str(self.candidate_trial_id),
-            "comparison_group_id": self.comparison_group_id,
+            "baseline_output_hash": self.baseline_output_hash(),
+            "candidate_output_hash": self.candidate_output_hash(),
         })
 
 
@@ -207,7 +251,6 @@ def build_pair(
     baseline_trial_id: UUID,
     candidate_trial_id: UUID,
     case_id: str,
-    comparison_group_id: str,
     baseline_view: AuthorizedView,
     candidate_view: AuthorizedView,
 ) -> Pair:
@@ -215,14 +258,15 @@ def build_pair(
 
     Both views must already be filtered to ``JUDGE_ALLOWED_KINDS`` — this
     function does not widen or narrow them. It extracts the two projections
-    and freezes them on the Pair.
+    and freezes them on the Pair. ``comparison_group_id`` is NOT taken
+    here: it is a per-execution attribute that lives on
+    ``EvalPairwiseJudgeResult`` rows, not on the Pair.
     """
 
     return Pair(
         baseline_trial_id=baseline_trial_id,
         candidate_trial_id=candidate_trial_id,
         case_id=case_id,
-        comparison_group_id=comparison_group_id,
         baseline_projection=_extract_min_projection(baseline_view),
         candidate_projection=_extract_min_projection(candidate_view),
     )
