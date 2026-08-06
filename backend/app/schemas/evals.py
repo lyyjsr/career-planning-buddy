@@ -141,6 +141,14 @@ class PairwiseRunRequest(StrictModel):
     candidate_experiment_id: UUID
     dataset_id: str = Field(min_length=1, max_length=128)
     dataset_version: str = Field(min_length=1, max_length=32)
+    fixture_mapping: dict[str, dict[str, object]] | None = Field(
+        default=None,
+        description=(
+            "Optional pair_hash → PairwiseJudgeOutput (as serialized dict) "
+            "mapping for fixture-mode smoke runs. MUST be omitted (or null) "
+            "for production sweeps. Commit 3.3."
+        ),
+    )
 
 
 class PairwiseRunStatusResponse(StrictModel):

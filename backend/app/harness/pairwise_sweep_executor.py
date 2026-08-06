@@ -196,7 +196,32 @@ class PairwiseSweepExecutor:
         is responsible.
         """
 
-        judge = build_pairwise_judge(self._settings)
+        # Load the Sweep once to pull its fixture_mapping (Commit 3.3).
+        # The mapping is only populated for fixture-mode smoke runs; on
+        # production Sweeps it is NULL and build_pairwise_judge resolves
+        # to the configured live/fixture provider unchanged. Re-reading
+        # the Sweep later in _pump_one_item does NOT conflict — we only
+        # need the mapping here to construct the Judge once per drive.
+        async with self._session_factory() as sweep_session:
+            sweep = await EvalRepository(sweep_session).get_sweep(sweep_id)
+            raw_mapping = (
+                sweep.fixture_mapping if sweep is not None else None
+            )
+        # Reconstruct the JSONB-stored output dicts back into
+        # PairwiseJudgeOutput Pydantic models for the FixtureJudge
+        # mapping. A NULL column or empty dict yields an empty mapping
+        # (fail-closed: every pair returns invalid_structured_output).
+        from evals.v2.judge import PairwiseJudgeOutput
+
+        fixture_mapping = None
+        if raw_mapping:
+            fixture_mapping = {
+                str(k): PairwiseJudgeOutput.model_validate(v)
+                for k, v in raw_mapping.items()
+            }
+        judge = build_pairwise_judge(
+            self._settings, fixture_mapping=fixture_mapping
+        )
         key1, key2 = _advisory_key_parts(sweep_id)
         async with self._lock_engine.connect() as lock_conn:
             acquired = (

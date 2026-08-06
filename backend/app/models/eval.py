@@ -629,6 +629,15 @@ class EvalPairwiseSweep(Base):
         Integer, nullable=False, server_default="0"
     )
     error_summary: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    fixture_mapping: Mapped[dict[str, dict[str, object]] | None] = mapped_column(
+        JSONB,
+        comment=(
+            "Optional pair_hash → PairwiseJudgeOutput (as dict) mapping "
+            "consumed by FixturePairwiseJudge when "
+            "judge_llm_provider='fixture'. MUST be NULL for production "
+            "sweeps (live LLM path). Commit 3.3."
+        ),
+    )
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)

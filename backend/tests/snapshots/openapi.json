@@ -2669,6 +2669,22 @@
             "minLength": 1,
             "title": "Dataset Version",
             "type": "string"
+          },
+          "fixture_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional pair_hash → PairwiseJudgeOutput (as serialized dict) mapping for fixture-mode smoke runs. MUST be omitted (or null) for production sweeps. Commit 3.3.",
+            "title": "Fixture Mapping"
           }
         },
         "required": [

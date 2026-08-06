@@ -184,6 +184,8 @@ async def start_pairwise_run(
         judge_prompt_version=judge_prompt_version,
         judge_rubric_version=judge_rubric_version,
         annotation_schema_version=annotation_schema_version,
+        fixture_mapping=body.fixture_mapping,
+        session=session,
     )
     executor.submit(sweep.id)
     await session.refresh(sweep)
@@ -201,12 +203,35 @@ async def _materialize_sweep(
     judge_prompt_version: str,
     judge_rubric_version: str,
     annotation_schema_version: str,
+    fixture_mapping: dict[str, dict[str, object]] | None,
+    session: AsyncSession,
 ) -> EvalPairwiseSweep:
-    """Create the Sweep row + SweepItem rows from the frozen Export JSONL."""
+    """Create the Sweep row + SweepItem rows from the frozen Export JSONL.
 
+    Commit 3.3 closes the long-standing gap (Commit 3.1 report's
+    "explicit gap" comment): rows ARE now seeded from ``bundle.lines``,
+    so the executor has real work to pump. Each export line becomes:
+
+    * one ``EvalTrialPair`` row (idempotent via pair_hash re-use);
+    * two ``SweepItemSeed`` rows — baseline + swapped — derived from the
+      pair. Position assignment is deterministic per (pair_hash,
+      reviewer_id) via ``derive_position_variant``, matching the GET
+      review-surface endpoint the reviewer later hits.
+
+    The optional ``fixture_mapping`` (pair_hash → JudgeOutput dict, only
+    set on smoke runs) is persisted onto the Sweep so the executor can
+    construct a FixturePairwiseJudge that returns ``completed`` verdicts
+    rather than fail-closing on an empty mapping.
+    """
+
+    import hashlib
     import uuid as _uuid
 
-    from app.models.eval import EvalPairwiseSweep
+    from app.models.eval import EvalPairwiseSweep, EvalTrialPair
+    from app.services.pairwise_calibration import (
+        PairwiseCalibrationService,
+        SweepItemSeed,
+    )
 
     pair_count = len(bundle.lines)
     requested_judge_run_count = pair_count * 2
@@ -226,14 +251,130 @@ async def _materialize_sweep(
         requested_pair_count=pair_count,
         requested_judge_run_count=requested_judge_run_count,
         requested_by=str(reviewer.id),
+        fixture_mapping=fixture_mapping,
     )
     async with session_transaction(repo._session):  # noqa: SLF001
         sweep = await repo.create_sweep(sweep)
 
-    # Seed pair + sweep item rows would normally be persisted against
-    # real ``EvalTrialPair`` rows. For PR-9c.2 the Sweep stays in
-    # ``queued`` (no real graded trials yet smoke-harnessed); the
-    # Executor will pick up work once materialize_sweep_items is invoked.
+    # Build seeds from the frozen Export bundle. Each line maps to one
+    # EvalTrialPair row and two SweepItem rows (baseline + swapped).
+    # ``derive_position_variant`` keeps the reviewer-visible A/B ordering
+    # consistent across HTTP GET review-surface and the executor's
+    # internal claim path.
+    seeds: list[SweepItemSeed] = []
+    async with session_transaction(session):
+        for line in bundle.lines:
+            # Idempotent EvalTrialPair row via pair_hash.
+            existing_pair = await repo.get_pair_by_hash(line.pair_hash)
+            if existing_pair is None:
+                trial_pair = await repo.get_or_create_pair(
+                    EvalTrialPair(
+                        baseline_trial_id=line.baseline_trial_id,
+                        candidate_trial_id=line.candidate_trial_id,
+                        case_id=line.case_id,
+                        pair_hash=line.pair_hash,
+                        input_hash=hashlib.sha256(
+                            (
+                                line.baseline_output_hash
+                                + line.candidate_output_hash
+                            )
+                            .encode("utf-8")
+                        ).hexdigest(),
+                        allowed_evidence_kinds=[
+                            "REQUEST_CONSTRAINTS",
+                            "PLAN_PROJECTION",
+                        ],
+                        judge_prompt_version=judge_prompt_version,
+                        judge_rubric_version=judge_rubric_version,
+                    )
+                )
+            else:
+                trial_pair = existing_pair
+
+            # Frozen review surface sha — derived from the export's
+            # frozen projections exactly as the GET review-surface
+            # endpoint would. We piggyback the helper here so the
+            # SweepItem.frozen_review_surface_sha256 matches what the
+            # HTTP layer will recompute on every annotation POST.
+            from evals.v2.pairwise import (
+                Pair as PairDomain,
+            )
+            from evals.v2.pairwise import (
+                PositionVariant as PV,
+            )
+            from evals.v2.pairwise import (
+                TrialEvidenceProjection,
+            )
+            from evals.v2.pairwise_review_surface import (
+                build_frozen_review_surface,
+            )
+
+            domain_pair = PairDomain(
+                baseline_trial_id=line.baseline_trial_id,
+                candidate_trial_id=line.candidate_trial_id,
+                case_id=line.case_id,
+                baseline_projection=TrialEvidenceProjection(
+                    request_constraints=line.frozen_request_constraints,
+                    plan_projection=line.frozen_baseline_plan_projection,
+                ),
+                candidate_projection=TrialEvidenceProjection(
+                    request_constraints=line.frozen_request_constraints,
+                    plan_projection=line.frozen_candidate_plan_projection,
+                ),
+            )
+            # build_frozen_review_surface derives the canonical
+            # position_variant for this reviewer; the surface sha is
+            # display-invariant so both SweepItem rows (baseline +
+            # swapped) carry the SAME frozen hash and the executor's
+            # review-surface reconstruction at annotation time matches.
+            surface = build_frozen_review_surface(
+                pair=domain_pair,
+                reviewer_id=str(reviewer.id),
+                rubric=[],
+                rubric_version=judge_rubric_version,
+                annotation_schema_version=annotation_schema_version,
+            )
+
+            seeds.append(
+                SweepItemSeed(
+                    pair_id=trial_pair.id,
+                    pair_hash=line.pair_hash,
+                    case_id=line.case_id,
+                    baseline_trial_id=line.baseline_trial_id,
+                    candidate_trial_id=line.candidate_trial_id,
+                    baseline_output_hash=line.baseline_output_hash,
+                    candidate_output_hash=line.candidate_output_hash,
+                    frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+                    display_a_trial_id=line.baseline_trial_id,
+                    display_b_trial_id=line.candidate_trial_id,
+                    position_variant=PV.BASELINE,
+                )
+            )
+            seeds.append(
+                SweepItemSeed(
+                    pair_id=trial_pair.id,
+                    pair_hash=line.pair_hash,
+                    case_id=line.case_id,
+                    baseline_trial_id=line.baseline_trial_id,
+                    candidate_trial_id=line.candidate_trial_id,
+                    baseline_output_hash=line.baseline_output_hash,
+                    candidate_output_hash=line.candidate_output_hash,
+                    frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+                    display_a_trial_id=line.candidate_trial_id,
+                    display_b_trial_id=line.baseline_trial_id,
+                    position_variant=PV.SWAPPED,
+                )
+            )
+
+    # Seed the SweepItems via the Service so the deterministic
+    # judge_run_id + counter invariants get enforced.
+    service = PairwiseCalibrationService(session)
+    await service.materialize_sweep_items(
+        sweep=sweep,
+        seeds=seeds,
+        annotation_schema_version=annotation_schema_version,
+    )
+
     return sweep
 
 
