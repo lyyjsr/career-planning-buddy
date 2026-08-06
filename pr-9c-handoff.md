@@ -279,4 +279,183 @@ cd .. && mv .env.backup .env && rm -f .env.bak
 
 ---
 
+## 8. PR-9c.2 final state (frozen)
+
+> 状态：PR-9c.2 engineering gate = **PASS** / PR-9c.2 = **CLOSED** / PR-9 formal human-calibration gate = **BLOCKED** / Overall PR-9 = **NOT CLOSED**。本节冻结 PR-9c.2 最终基线,作为下一会话入口。
+
+### 8.1 Final baseline
+
+| 项目 | 值 |
+|---|---|
+| 分支 | `feat/eval` |
+| PR-9c.2 final SHA | `0122bbc2e898ee75d03182220775a69bfeeb20e8` |
+| HEAD == origin/feat/eval | ✓ |
+| Working tree | clean |
+| Alembic head | `20260815_0015` (`eval_pairwise_calibration` 4 表;0016 未引入) |
+| Endpoints | **9**（非 10;上一轮 handoff 报告误计。详 §8.5）|
+| Tests | `492 passed`（PR-9c.1 完成时 350;PR-9c.2 共 +142）|
+| ruff (app/evals/tests) | 0 errors |
+| mypy (app/evals/tests) | 0 errors / 205 files |
+| `test_openapi_snapshot.py` | passes（snapshot 已 regen 到 0122bbc）|
+| 工程门禁 | PASS |
+| 正式人工校准门禁 | BLOCKED |
+
+### 8.2 PR-9c.2 commit chain
+
+```
+656336c  Commit 1    Calibration domain core (review_surface / sampler / loader / metrics + 63 tests)
+3ef92bd  Commit 2    Calibration persistence (alembic 0015 双表 / 4 ORM / Repository 5 领域 / Service 6 能力 / 43 DB tests)
+4ee4efa  Commit 3    Pairwise Calibration HTTP + SweepExecutor (9 endpoints)
+c7d3431  Commit 3.1  Executor semantics + Review workflow fixes (reviewer issues #1,#2,#3,#4,#6,#7)
+0122bbc  Commit 3.2  Close 3 remaining reviewer items (#1 review_token required, #2 dedicated advisory-lock connection, #3 wire compute_calibration_status)
+```
+
+### 8.3 PR-9c.2 endpoint catalog（9 个）
+
+```
+POST /api/v1/eval/runs/{baseline_exp}/pairwise/run                              spawn sweep
+GET  /api/v1/eval/runs/{baseline_exp}/pairwise/run/{sweep_id}                   status
+POST /api/v1/eval/runs/{baseline_exp}/pairwise/run/{sweep_id}/cancel            staging only
+GET  /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface?sweep_id=…       blinded review surface + review_token
+POST /api/v1/eval/runs/pairwise/annotations                                     primary OR adjudication（review_token 必填）
+GET  /api/v1/eval/runs/pairwise/annotations/{pair_id}                           按 pair 列出
+POST /api/v1/eval/pairwise/calibration                                          create report（含真实 calibration_status）
+GET  /api/v1/eval/pairwise/calibration/{dataset}/{version}/latest
+GET  /api/v1/eval/pairwise/calibration/{dataset}/{version}/history
+```
+
+`GET /runs/pairwise/annotations/{pair_id}` 的 `?sweep_id=…` 是 query param,不是独立 endpoint。
+
+### 8.4 Calibration status now wired(Commit 3.2 issue #3 解除)
+
+`compute_calibration_status`（Commit 1 已数据驱动的纯函数）自 Commit 3.2 起真正接入 production report pipeline:
+
+```
+POST /pairwise/calibration
+  └── _compute_calibration_status_from_snapshots():
+        valid_human_pair_count      ← annotation snapshot（≥2 distinct primary reviewers per pair）
+        position_pair_count         ← Σ sweep.position_pair_count（结构 counter）
+        position_metric_sample_count ← pairs where BOTH required results are
+                                         judged_run_status='completed'
+                                         AND normalized_winner IS NOT NULL
+        agreement                   ← exact-match Judge-vs-human over intersection
+        position_bias               ← fraction of decisive pairs whose verdict
+                                       differs across the two position variants
+  └── compute_calibration_status(position_pair_count=position_metric_sample_count)
+  └── report_payload.calibration_status / usage_mode / agreement / position_bias /
+                                  valid_human_pair_count /
+                                  position_pair_count /
+                                  position_metric_sample_count /
+                                  agreement_sample_count
+```
+
+**关键**：正式门槛（`compute_calibration_status`）使用 `position_metric_sample_count`,**not** `position_pair_count`。`judge_run_status='invalid_structured_output'` 的 Result 行存在但仍不计入 metric 分母。
+
+`report.report_payload` 现在持久化全部真实字段,GET `/pairwise/calibration/{...}/latest|history` 通过 `dict(report.report_payload)` 读取真实值。Commit 3.1 之前的 hard-default `payload.get("calibration_status", "insufficient")` 已废止。
+
+### 8.5 文档更正记录
+
+1. **Endpoint 数 (3.1 报告误写 10)**：实为 9（§8.3）。已在 module docstring 修正。
+2. **Commit 3.2 新增 test 数 (3.2 报告误写 11)**：实为 **8**:
+   - Token 3：`test_annotation_without_review_token_is_rejected` / `test_annotation_with_token_for_other_pair_is_rejected` / `test_annotation_token_for_other_reviewer_is_rejected`
+   - Lock 4：`test_advisory_lock_unlock_use_same_connection` / `test_second_executor_cannot_drive_locked_sweep` / `test_lock_released_after_executor_exception` / `test_lock_released_after_cancelled_sweep`
+   - Calibration 1：`test_calibration_report_status_is_data_driven`
+   - Pytest 由 Commit 3.1 时的 484 增至 492,净增 8,与列表一致。
+
+### 8.6 Executor state machine（Commit 3.2 修订）
+
+```
+submit → _execute → _drive_sweep:
+    async with engine.connect() as lock_conn:         # 物理连接独占,Commit 3.2 issue #2
+        acquired = pg_try_advisory_lock(k1, k2)        # 非阻塞,失败即 return
+        if not acquired: return                        # 另一 worker 持锁,本 worker 让位
+        try:
+            await _recover_running_items(sweep_id)
+            loop:
+                done = await _pump_one_item(...)        # 每 item 独立短 txn
+                if done: return
+        finally:
+            unlocked = pg_advisory_unlock(k1, k2)
+            assert unlocked is True                    # 永不 silent 丢失锁;否则 RuntimeError
+```
+
+`_advisory_key_parts` 高位重解释为 signed int4,允许任意 sweep UUID 落在 Postgres advisory int4 区间。
+
+Recovery（`_recover_running_items`）入口开自己的短 session,实现委派 `_recover_running_items_in_session`,供测试以外层 `db_session` 驱动（避免写落到 rollback-root 之外）。逻辑:
+
+- `running + 无 JudgeResult` → CAS requeue 到 `queued`
+- `running + 已有 JudgeResult` → CAS 直 `completed`（无 Provider 调用） + `_apply_pair_deltas`
+
+Pair 计数（Commit 3.1 修订,Commit 3.2 未改）：
+
+- `completed_pair` 仅在 **第二** 个 required Item terminal 时 +1
+- `position_pair` 仅在两个 sibling 均 `completed` 且均有 `judge_result_id` 时 +1
+- `failed` / `cancelled` sibling 不计 `position_pair`
+
+`run_pairwise_judge` 已加 idempotency guard:replay 同一 `judge_run_id` 时先查 `get_pair_by_hash` + `get_judge_result`,命中即返回已存 (pair, result),避开 UNIQUE(`judge_run_id`) IntegrityError。
+
+### 8.7 正式人工校准门禁（仍 BLOCKED）
+
+```
+PR-9 formal human-calibration gate = BLOCKED
+calibration_status                  = insufficient
+usage_mode                          = diagnostic_only
+valid_human_pair_count              = 0 / 100
+position_metric_sample_count        = 0 / 100
+```
+
+**非硬编码**:`compute_calibration_status` 真实数据驱动,只待真实数据。`insufficient` 是 `valid_human_pair_count=0` 的正确推导。
+
+### 8.8 数据集边界（用户冻结,不可混用）
+
+| 数据集 | 用途 | 规模 | 预期 status | 预期 usage_mode |
+|---|---|---|---|---|
+| `pairwise-calibration-v0-dev-smoke` | smoke 工程端到端验证 | **20–30** 真 graded Trial pair | 永远 `insufficient` | 永远 `diagnostic_only` |
+| `pairwise-calibration-v1` | 正式 Calibration Gate | ≥100 valid 人工 pair | 根据 agreement / position_bias 推导 | passing 时 `gate_eligible` |
+
+**Smoke 不扩成 100,不借用为正式 v1**。一个有效人工 pair = 双 primary consensus 或 双 primary disagreement + 第三人 adjudication;100 pair 至少 ~200 次 primary annotation 加分歧的 adjudication。
+
+### 8.9 下一会话任务（不进 PR-10,不混用数据集）
+
+```
+阶段 A  导出真实 v0-dev-smoke Dataset（20–30 真 graded Trial pair,human label null）
+        端到端验证：冻结 → sweep → original/swapped Judge → GET review-surface →
+                  POST annotations（必带 review_token）→ 双人共识 / adjudication →
+                  POST /pairwise/calibration
+        预期：calibration_status=insufficient, usage_mode=diagnostic_only
+
+阶段 B  pairwise-calibration-v1:≥100 valid 人工 pair
+        valid_human_pair_count ≥ 100 且 position_metric_sample_count ≥ 100
+
+阶段 C  冻结 v1 校准报告
+        agreement ≥ 0.70 且 position_bias ≤ 0.15 → passing / gate_eligible → close PR-9
+        否则 failing / diagnostic_only → 不调阈值,定位 prompt/rubric/model/position 问题重版本化
+
+阶段 D  PR-10:CI / Developer Trace / Production Backtest / Bad Case 回流 / Online Eval
+```
+
+### 8.10 命令样例（下一会话复用）
+
+```bash
+cd "/Users/huanqi/Accompany Project/career-planning-buddy-ly"
+git checkout feat/eval
+git pull
+git rev-parse HEAD   # 期望 0122bbc...
+git status --short   # 期望空
+
+# Pre-test mask .env（沿 PR-1 起,Settings Literal coercion 限制）
+cp .env .env.backup
+sed -i.bak 's/^AGENT_FEATURE_STAGE=/#AGENT_FEATURE_STAGE=/; s/^AGENT_MAX_TOOL_ROUNDS=/#AGENT_MAX_TOOL_ROUNDS=/' .env
+
+cd backend && /opt/anaconda3/envs/cp/bin/python -m pytest tests/ -q
+/opt/anaconda3/envs/cp/bin/python -m ruff check app/ evals/ tests/
+/opt/anaconda3/envs/cp/bin/python -m mypy app/ evals/ tests/
+PYTHONPATH=. /opt/anaconda3/envs/cp/bin/python scripts/generate_openapi.py
+/opt/anaconda3/envs/cp/bin/python -m pytest tests/test_openapi_snapshot.py -q
+
+cd .. && mv .env.backup .env && rm -f .env.bak
+```
+
+---
+
 END
