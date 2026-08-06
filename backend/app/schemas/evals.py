@@ -204,6 +204,17 @@ class PairwiseAnnotationSubmitRequest(StrictModel):
     ]
     rationale: str | None = None
     is_adjudication: bool = False
+    review_token: str | None = Field(
+        default=None,
+        description=(
+            "Optional tamper-protection token returned by the GET "
+            "review-surface endpoint. The server re-derives it from "
+            "(pair_id, reviewer_id, frozen_review_surface_sha256) and "
+            "rejects on mismatch (422). May be omitted for backward-"
+            "compatibility with existing callers that did not first "
+            "fetch the surface."
+        ),
+    )
 
 
 class PairwiseAnnotationResponse(StrictModel):
@@ -243,6 +254,44 @@ class PairwiseAnnotationListResponse(StrictModel):
     annotations: list[PairwiseAnnotationResponse]
     has_adjudication: bool
     pair_consensus_status: str
+
+
+# ----------------------------------------------------- review-surface (3.1)
+
+
+class PairwiseReviewSurfaceResponse(StrictModel):
+    """Server-rendered blinded Review Surface returned by
+    ``GET /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface``.
+
+    Reviewer-authoritative fields EXCLUDED by design (issue #4):
+
+    * ``pair_hash`` — would let the reviewer correlate repeated surfaces
+      or guess at sibling identity;
+    * ``display_*_trial_id`` / baseline_or_candidate role markers —
+      reveals which side is which;
+    * model / provider identity, run cost / latency, automatic scores;
+    * ``suggested_label`` or any Judge hint.
+
+    What the reviewer DOES see: ``display_a`` / ``display_b`` (request +
+    plan projections), the deterministic ``position_variant`` they were
+    assigned, the rubric they should apply, and a non-secret
+    ``review_token`` that ties a subsequent POST annotation back to this
+    exact surface (``sha256(pair_id | reviewer_id |
+    frozen_review_surface_sha256)[:16]``).
+    """
+
+    pair_id: UUID
+    sweep_id: UUID
+    case_id: str
+    review_surface_version: str
+    annotation_schema_version: str
+    rubric_version: str
+    position_variant: Literal["baseline", "swapped"]
+    rubric: list[dict[str, object]]
+    display_a: dict[str, object]
+    display_b: dict[str, object]
+    frozen_review_surface_sha256: str
+    review_token: str
 
 
 # ---------------------------------------------------------------- calibration

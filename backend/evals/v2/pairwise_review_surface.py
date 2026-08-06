@@ -251,6 +251,30 @@ def serialize_surface_json(surface: FrozenReviewSurface) -> str:
     )
 
 
+def derive_review_token(
+    *,
+    pair_id: UUID | str,
+    reviewer_id: str,
+    frozen_review_surface_sha256: str,
+) -> str:
+    """Non-secret tamper-protection token linking a POST annotation back
+    to the GET review-surface the reviewer was shown.
+
+    NOT a cryptographic MAC — there is no server secret in the mix. Its
+    purpose is purely to detect that the reviewer is submitting against
+    a DIFFERENT surface than the one they fetched (e.g. they switched
+    reviewers, the rubric version bumped under them, or they tried to
+    submit a stale token from a prior sweep). The server re-derives it
+    and rejects on mismatch.
+
+    16 hex chars (8 bytes) is enough collision-resistance for the
+    failure mode (an honest reviewer cannot accidentally forge it).
+    """
+
+    seed = f"review-token/v1/{pair_id}/{reviewer_id}/{frozen_review_surface_sha256}"
+    return sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
 # A trivial sanity-check type to keep the literal vocabulary closed in
 # callers that import from here. Mirrors evals.v2.judge.BaselineCandidateLabel
 # defined in calibration_metrics.py to avoid a circular import.
@@ -296,9 +320,12 @@ __all__ = [
     "REVIEW_SURFACE_VERSION",
     "BaselineCandidateLabel",
     "FrozenReviewSurface",
+    "ReviewSurfaceFrozenInput",
     "SurfaceAllowedKinds",
     "build_frozen_review_surface",
+    "build_frozen_review_surface_for_pair_row",
     "derive_position_variant",
+    "derive_review_token",
     "normalize_raw_dimensions",
     "normalize_raw_to_baseline_candidate",
     "render_payload_dict",

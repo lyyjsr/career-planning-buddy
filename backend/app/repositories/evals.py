@@ -276,6 +276,41 @@ class EvalRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_judge_result_by_run(
+        self, judge_run_id: UUID
+    ) -> EvalPairwiseJudgeResult | None:
+        """Look up a JudgeResult by its deterministic ``judge_run_id``
+        alone (no pair scope). Used by the Executor's recovery path,
+        where we have the SweepItem's ``judge_run_id`` but not the
+        Pair id (the SweepItem's ``pair_id`` is the FK to the Pair
+        row, but the Result row's ``pair_id`` may match either the
+        SweepItem's Pair or its sibling's — both Items of a Pair share
+        the same Pair row, so their Results carry that same pair_id;
+        nonetheless the recovery path prefers to resolve Result-Pair
+        coupling via the globally-unique ``judge_run_id``).
+        """
+
+        result = await self._session.execute(
+            select(EvalPairwiseJudgeResult).where(
+                EvalPairwiseJudgeResult.judge_run_id == judge_run_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_judge_result_by_id(
+        self, result_id: UUID
+    ) -> EvalPairwiseJudgeResult | None:
+        """Look up a JudgeResult by its primary key — primarily a test
+        convenience so a caller that has an opaque ``judge_result_id``
+        FK can fetch the row's ``judge_run_id`` for further joins."""
+
+        result = await self._session.execute(
+            select(EvalPairwiseJudgeResult).where(
+                EvalPairwiseJudgeResult.id == result_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_judge_results_by_pair(
         self, pair_id: UUID
     ) -> list[EvalPairwiseJudgeResult]:
@@ -526,6 +561,32 @@ class EvalRepository:
             .where(
                 EvalPairwiseSweepItem.sweep_id == sweep_id,
                 EvalPairwiseSweepItem.status.in_(("queued", "running")),
+            )
+            .order_by(
+                EvalPairwiseSweepItem.pair_hash,
+                EvalPairwiseSweepItem.position_variant,
+            )
+        )
+        return list(result.scalars())
+
+    async def list_running_sweep_items(
+        self, sweep_id: UUID
+    ) -> list[EvalPairwiseSweepItem]:
+        """Items currently in ``running`` state — the subset that
+        ``_recover_running_items`` MUST reconcile on process restart.
+
+        Distinct from ``list_recoverable_sweep_items`` which also
+        includes ``queued`` (and is what the executor's main pump
+        consumes). The recovery path specifically needs the orphaned
+        ``running`` Items because ``_claim_one_item`` only picks up
+        ``queued`` — without reconciliation these would stall the Sweep.
+        """
+
+        result = await self._session.execute(
+            select(EvalPairwiseSweepItem)
+            .where(
+                EvalPairwiseSweepItem.sweep_id == sweep_id,
+                EvalPairwiseSweepItem.status == "running",
             )
             .order_by(
                 EvalPairwiseSweepItem.pair_hash,

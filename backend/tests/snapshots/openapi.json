@@ -2347,6 +2347,18 @@
             "title": "Raw Winner",
             "type": "string"
           },
+          "review_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional tamper-protection token returned by the GET review-surface endpoint. The server re-derives it from (pair_id, reviewer_id, frozen_review_surface_sha256) and rejects on mismatch (422). May be omitted for backward-compatibility with existing callers that did not first fetch the surface.",
+            "title": "Review Token"
+          },
           "sweep_id": {
             "format": "uuid",
             "title": "Sweep Id",
@@ -2527,6 +2539,88 @@
           "status"
         ],
         "title": "PairwiseCalibrationReportResponse",
+        "type": "object"
+      },
+      "PairwiseReviewSurfaceResponse": {
+        "additionalProperties": false,
+        "description": "Server-rendered blinded Review Surface returned by\n``GET /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface``.\n\nReviewer-authoritative fields EXCLUDED by design (issue #4):\n\n* ``pair_hash`` — would let the reviewer correlate repeated surfaces\n  or guess at sibling identity;\n* ``display_*_trial_id`` / baseline_or_candidate role markers —\n  reveals which side is which;\n* model / provider identity, run cost / latency, automatic scores;\n* ``suggested_label`` or any Judge hint.\n\nWhat the reviewer DOES see: ``display_a`` / ``display_b`` (request +\nplan projections), the deterministic ``position_variant`` they were\nassigned, the rubric they should apply, and a non-secret\n``review_token`` that ties a subsequent POST annotation back to this\nexact surface (``sha256(pair_id | reviewer_id |\nfrozen_review_surface_sha256)[:16]``).",
+        "properties": {
+          "annotation_schema_version": {
+            "title": "Annotation Schema Version",
+            "type": "string"
+          },
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "display_a": {
+            "additionalProperties": true,
+            "title": "Display A",
+            "type": "object"
+          },
+          "display_b": {
+            "additionalProperties": true,
+            "title": "Display B",
+            "type": "object"
+          },
+          "frozen_review_surface_sha256": {
+            "title": "Frozen Review Surface Sha256",
+            "type": "string"
+          },
+          "pair_id": {
+            "format": "uuid",
+            "title": "Pair Id",
+            "type": "string"
+          },
+          "position_variant": {
+            "enum": [
+              "baseline",
+              "swapped"
+            ],
+            "title": "Position Variant",
+            "type": "string"
+          },
+          "review_surface_version": {
+            "title": "Review Surface Version",
+            "type": "string"
+          },
+          "review_token": {
+            "title": "Review Token",
+            "type": "string"
+          },
+          "rubric": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rubric",
+            "type": "array"
+          },
+          "rubric_version": {
+            "title": "Rubric Version",
+            "type": "string"
+          },
+          "sweep_id": {
+            "format": "uuid",
+            "title": "Sweep Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pair_id",
+          "sweep_id",
+          "case_id",
+          "review_surface_version",
+          "annotation_schema_version",
+          "rubric_version",
+          "position_variant",
+          "rubric",
+          "display_a",
+          "display_b",
+          "frozen_review_surface_sha256",
+          "review_token"
+        ],
+        "title": "PairwiseReviewSurfaceResponse",
         "type": "object"
       },
       "PairwiseRunCancelResponse": {
@@ -5432,6 +5526,115 @@
           }
         ],
         "summary": "List Pairwise Annotations",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface": {
+      "get": {
+        "description": "Return the server-rendered, blinded Review Surface for one Pair\nunder a given Sweep, for the authenticated reviewer.\n\nIssue #4 closes the reviewer workflow gap. Without this endpoint a\nreviewer could POST an annotation but had no way to discover the\nserver-chosen A/B ordering, the rubric, or any tamper-proof binding\nback to their reviewer identity.\n\nWhat this endpoint returns (deliberately minimal):\n\n* ``display_a`` / ``display_b`` — request + plan projections only,\n  positioned per ``position_variant`` (itself derived from\n  ``(pair_hash, reviewer_id, rubric_version,\n  annotation_schema_version)``);\n* ``position_variant``, ``review_surface_version``,\n  ``annotation_schema_version``, ``rubric_version`` — provenance;\n* ``rubric`` — empty by default in PR-9c.2 (no rubric catalog yet)\n  but the field is reserved;\n* ``frozen_review_surface_sha256`` — same value that the POST\n  ``/runs/pairwise/annotations`` endpoint re-derives server-side so\n  a re-submit hits the idempotent path;\n* ``review_token`` — short non-secret token that the reviewer may\n  echo back on POST. The server re-derives it; mismatch ⇒ 422.\n\nWhat it does NOT return: pair_hash, trial ids, baseline/candidate\nrole markers, model/provider identity, automatic scores, suggested\nlabels or judge hints, run cost / latency.",
+        "operationId": "get_pairwise_review_surface_api_v1_eval_runs_pairwise_pairs__pair_id__review_surface_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pair_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pair Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sweep_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Sweep Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseReviewSurfaceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pairwise Review Surface",
         "tags": [
           "pairwise-calibration"
         ]

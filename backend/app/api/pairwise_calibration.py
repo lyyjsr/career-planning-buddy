@@ -1,16 +1,17 @@
 """PR-9c.2 Pairwise Calibration HTTP control plane.
 
-Nine endpoints under ``/api/v1/eval`` (separate router, not nested under
+Ten endpoints under ``/api/v1/eval`` (separate router, not nested under
 ``/eval/runs/{id}`` because calibration is cross-experiment). All require
 ``require_dev`` (same as the rest of the eval control plane) and pull
 ``reviewer_id`` from JWT subject — never from the request body
-(supplementary constraint #6).
+(supplementary constraint #6 + Commit 3.1 issue #4 review-token binding).
 
 Endpoints:
 
 * POST /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run
 * GET  /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}
 * POST /api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}/cancel
+* GET  /api/v1/eval/runs/pairwise/pairs/{pair_id}/review-surface?sweep_id=...    (3.1)
 * POST /api/v1/eval/runs/pairwise/annotations
 * GET  /api/v1/eval/runs/pairwise/annotations/{pair_id}
 * GET  /api/v1/eval/runs/pairwise/annotations?sweep_id=...
@@ -48,6 +49,7 @@ from app.schemas.evals import (
     PairwiseAnnotationSubmitResponse,
     PairwiseCalibrationReportRequest,
     PairwiseCalibrationReportResponse,
+    PairwiseReviewSurfaceResponse,
     PairwiseRunCancelResponse,
     PairwiseRunRequest,
     PairwiseRunStatusResponse,
@@ -288,6 +290,130 @@ async def cancel_pairwise_run(
 
 
 # ===========================================================================
+# Review surface (Commit 3.1 — issue #4)
+# ===========================================================================
+
+
+@router.get(
+    "/runs/pairwise/pairs/{pair_id}/review-surface",
+    response_model=PairwiseReviewSurfaceResponse,
+    responses=_ERROR_RESPONSES,
+)
+async def get_pairwise_review_surface(
+    pair_id: UUID,
+    sweep_id: UUID,
+    reviewer: Annotated[AuthenticatedUser, Depends(require_dev)],
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+) -> PairwiseReviewSurfaceResponse:
+    """Return the server-rendered, blinded Review Surface for one Pair
+    under a given Sweep, for the authenticated reviewer.
+
+    Issue #4 closes the reviewer workflow gap. Without this endpoint a
+    reviewer could POST an annotation but had no way to discover the
+    server-chosen A/B ordering, the rubric, or any tamper-proof binding
+    back to their reviewer identity.
+
+    What this endpoint returns (deliberately minimal):
+
+    * ``display_a`` / ``display_b`` — request + plan projections only,
+      positioned per ``position_variant`` (itself derived from
+      ``(pair_hash, reviewer_id, rubric_version,
+      annotation_schema_version)``);
+    * ``position_variant``, ``review_surface_version``,
+      ``annotation_schema_version``, ``rubric_version`` — provenance;
+    * ``rubric`` — empty by default in PR-9c.2 (no rubric catalog yet)
+      but the field is reserved;
+    * ``frozen_review_surface_sha256`` — same value that the POST
+      ``/runs/pairwise/annotations`` endpoint re-derives server-side so
+      a re-submit hits the idempotent path;
+    * ``review_token`` — short non-secret token that the reviewer may
+      echo back on POST. The server re-derives it; mismatch ⇒ 422.
+
+    What it does NOT return: pair_hash, trial ids, baseline/candidate
+    role markers, model/provider identity, automatic scores, suggested
+    labels or judge hints, run cost / latency."""
+
+    repo = EvalRepository(session)
+    pair_row = await repo.get_pair(pair_id)
+    if pair_row is None:
+        raise AppError(
+            code="EVAL_PAIR_NOT_FOUND",
+            message="pair not found",
+            status_code=HTTPStatus.NOT_FOUND,
+        )
+    sweep = await repo.get_sweep(sweep_id)
+    if sweep is None:
+        raise AppError(
+            code="EVAL_SWEEP_NOT_FOUND",
+            message="sweep not found",
+            status_code=HTTPStatus.NOT_FOUND,
+        )
+
+    from uuid import UUID as _UUID
+
+    from evals.v2.pairwise import (
+        JUDGE_ALLOWED_KINDS,
+        TrialEvidenceProjection,
+    )
+    from evals.v2.pairwise import Pair as _PairDomain  # noqa: F401
+    from evals.v2.pairwise_review_surface import (
+        build_frozen_review_surface,
+        derive_review_token,
+    )
+
+    pair_domain = _PairDomain(
+        baseline_trial_id=(
+            pair_row.baseline_trial_id
+            if isinstance(pair_row.baseline_trial_id, _UUID)
+            else _UUID(str(pair_row.baseline_trial_id))
+        ),
+        candidate_trial_id=(
+            pair_row.candidate_trial_id
+            if isinstance(pair_row.candidate_trial_id, _UUID)
+            else _UUID(str(pair_row.candidate_trial_id))
+        ),
+        case_id=pair_row.case_id,
+        baseline_projection=TrialEvidenceProjection(
+            request_constraints=None, plan_projection=None
+        ),
+        candidate_projection=TrialEvidenceProjection(
+            request_constraints=None, plan_projection=None
+        ),
+    )
+    surface = build_frozen_review_surface(
+        pair=pair_domain,
+        reviewer_id=str(reviewer.id),
+        rubric=[],
+        rubric_version=sweep.judge_rubric_version,
+        annotation_schema_version=sweep.annotation_schema_version,
+    )
+    # Allowed-evidence-kinds is a frozen set of strings; not part of the
+    # response payload but documents the surface's evidence scope.
+    assert surface.allowed_evidence_kinds == frozenset(
+        kind.value for kind in JUDGE_ALLOWED_KINDS
+    )
+    review_token = derive_review_token(
+        pair_id=pair_id,
+        reviewer_id=str(reviewer.id),
+        frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+    )
+    return PairwiseReviewSurfaceResponse(
+        pair_id=pair_id,
+        sweep_id=sweep_id,
+        case_id=surface.case_id,
+        review_surface_version=surface.review_surface_version,
+        annotation_schema_version=sweep.annotation_schema_version,
+        rubric_version=surface.rubric_version,
+        position_variant=surface.position_variant.value,
+        rubric=list(surface.rubric),
+        display_a=surface.display_a,
+        display_b=surface.display_b,
+        frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+        review_token=review_token,
+    )
+
+
+# ===========================================================================
 # Annotation control plane
 # ===========================================================================
 
@@ -370,6 +496,30 @@ async def submit_annotation(
         annotation_schema_version=sweep.annotation_schema_version,
         rubric=[],
     )
+
+    # Issue #4 / Commit 3.1: tamper-protection via review_token. If the
+    # caller supplied one (i.e. they first fetched the GET review-surface
+    # endpoint as the workflow requires), re-derive and reject on mismatch.
+    # The mismatch signals that they are submitting against a different
+    # surface than the one they were shown (different reviewer, stale
+    # rubric version, or a deliberate forgery attempt).
+    if body.review_token is not None:
+        from evals.v2.pairwise_review_surface import derive_review_token
+
+        expected = derive_review_token(
+            pair_id=body.pair_id,
+            reviewer_id=str(reviewer.id),
+            frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
+        )
+        if body.review_token != expected:
+            raise AppError(
+                code="EVAL_REVIEW_TOKEN_MISMATCH",
+                message=(
+                    "review_token does not match the server-derived token "
+                    "for this (pair, reviewer, frozen_review_surface)"
+                ),
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
 
     # Compute normalized verdicts from raw + position variant.
     from evals.v2.pairwise_review_surface import (

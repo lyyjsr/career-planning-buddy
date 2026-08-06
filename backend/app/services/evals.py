@@ -565,18 +565,49 @@ class EvalService:
         Trials have been graded first.
 
         Returns the persisted (pair, result) tuple.
+
+        Idempotency: ``eval_pairwise_judge_results.judge_run_id`` has a
+        UNIQUE constraint and ``EvalPairwiseSweepItem.judge_run_id`` is
+        deterministic (uuid5 over ``sweep|pair_hash|position|model|
+        prompt|rubric``). Crash recovery replays the SAME ``judge_run_id``,
+        which would otherwise hit ``IntegrityError`` on the result INSERT.
+        Guard the replay by looking up an existing row first; if found,
+        return it without invoking the Provider. The Pair row is already
+        idempotent via ``get_or_create_pair``.
         """
 
         async with session_transaction(self._session):
-            baseline_view = await self._build_judge_view(baseline_trial_id)
-            candidate_view = await self._build_judge_view(candidate_trial_id)
-            pair_domain = build_pair(
+            # Idempotency guard: an existing Result for this deterministic
+            # judge_run_id means a prior attempt already succeeded (typical
+            # crash-recovery replay). Return it verbatim; do NOT call the
+            # Provider again — that would either duplicate the result row
+            # (IntegrityError) or burn cost on an already-attributed run.
+            # We need a Pair row first to scope the lookup. Pair rows are
+            # themselves idempotent (UNIQUE pair_hash on content). Build
+            # the domain Pair purely to compute its hash; if the row
+            # already exists we re-use it, otherwise we create it below.
+            baseline_view_probe = await self._build_judge_view(baseline_trial_id)
+            candidate_view_probe = await self._build_judge_view(candidate_trial_id)
+            pair_domain_probe = build_pair(
                 baseline_trial_id=baseline_trial_id,
                 candidate_trial_id=candidate_trial_id,
                 case_id=case_id,
-                baseline_view=baseline_view,
-                candidate_view=candidate_view,
+                baseline_view=baseline_view_probe,
+                candidate_view=candidate_view_probe,
             )
+            existing_pair_row = await self._evals.get_pair_by_hash(
+                pair_domain_probe.pair_hash()
+            )
+            if existing_pair_row is not None:
+                existing_result = await self._evals.get_judge_result(
+                    existing_pair_row.id, judge_run_id
+                )
+                if existing_result is not None:
+                    return existing_pair_row, existing_result
+
+            baseline_view = baseline_view_probe
+            candidate_view = candidate_view_probe
+            pair_domain = pair_domain_probe
             judge_input = build_judge_input(
                 pair=pair_domain,
                 judge_run_id=judge_run_id,
