@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.eval import (
     EvalEvidenceItem,
     EvalExperiment,
+    EvalPairwiseCalibrationReport,
+    EvalPairwiseHumanAnnotation,
     EvalPairwiseJudgeResult,
+    EvalPairwiseSweep,
+    EvalPairwiseSweepItem,
     EvalScore,
     EvalTrial,
     EvalTrialPair,
@@ -308,3 +312,451 @@ class EvalRepository:
             for pair, judge_result in result.all()
         ]
 
+
+    # ====================================================================
+    # PR-9c.2 Calibration workflow repository
+    # ====================================================================
+    #
+    # Grouped by domain (per Plan v2 execution order):
+    #   1) Sweep lifecycle — create / get / list / mark terminal / cancel
+    #   2) SweepItem materialize / claim / recovery work list
+    #   3) Annotation queries / inserts (idempotent, no ON CONFLICT)
+    #   4) Pair locking for primary/adjudication serial decisions
+    #   5) Calibration report snapshot
+    #
+    # Business invariants (third-primary rejection, adjudicator-third-person
+    # check, vector disagreement, input_hash integrity) live in the Service
+    # layer. The Repository issues only DB actions. The Service issues
+    # SELECT FOR UPDATE on the Pair row via ``lock_pair_for_update``.
+    # --------------------------------------------------------------------
+
+    # ----- 1) Sweep lifecycle ------------------------------------------
+
+    async def create_sweep(self, sweep: EvalPairwiseSweep) -> EvalPairwiseSweep:
+        self._session.add(sweep)
+        await self._session.flush()
+        return sweep
+
+    async def get_sweep(self, sweep_id: UUID) -> EvalPairwiseSweep | None:
+        result = await self._session.execute(
+            select(EvalPairwiseSweep).where(EvalPairwiseSweep.id == sweep_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_sweep_by_comparison_group(
+        self, comparison_group_id: str
+    ) -> EvalPairwiseSweep | None:
+        result = await self._session.execute(
+            select(EvalPairwiseSweep).where(
+                EvalPairwiseSweep.comparison_group_id == comparison_group_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_sweeps_by_dataset(
+        self, dataset_id: str, dataset_version: str
+    ) -> list[EvalPairwiseSweep]:
+        result = await self._session.execute(
+            select(EvalPairwiseSweep)
+            .where(
+                EvalPairwiseSweep.dataset_id == dataset_id,
+                EvalPairwiseSweep.dataset_version == dataset_version,
+            )
+            .order_by(EvalPairwiseSweep.started_at.desc())
+        )
+        return list(result.scalars())
+
+    async def mark_sweep_running(self, sweep_id: UUID) -> None:
+        """Transition ``queued`` → ``running``. Idempotent if already running."""
+
+        await self._session.execute(
+            update(EvalPairwiseSweep)
+            .where(
+                EvalPairwiseSweep.id == sweep_id,
+                EvalPairwiseSweep.status == "queued",
+            )
+            .values(status="running")
+        )
+
+    async def mark_sweep_terminal(
+        self, sweep_id: UUID, *, status: str
+    ) -> None:
+        """Set terminal status + ``terminal_at = now()``.
+
+        Caller (Service) is responsible for choosing ``completed`` vs
+        ``failed``. The cancelled terminal state is reserved for the
+        Executor (Commit 3).
+        """
+
+        if status not in ("completed", "failed"):
+            raise ValueError(f"invalid terminal status: {status!r}")
+        await self._session.execute(
+            update(EvalPairwiseSweep)
+            .where(EvalPairwiseSweep.id == sweep_id)
+            .values(status=status, terminal_at=func.now())
+        )
+
+    async def increment_sweep_completed_run(
+        self, sweep_id: UUID, *, completed_pair: bool, position_pair: bool
+    ) -> None:
+        """Atomically bump ``completed_judge_run_count`` and (conditionally)
+        ``completed_pair_count`` / ``position_pair_count``.
+
+        Uses Postgres ``UPDATE ... SET col = col + 1`` semantics so
+        concurrent Item completions serialize correctly. The Service is
+        responsible for computing ``completed_pair`` and ``position_pair``
+        flags by inspecting the sibling item before invoking this.
+        """
+
+        # Read existing counters under row lock to compute conditional
+        # increments cleanly. We use SELECT ... FOR UPDATE so two
+        # concurrent calls serialize against the same row.
+        result = await self._session.execute(
+            select(EvalPairwiseSweep)
+            .where(EvalPairwiseSweep.id == sweep_id)
+            .with_for_update()
+        )
+        sweep = result.scalar_one_or_none()
+        if sweep is None:
+            raise ValueError(f"sweep {sweep_id} not found")
+        sweep.completed_judge_run_count += 1
+        if completed_pair:
+            sweep.completed_pair_count += 1
+        if position_pair:
+            sweep.position_pair_count += 1
+
+    async def increment_sweep_failed_run(self, sweep_id: UUID) -> None:
+        """Atomically bump ``failed_judge_run_count``."""
+
+        result = await self._session.execute(
+            select(EvalPairwiseSweep)
+            .where(EvalPairwiseSweep.id == sweep_id)
+            .with_for_update()
+        )
+        sweep = result.scalar_one_or_none()
+        if sweep is None:
+            raise ValueError(f"sweep {sweep_id} not found")
+        sweep.failed_judge_run_count += 1
+
+    async def set_sweep_cancel_requested_at(
+        self, sweep_id: UUID, at: datetime
+    ) -> EvalPairwiseSweep | None:
+        """Stage a cancel request by stamping ``cancel_requested_at``.
+
+        Per supplementary constraint #8, this method does NOT touch
+        ``status``. The Executor (Commit 3) cooperatively reads this
+        field, drains in-flight work, then sets ``status='cancelled'`` +
+        ``terminal_at``. Returns the updated row, or ``None`` if the
+        Sweep was not found OR was already in a terminal state (caller
+        treats that as no-op).
+        """
+
+        result = await self._session.execute(
+            select(EvalPairwiseSweep)
+            .where(EvalPairwiseSweep.id == sweep_id)
+            .with_for_update()
+        )
+        sweep = result.scalar_one_or_none()
+        if sweep is None:
+            return None
+        if sweep.terminal_at is not None:
+            # Already terminal — idempotent no-op (cancel_requested stays
+            # whatever the previous caller set it to).
+            return sweep
+        if sweep.cancel_requested_at is None:
+            sweep.cancel_requested_at = at
+        return sweep
+
+    # ----- 2) SweepItem materialize / claim / recover ------------------
+
+    async def create_sweep_items(
+        self, items: list[EvalPairwiseSweepItem]
+    ) -> list[EvalPairwiseSweepItem]:
+        """Bulk-insert frozen SweepItem rows.
+
+        Items MUST arrive pre-keyed with their deterministic
+        ``judge_run_id`` (Service.compute_deterministic_judge_run_id).
+        ``UNIQUE(sweep_id, pair_id, position_variant)`` +
+        ``UNIQUE(judge_run_id)`` ensure a crashed Sweep's retry reuses
+        the SAME rows instead of allocating new ids.
+        """
+
+        if not items:
+            return []
+        self._session.add_all(items)
+        await self._session.flush()
+        return items
+
+    async def get_sweep_item(
+        self, sweep_id: UUID, pair_id: UUID, position_variant: str
+    ) -> EvalPairwiseSweepItem | None:
+        result = await self._session.execute(
+            select(EvalPairwiseSweepItem).where(
+                EvalPairwiseSweepItem.sweep_id == sweep_id,
+                EvalPairwiseSweepItem.pair_id == pair_id,
+                EvalPairwiseSweepItem.position_variant == position_variant,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_sweep_items(self, sweep_id: UUID) -> list[EvalPairwiseSweepItem]:
+        result = await self._session.execute(
+            select(EvalPairwiseSweepItem)
+            .where(EvalPairwiseSweepItem.sweep_id == sweep_id)
+            .order_by(
+                EvalPairwiseSweepItem.pair_hash,
+                EvalPairwiseSweepItem.position_variant,
+            )
+        )
+        return list(result.scalars())
+
+    async def list_recoverable_sweep_items(
+        self, sweep_id: UUID
+    ) -> list[EvalPairwiseSweepItem]:
+        """The recovery work list: items that are queued or running.
+
+        Per supplementary constraint #3, recovery NEVER re-runs the
+        Sampler. It only consumes already-frozen SweepItem rows. Items
+        that reached ``completed`` / ``failed`` / ``cancelled`` are
+        skipped — they are already attributable to their judge_run_id.
+        """
+
+        result = await self._session.execute(
+            select(EvalPairwiseSweepItem)
+            .where(
+                EvalPairwiseSweepItem.sweep_id == sweep_id,
+                EvalPairwiseSweepItem.status.in_(("queued", "running")),
+            )
+            .order_by(
+                EvalPairwiseSweepItem.pair_hash,
+                EvalPairwiseSweepItem.position_variant,
+            )
+        )
+        return list(result.scalars())
+
+    async def mark_sweep_item_completed(
+        self,
+        item_id: UUID,
+        *,
+        judge_result_id: UUID,
+    ) -> bool:
+        """Flip a SweepItem to terminal ``completed``.
+
+        Returns ``True`` iff the row transitioned from
+        ``('queued','running') → 'completed'`` this call. Returns
+        ``False`` if the Item was already terminal (the caller MUST NOT
+        bump Sweep counters when ``False`` is returned — otherwise
+        double counting).
+
+        Per supplementary constraint #3: ``completed`` Items MUST carry
+        a ``judge_result_id`` — a Judge Run that produced
+        ``invalid_structured_output`` still has a row in
+        ``eval_pairwise_judge_results`` and is associated here. The caller
+        may not pass ``judge_result_id=None``; this is enforced by the
+        type signature (no Optional).
+        """
+
+        result = await self._session.execute(
+            update(EvalPairwiseSweepItem)
+            .where(
+                EvalPairwiseSweepItem.id == item_id,
+                EvalPairwiseSweepItem.status.in_(("queued", "running")),
+            )
+            .values(
+                status="completed",
+                judge_result_id=judge_result_id,
+                terminal_at=func.now(),
+            )
+            .returning(EvalPairwiseSweepItem.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def mark_sweep_item_failed(
+        self,
+        item_id: UUID,
+        *,
+        error_code: str,
+    ) -> bool:
+        """Flip a SweepItem to terminal ``failed``.
+
+        Returns ``True`` iff a transition happened; ``False`` if the Item
+        was already terminal (callers MUST NOT bump counters on
+        ``False``). ``failed`` is reserved for control-plane failures —
+        a Judge Run that returned ``invalid_structured_output`` still
+        has an ``eval_pairwise_judge_results`` row, so the Item is
+        ``completed`` with that result, NOT ``failed``.
+        """
+
+        result = await self._session.execute(
+            update(EvalPairwiseSweepItem)
+            .where(
+                EvalPairwiseSweepItem.id == item_id,
+                EvalPairwiseSweepItem.status.in_(("queued", "running")),
+            )
+            .values(
+                status="failed",
+                error_code=error_code,
+                terminal_at=func.now(),
+            )
+            .returning(EvalPairwiseSweepItem.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    # ----- 3) Annotation queries / inserts ----------------------------
+
+    async def lock_pair_for_update(
+        self, pair_id: UUID
+    ) -> EvalTrialPair | None:
+        """``SELECT pair row FOR UPDATE`` — primary call path for
+        serial primary/adjudication decisions in the Service layer.
+
+        Acquiring a row-level lock on the Pair serializes any concurrent
+        annotation submissions against the same Pair within the same
+        transaction; the Service then reads existing primaries, validates
+        the contract (max-2 primaries, third-person adjudicator, vector
+        disagreement present), and INSERTs under the lock. Two
+        overlapping submissions therefore serialize — the loser sees the
+        winner's INSERT and fails its precondition.
+        """
+
+        result = await self._session.execute(
+            select(EvalTrialPair)
+            .where(EvalTrialPair.id == pair_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def list_annotations_by_pair(
+        self, pair_id: UUID
+    ) -> list[EvalPairwiseHumanAnnotation]:
+        """All annotations (primary + adjudication) for one Pair."""
+
+        result = await self._session.execute(
+            select(EvalPairwiseHumanAnnotation)
+            .where(EvalPairwiseHumanAnnotation.pair_id == pair_id)
+            .order_by(EvalPairwiseHumanAnnotation.created_at)
+        )
+        return list(result.scalars())
+
+    async def list_annotations_by_sweep(
+        self, sweep_id: UUID
+    ) -> list[EvalPairwiseHumanAnnotation]:
+        result = await self._session.execute(
+            select(EvalPairwiseHumanAnnotation)
+            .where(EvalPairwiseHumanAnnotation.sweep_id == sweep_id)
+            .order_by(
+                EvalPairwiseHumanAnnotation.pair_id,
+                EvalPairwiseHumanAnnotation.created_at,
+            )
+        )
+        return list(result.scalars())
+
+    async def find_annotation(
+        self,
+        *,
+        dataset_id: str,
+        pair_id: UUID,
+        reviewer_id: str,
+        review_input_hash: str,
+        is_adjudication: bool | None = None,
+    ) -> EvalPairwiseHumanAnnotation | None:
+        """Exact (dataset, pair, reviewer, review-surface) lookup used
+        by the idempotent annotation submit path.
+
+        ``is_adjudication`` narrows the lookup when the caller wants to
+        find only a primary (``False``) or only an adjudication
+        (``True``) row. This matters when the SAME reviewer could
+        legitimately hold BOTH a primary and an adjudication on the same
+        (pair, surface) pair — but in our contract that is forbidden (an
+        adjudicator MUST be a different reviewer from the primaries),
+        so the role filter is a defensive carve-out for tests rather
+        than a production branch."""
+
+        stmt = select(EvalPairwiseHumanAnnotation).where(
+            EvalPairwiseHumanAnnotation.dataset_id == dataset_id,
+            EvalPairwiseHumanAnnotation.pair_id == pair_id,
+            EvalPairwiseHumanAnnotation.reviewer_id == reviewer_id,
+            EvalPairwiseHumanAnnotation.review_input_hash == review_input_hash,
+        )
+        if is_adjudication is not None:
+            stmt = stmt.where(
+                EvalPairwiseHumanAnnotation.is_adjudication == is_adjudication
+            )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def create_annotation(
+        self, annotation: EvalPairwiseHumanAnnotation
+    ) -> EvalPairwiseHumanAnnotation:
+        """Insert a new annotation. Idempotency / conflict resolution is
+        the Service's responsibility via ``find_annotation`` first."""
+
+        self._session.add(annotation)
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            # UNIQUE(...) violation surfaced to Service as a 409 conflict
+            # or a hard FK failure. Re-raise so the caller can decide.
+            raise exc
+        return annotation
+
+    # ----- 4) Calibration report snapshot ------------------------------
+
+    async def find_calibration_report_by_input_hash(
+        self, input_hash: str
+    ) -> EvalPairwiseCalibrationReport | None:
+        result = await self._session.execute(
+            select(EvalPairwiseCalibrationReport).where(
+                EvalPairwiseCalibrationReport.input_hash == input_hash
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_calibration_report(
+        self, dataset_id: str, dataset_version: str
+    ) -> EvalPairwiseCalibrationReport | None:
+        """Most recently created report for a given dataset identity."""
+
+        result = await self._session.execute(
+            select(EvalPairwiseCalibrationReport)
+            .where(
+                EvalPairwiseCalibrationReport.dataset_id == dataset_id,
+                EvalPairwiseCalibrationReport.dataset_version == dataset_version,
+            )
+            .order_by(EvalPairwiseCalibrationReport.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_calibration_reports(
+        self, dataset_id: str, dataset_version: str
+    ) -> list[EvalPairwiseCalibrationReport]:
+        """History (newest first)."""
+
+        result = await self._session.execute(
+            select(EvalPairwiseCalibrationReport)
+            .where(
+                EvalPairwiseCalibrationReport.dataset_id == dataset_id,
+                EvalPairwiseCalibrationReport.dataset_version == dataset_version,
+            )
+            .order_by(EvalPairwiseCalibrationReport.created_at.desc())
+        )
+        return list(result.scalars())
+
+    async def create_calibration_report(
+        self, report: EvalPairwiseCalibrationReport
+    ) -> EvalPairwiseCalibrationReport:
+        """Insert a new report row. Caller (Service) computes input_hash
+        + content_hash and verifies no content_hash mismatch on an
+        existing input_hash hit beforehand."""
+
+        self._session.add(report)
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            # UNIQUE(input_hash) hit on a race we missed — surface the
+            # integrity violation to the caller; the Service should
+            # re-read and decide whether content_hash matches (idempotent
+            # return) or diverges (integrity error).
+            raise exc
+        return report

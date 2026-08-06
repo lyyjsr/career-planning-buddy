@@ -508,3 +508,509 @@ class EvalPairwiseJudgeResult(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+# ===========================================================================
+# PR-9c.2 Calibration persistence (alembic 20260815_0015).
+#
+# Four tables wrapped around PR-9c.1's two Pair/Judge tables to form the
+# calibration workflow: Sweep control plane, frozen per-(pair, position)
+# SweepItem work units, reviewer Annotations (raw a/b + normalized
+# baseline/candidate), and versioned CalibrationReport snapshots.
+#
+# Key invariants enforced at ORM layer (DDL mirrors these in 0015):
+# - Sweep counters separate pair_count vs judge_run_count.
+# - SweepItem.judge_run_id is the deterministic uuid5 helper output.
+# - Annotation raw_dimension_verdicts vocabulary: a/b/tie/both_unacceptable;
+#   normalized_dimensions vocabulary: baseline/candidate/tie/both_unacceptable.
+#   Stored as 10 explicit per-dim columns (Postgres forbids subqueries in
+#   CHECK, so we cannot enforce JSONB integrity there).
+# - CalibrationReport UNIQUE(input_hash); same input + different content
+#   is an integrity violation, not a hidden second row.
+# - cancel_requested_at is a STAGING FACT, not a terminal status. Only the
+#   SweepExecutor (Commit 3) writes status='cancelled'.
+# ===========================================================================
+
+
+class EvalPairwiseSweep(Base):
+    """Sweep control plane. One row per Judge sweep over a frozen Pair
+    Export JSONL with both original and swapped position variants."""
+
+    __tablename__ = "eval_pairwise_sweeps"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','running','completed','failed','cancelled')",
+            name="ck_eval_pairwise_sweeps_status",
+        ),
+        CheckConstraint(
+            "source_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_sweeps_source_sha",
+        ),
+        CheckConstraint(
+            "requested_pair_count > 0",
+            name="ck_eval_pairwise_sweeps_requested_pair_positive",
+        ),
+        CheckConstraint(
+            "requested_judge_run_count = requested_pair_count * 2",
+            name="ck_eval_pairwise_sweeps_runs_eq_pairs_times_two",
+        ),
+        CheckConstraint(
+            "completed_judge_run_count + failed_judge_run_count "
+            "<= requested_judge_run_count",
+            name="ck_eval_pairwise_sweeps_terminal_le_requested",
+        ),
+        CheckConstraint(
+            "completed_pair_count <= requested_pair_count",
+            name="ck_eval_pairwise_sweeps_pairs_le_requested",
+        ),
+        CheckConstraint(
+            "position_pair_count <= completed_pair_count",
+            name="ck_eval_pairwise_sweeps_position_le_completed_pairs",
+        ),
+        CheckConstraint(
+            "comparison_group_id <> ''",
+            name="ck_eval_pairwise_sweeps_group_nonempty",
+        ),
+        CheckConstraint(
+            "(status = 'cancelled') = (cancel_requested_at IS NOT NULL AND "
+            "terminal_at IS NOT NULL)",
+            name="ck_eval_pairwise_sweeps_cancelled_implies_both_timestamps",
+        ),
+        UniqueConstraint(
+            "comparison_group_id",
+            name="uq_eval_pairwise_sweeps_comparison_group",
+        ),
+        Index("ix_eval_pairwise_sweeps_dataset", "dataset_id", "dataset_version"),
+        Index("ix_eval_pairwise_sweeps_status", "status"),
+        Index(
+            "ix_eval_pairwise_sweeps_experiments",
+            "baseline_experiment_id",
+            "candidate_experiment_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    dataset_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    dataset_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    export_revision: Mapped[str] = mapped_column(String(64), nullable=False)
+    baseline_experiment_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_experiments.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    candidate_experiment_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_experiments.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    judge_model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    judge_prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    annotation_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    comparison_group_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_pair_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_judge_run_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_judge_run_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    failed_judge_run_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    completed_pair_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    position_pair_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    error_summary: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EvalPairwiseSweepItem(Base):
+    """One frozen (pair, position_variant) work unit inside a Sweep.
+
+    The deterministic ``judge_run_id`` (uuid5 of
+    ``sweep_id|pair_hash|position_variant|model|prompt|rubric``) means a
+    crashed Sweep recovers by querying items with status IN
+    (queued, running) and replaying them — the Sampler is NEVER re-run.
+    """
+
+    __tablename__ = "eval_pairwise_sweep_items"
+    __table_args__ = (
+        CheckConstraint(
+            "position_variant IN ('baseline','swapped')",
+            name="ck_eval_pairwise_sweep_items_position",
+        ),
+        CheckConstraint(
+            "status IN ('queued','running','completed','failed','cancelled')",
+            name="ck_eval_pairwise_sweep_items_status",
+        ),
+        CheckConstraint(
+            "pair_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_sweep_items_pair_hash",
+        ),
+        CheckConstraint(
+            "baseline_output_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_sweep_items_baseline_sha",
+        ),
+        CheckConstraint(
+            "candidate_output_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_sweep_items_candidate_sha",
+        ),
+        CheckConstraint(
+            "frozen_review_surface_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_sweep_items_review_surface_sha",
+        ),
+        CheckConstraint(
+            "(position_variant = 'baseline' AND "
+            "display_a_trial_id = baseline_trial_id AND "
+            "display_b_trial_id = candidate_trial_id) OR "
+            "(position_variant = 'swapped' AND "
+            "display_a_trial_id = candidate_trial_id AND "
+            "display_b_trial_id = baseline_trial_id)",
+            name="ck_eval_pairwise_sweep_items_position_consistency",
+        ),
+        CheckConstraint(
+            "(status IN ('completed','failed','cancelled')) = "
+            "(terminal_at IS NOT NULL)",
+            name="ck_eval_pairwise_sweep_items_terminal_status",
+        ),
+        CheckConstraint(
+            "(status = 'completed') = (judge_result_id IS NOT NULL)",
+            name="ck_eval_pairwise_sweep_items_completed_requires_result",
+        ),
+        UniqueConstraint(
+            "sweep_id",
+            "pair_id",
+            "position_variant",
+            name="uq_eval_pairwise_sweep_items_sweep_pair_pos",
+        ),
+        UniqueConstraint(
+            "judge_run_id",
+            name="uq_eval_pairwise_sweep_items_judge_run_id",
+        ),
+        Index(
+            "ix_eval_pairwise_sweep_items_sweep_status", "sweep_id", "status"
+        ),
+        Index(
+            "ix_eval_pairwise_sweep_items_pair_pos", "pair_id", "position_variant"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    sweep_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_pairwise_sweeps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    pair_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trial_pairs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    position_variant: Mapped[str] = mapped_column(String(16), nullable=False)
+    case_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    pair_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    baseline_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    candidate_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    baseline_output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_a_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    display_b_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    frozen_review_surface_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    judge_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_result_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_pairwise_judge_results.id", ondelete="SET NULL"),
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# The five canonical dimensions stored as explicit columns on
+# EvalPairwiseHumanAnnotation (Postgres forbids subqueries in CHECK; explicit
+# columns give us CHECK-level guarantees without JSONB integrity gymnastics).
+_EVAL_PAIRWISE_DIMENSIONS: tuple[str, ...] = (
+    "actionability",
+    "alignment",
+    "personalization",
+    "clarity",
+    "consistency",
+)
+
+
+class EvalPairwiseHumanAnnotation(Base):
+    """One reviewer annotation (primary or adjudication) for one Pair.
+
+    The reviewer's raw verdict uses position vocabulary (``a``/``b``) — the
+    reviewer only ever sees display_a vs display_b. The normalized verdict
+    is baseline-relative (``baseline``/``candidate``) and is derived from the
+    raw verdict + the deterministic ``position_variant`` of the frozen
+    review surface the reviewer was shown.
+
+    Five dimensions are stored as 10 explicit columns (raw_dim_* and
+    norm_dim_*). Use ``EvalPairwiseHumanAnnotationHelper`` to (de)serialize
+    between dict and column views.
+    """
+
+    __tablename__ = "eval_pairwise_human_annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "reviewer_role IN ('primary','adjudicator')",
+            name="ck_eval_pairwise_ann_role",
+        ),
+        CheckConstraint(
+            "(reviewer_role = 'adjudicator') = is_adjudication",
+            name="ck_eval_pairwise_ann_role_adjudication_eq",
+        ),
+        CheckConstraint(
+            "position_variant IN ('baseline','swapped')",
+            name="ck_eval_pairwise_ann_position",
+        ),
+        CheckConstraint(
+            "raw_winner IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_winner",
+        ),
+        CheckConstraint(
+            "normalized_winner IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_normalized_winner",
+        ),
+        CheckConstraint(
+            "raw_dim_actionability IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_actionability",
+        ),
+        CheckConstraint(
+            "raw_dim_alignment IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_alignment",
+        ),
+        CheckConstraint(
+            "raw_dim_personalization IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_personalization",
+        ),
+        CheckConstraint(
+            "raw_dim_clarity IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_clarity",
+        ),
+        CheckConstraint(
+            "raw_dim_consistency IN ('a','b','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_raw_consistency",
+        ),
+        CheckConstraint(
+            "norm_dim_actionability IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_norm_actionability",
+        ),
+        CheckConstraint(
+            "norm_dim_alignment IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_norm_alignment",
+        ),
+        CheckConstraint(
+            "norm_dim_personalization IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_norm_personalization",
+        ),
+        CheckConstraint(
+            "norm_dim_clarity IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_norm_clarity",
+        ),
+        CheckConstraint(
+            "norm_dim_consistency IN "
+            "('baseline','candidate','tie','both_unacceptable')",
+            name="ck_eval_pairwise_ann_norm_consistency",
+        ),
+        CheckConstraint(
+            "review_input_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_ann_review_input_sha",
+        ),
+        CheckConstraint(
+            "submission_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_ann_submission_sha",
+        ),
+        CheckConstraint(
+            "frozen_review_surface_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_ann_review_surface_sha",
+        ),
+        UniqueConstraint(
+            "dataset_id",
+            "pair_id",
+            "reviewer_id",
+            "review_input_hash",
+            name="uq_eval_pairwise_ann_dataset_pair_reviewer_surface",
+        ),
+        Index("ix_eval_pairwise_ann_pair", "pair_id"),
+        Index("ix_eval_pairwise_ann_sweep", "sweep_id"),
+        Index("ix_eval_pairwise_ann_reviewer", "reviewer_id"),
+        Index("ix_eval_pairwise_ann_dataset", "dataset_id", "dataset_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    dataset_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    dataset_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    sweep_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_pairwise_sweeps.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    pair_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trial_pairs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    reviewer_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reviewer_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    is_adjudication: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    annotation_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    frozen_review_surface_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    position_variant: Mapped[str] = mapped_column(String(16), nullable=False)
+    display_a_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    display_b_trial_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=False
+    )
+    raw_winner: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_dim_actionability: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_dim_alignment: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_dim_personalization: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_dim_clarity: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_dim_consistency: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_winner: Mapped[str] = mapped_column(String(32), nullable=False)
+    norm_dim_actionability: Mapped[str] = mapped_column(String(32), nullable=False)
+    norm_dim_alignment: Mapped[str] = mapped_column(String(32), nullable=False)
+    norm_dim_personalization: Mapped[str] = mapped_column(String(32), nullable=False)
+    norm_dim_clarity: Mapped[str] = mapped_column(String(32), nullable=False)
+    norm_dim_consistency: Mapped[str] = mapped_column(String(32), nullable=False)
+    review_input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    submission_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    # ---- dict-view helpers (Pydantic boundary) ----
+    #
+    # Service / HTTP code prefers dict views. The 10 explicit columns are
+    # the persistence form; these helpers convert between the two without
+    # going through JSONB. Dimensions are always returned in
+    # ``_EVAL_PAIRWISE_DIMENSIONS`` order.
+
+    def raw_dimension_verdicts(self) -> dict[str, str]:
+        return {
+            dim: getattr(self, f"raw_dim_{dim}")
+            for dim in _EVAL_PAIRWISE_DIMENSIONS
+        }
+
+    def normalized_dimension_verdicts(self) -> dict[str, str]:
+        return {
+            dim: getattr(self, f"norm_dim_{dim}")
+            for dim in _EVAL_PAIRWISE_DIMENSIONS
+        }
+
+
+class EvalPairwiseCalibrationReport(Base):
+    """Versioned calibration report snapshot.
+
+    ``input_hash`` is the report's identity (UNIQUE); same input + different
+    ``content_hash`` is an integrity violation flagged by the Service layer
+    (DB UNIQUE on input_hash prevents a silent second row). Reports are
+    written explicitly via POST ``/pairwise/calibration``; GET endpoints
+    only read existing rows.
+    """
+
+    __tablename__ = "eval_pairwise_calibration_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "source_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_reports_source_sha",
+        ),
+        CheckConstraint(
+            "input_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_reports_input_sha",
+        ),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_eval_pairwise_reports_content_sha",
+        ),
+        CheckConstraint(
+            "dataset_version <> ''",
+            name="ck_eval_pairwise_reports_version_nonempty",
+        ),
+        UniqueConstraint(
+            "input_hash", name="uq_eval_pairwise_reports_input_hash"
+        ),
+        Index(
+            "ix_eval_pairwise_reports_dataset_created",
+            "dataset_id",
+            "dataset_version",
+            "created_at",
+        ),
+        Index("ix_eval_pairwise_reports_judge", "judge_model_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    dataset_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    dataset_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    judge_model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    judge_prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    judge_rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    annotation_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    calibration_policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
