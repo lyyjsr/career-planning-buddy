@@ -71,6 +71,26 @@ class EvalService:
                 message="Eval Trial run_type is invalid",
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             )
+        # PR-9b: refuse execution_mode=live_provider when the global
+        # Settings.llm_provider is still mock — the TrialRunner would
+        # otherwise silently degrade a "live" experiment to mock semantics
+        # and reports would mislabel the run as real-provider.
+        from app.core.config import get_settings as _get_settings
+
+        _settings = _get_settings()
+        if (
+            config.execution_mode == "live_provider"
+            and _settings.llm_provider == "mock"
+        ):
+            raise AppError(
+                code="EVAL_PROVIDER_MODE_INVALID",
+                message=(
+                    "execution_mode=live_provider requires Settings.llm_provider "
+                    "!= 'mock' (got 'mock'). Set LLM_PROVIDER=openai_compatible "
+                    "and the matching LLM_API_KEY/LLM_BASE_URL."
+                ),
+                status_code=HTTPStatus.CONFLICT,
+            )
         frozen_hash = canonical_sha256(config.frozen_config())
         async with session_transaction(self._session):
             if config.baseline_experiment_id is not None:
@@ -338,6 +358,70 @@ class EvalService:
                         status_code=HTTPStatus.CONFLICT,
                     ) from exc
             return results
+
+    async def set_cancel_requested(self, experiment_id: UUID) -> tuple[bool, datetime | None]:
+        """Stamp ``cancel_requested_at`` on a running Experiment.
+
+        Returns ``(requested, cancel_requested_at)``. ``requested=False``
+        means the Experiment is already terminal (completed/failed/
+        cancelled) and the request is a no-op idempotent. ``requested=True``
+        means we just stamped the timestamp (or it was already there).
+        Never promotes the Experiment to ``cancelled`` status — the
+        background executor observes the timestamp and transitions when
+        every in-flight Trial reaches a terminal state.
+        """
+
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        async with session_transaction(self._session):
+            experiment = await self._evals.get_experiment(experiment_id, for_update=True)
+            if experiment is None:
+                raise AppError(
+                    code="EVAL_EXPERIMENT_NOT_FOUND",
+                    message="Eval Experiment was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if experiment.status in {"completed", "failed", "cancelled"}:
+                return False, experiment.cancel_requested_at
+            if experiment.cancel_requested_at is None:
+                experiment.cancel_requested_at = _dt.now(UTC)
+            return True, experiment.cancel_requested_at
+
+    async def regenerate_report(
+        self, experiment_id: UUID, dataset: DatasetBundle
+    ) -> "ExperimentReport":
+        """Pure-aggregate rebuild of the report; no Runtime / Trial side effects.
+
+        Bumps ``report_revision`` only when the computed report content
+        hash changes. Always returns the freshly-built ExperimentReport.
+        """
+
+        from evals.v2.contracts import canonical_sha256 as _canon
+
+        report = await self.build_report(experiment_id, dataset)
+        async with session_transaction(self._session):
+            experiment = await self._evals.get_experiment(
+                experiment_id, for_update=True
+            )
+            if experiment is None:
+                raise AppError(
+                    code="EVAL_EXPERIMENT_NOT_FOUND",
+                    message="Eval Experiment was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            content = report.to_dict()
+            # Content hash excludes revision/hash themselves so a bump
+            # does not feed back into the hash.
+            content_for_hash = {
+                k: v for k, v in content.items()
+                if k not in {"revision"}
+            }
+            new_hash = _canon(content_for_hash)
+            if experiment.report_content_hash != new_hash:
+                experiment.report_content_hash = new_hash
+                experiment.report_revision = int(experiment.report_revision) + 1
+        return report
 
     async def build_report(
         self,

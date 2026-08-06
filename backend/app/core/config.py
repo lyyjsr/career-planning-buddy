@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # "mock" / "live" when building the executor's providers (LLM + Search +
     # Embedding). Prod HTTP path ignores this field entirely.
     eval_provider_mode: Literal["mock", "fixture", "live"] = "mock"
+    # PR-9b: live-mode bookkeeping knobs.
+    eval_audit_live_calls: bool = True
+    eval_provider_seed_mode: Literal["none", "provider_seed", "local_seed"] = (
+        "provider_seed"
+    )
     embedding_model_name: str | None = Field(default=None, min_length=1, max_length=200)
     embedding_dim: int = Field(
         default=1024,

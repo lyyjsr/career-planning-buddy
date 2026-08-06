@@ -68,3 +68,63 @@ class EvalRunReportResponse(StrictModel):
     # pre-PR-9a consumers continue to deserialise cleanly.
     case_stats: dict[str, dict[str, object]] = Field(default_factory=dict)
     experiment_stats: dict[str, object] | None = None
+    # PR-9b: report revision (content-hash driven, not call-driven) plus
+    # the fact-record of any implised cancel request.
+    revision: int = 0
+    cancel_requested_at: datetime | None = None
+
+
+class EvalRunListItem(StrictModel):
+    """One row in the paginated Experiment listing."""
+
+    experiment_id: UUID
+    status: str
+    execution_mode: str
+    dataset_id: str
+    trial_count: int
+    started_at: datetime | None
+    finished_at: datetime | None
+    cancel_requested_at: datetime | None
+
+
+class EvalRunListResponse(StrictModel):
+    """Paginated response for GET /api/v1/eval/runs."""
+
+    items: list[EvalRunListItem]
+    next_offset: int | None = None
+
+
+class EvalRunProgressResponse(StrictModel):
+    """Lightweight progress view distinct from the heavy report payload."""
+
+    experiment_id: UUID
+    status: str
+    trial_count: int
+    completed_count: int
+    running_count: int
+    pending_count: int
+    failed_count: int
+    cancelled_count: int
+    timed_out_count: int
+    in_flight_trial_ids: list[UUID]
+    cancel_requested_at: datetime | None
+    estimated_progress: float
+    # Best-effort "last seen event"-style pointers. Optional: not surfaced
+    # when no agent_step row has emitted yet.
+    last_event_type: str | None = None
+    last_event_at: datetime | None = None
+
+
+class EvalRunCancelResponse(StrictModel):
+    """Response body for POST /api/v1/eval/runs/{id}/cancel.
+
+    ``status`` is the Experiment's current status at the time the request
+    was processed; it is NOT promoted to ``cancelled`` synchronously.
+    ``cancel_requested`` is False if the Experiment was already terminal
+    (no fresh timestamp stamped, request is a no-op).
+    """
+
+    experiment_id: UUID
+    status: str
+    cancel_requested: bool
+    cancel_requested_at: datetime | None = None

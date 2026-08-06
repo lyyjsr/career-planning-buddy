@@ -94,6 +94,17 @@ class EvalExperiment(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # PR-9b: cancel + report revision columns (migration 0013).
+    # ``cancel_requested_at`` is a fact record only; status=='cancelled'
+    # is the terminal signal. ``report_revision`` increments only when
+    # ``report_content_hash`` changes, never on every regenerate call.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    report_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    report_content_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class EvalTrial(Base):

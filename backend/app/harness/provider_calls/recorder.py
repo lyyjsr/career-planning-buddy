@@ -124,7 +124,13 @@ class ProviderCallRecorder:
             raw_response = await coro_factory()
         except AgentError as exc:
             status = "error"
-            error_code = type(exc).__name__
+            # PR-9b: persist ``exc.code`` (e.g. ``"PROVIDER_UNAVAILABLE"``)
+            # so the audit ledger stays joinable with
+            # ``app.harness.errors.EvalFailureCode`` and
+            # ``stats.runtime_failure_codes()``. Previously this wrote
+            # ``type(exc).__name__`` (the Python class name) which never
+            # matched the StatsShell taxonomy.
+            error_code = exc.code
         except asyncio.CancelledError:
             # The CancelledError is re-raised after we persist the row so the
             # executor's cancel-cooperative path is preserved exactly.

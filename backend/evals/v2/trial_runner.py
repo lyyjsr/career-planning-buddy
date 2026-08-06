@@ -315,6 +315,12 @@ class TrialRunner:
         embedding_provider = base_embedding
         search_provider = base_search
 
+        # PR-9b: live mode also installs the ProviderCallRecorder so real
+        # LLM / search / embedding calls leave an auditable, stat-able
+        # trail. ``eval_audit_live_calls`` defaults True; operators can opt
+        # out if they are streaming many trials through a low-token-cost
+        # provider and don't want the ledger volume.
+        recorder: ProviderCallRecorder | None = None
         if mode != "live":
             recorder = ProviderCallRecorder(
                 session_factory=self._session_factory,
@@ -345,6 +351,19 @@ class TrialRunner:
                 search_provider = AuditSearchProvider(
                     base_search, recorder,
                 )
+        elif getattr(self._settings, "eval_audit_live_calls", True):
+            # PR-9b: live mode auditor path. We use the same Audit*
+            # wrappers as the mock branch so the recorder sees the same
+            # call shape. ``retry_attempt`` defaults to 0 here; a future
+            # RetryingProvider wrapper would sit above this layer.
+            recorder = ProviderCallRecorder(
+                session_factory=self._session_factory,
+                run_id=run_id,
+                trial_id=trial_id,
+            )
+            planning_provider = AuditPlanningProvider(base_planning, recorder)
+            embedding_provider = AuditEmbeddingProvider(base_embedding, recorder)
+            search_provider = AuditSearchProvider(base_search, recorder)
 
         tool_registry = build_tool_registry(
             settings=self._settings,

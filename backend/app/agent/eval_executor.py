@@ -24,12 +24,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings, get_settings
 from app.core.database import AsyncSessionFactory, session_transaction
 from app.core.exceptions import AppError
+from app.harness.errors import EvalFailureCode
 from app.models.eval import EvalExperiment
+from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
 from evals.v2.dataset_loader import DatasetBundle
 from evals.v2.experiment_runner import ExperimentRunner
 
 logger = logging.getLogger(__name__)
+
+# Failure code stamped onto Trials stranded mid-flight when the process
+# crashed and ``EvalRunnerExecutor.recover_interrupted`` runs.
+_PROCESS_INTERRUPTED_CODE: str = EvalFailureCode.PROCESS_INTERRUPTED.value
 
 
 class EvalRunnerExecutor:
@@ -89,9 +95,14 @@ class EvalRunnerExecutor:
     async def recover_interrupted(self) -> int:
         """On process restart, mark every ``running`` experiment ``failed``.
 
-        ``ExperimentRunner`` is stateless and cannot resume a half-executed
-        Trial, so re-running is unsafe. We mark the experiment ``failed``
-        (legal transition per ``EXPERIMENT_TRANSITIONS``: running -> failed).
+        PR-9b: ``PROCESS_INTERRUPTED`` is stamped on the experiment row's
+        non-terminal Trials so the failure-code taxonomy distinguishes a
+        process crash from a runtime failure. ``cancel_requested_at`` does
+        NOT override crash evidence: an experiment whose operator pressed
+        cancel *and* whose process subsequently crashed still ends up in
+        ``failed`` (with ``PROCESS_INTERRUPTED``); a clean operator cancel
+        that survived would normally leave the experiment in ``cancelled``
+        via the background task's finalize path (no crash).
         """
 
         async with self._session_factory() as session:
@@ -111,8 +122,36 @@ class EvalRunnerExecutor:
                         await service.transition_experiment(exp.id, "failed")
                     except AppError:
                         # Illegal transition (rare race) -- never block startup.
-                        pass
+                        continue
+                    # Stamp the interrupt code on any non-terminal Trial that
+                    # the crash stranded. We bypass the trial transition
+                    # trigger here because the DB trigger accepts
+                    # (running -> failed) and we are writing from the harness
+                    # post-mortem.
+                    trials = await service._evals.list_trials(exp.id)  # noqa: SLF001
+                    for trial in trials:
+                        if trial.status in {"pending", "running"}:
+                            trial.status = "failed"
+                            if not trial.error_code:
+                                trial.error_code = (
+                                    _PROCESS_INTERRUPTED_CODE
+                                )
         return len(rows)
+
+    async def _cancel_was_requested(self, experiment_id: UUID) -> bool:
+        """Read-only check whether an operator staged cancel.
+
+        EvalRunnerExecutor polls this between Trials inside
+        ``run_experiment_and_grade`` so an active cancel skips remaining
+        Trials. The transition to experiment ``cancelled`` is still done
+        by ``ExperimentRunner`` itself once every Trial reaches a terminal
+        state.
+        """
+
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                row = await EvalRepository(session).get_experiment(experiment_id)
+                return bool(row and row.cancel_requested_at is not None)
 
     async def shutdown(self) -> None:
         """Cancel and await every outstanding task on application shutdown."""

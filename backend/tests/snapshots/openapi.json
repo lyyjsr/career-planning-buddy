@@ -1094,6 +1094,44 @@
         "title": "EvalExperimentResponse",
         "type": "object"
       },
+      "EvalRunCancelResponse": {
+        "additionalProperties": false,
+        "description": "Response body for POST /api/v1/eval/runs/{id}/cancel.\n\n``status`` is the Experiment's current status at the time the request\nwas processed; it is NOT promoted to ``cancelled`` synchronously.\n``cancel_requested`` is False if the Experiment was already terminal\n(no fresh timestamp stamped, request is a no-op).",
+        "properties": {
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "cancel_requested"
+        ],
+        "title": "EvalRunCancelResponse",
+        "type": "object"
+      },
       "EvalRunCreateRequest": {
         "additionalProperties": false,
         "description": "Body of POST /api/v1/eval/runs.\n\nThe server loads the named dataset (mirroring the CLI) instead of asking\nthe caller to ship a fully-validated ``DatasetBundle`` over the wire.",
@@ -1197,6 +1235,216 @@
         "title": "EvalRunCreatedResponse",
         "type": "object"
       },
+      "EvalRunListItem": {
+        "additionalProperties": false,
+        "description": "One row in the paginated Experiment listing.",
+        "properties": {
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "execution_mode": {
+            "title": "Execution Mode",
+            "type": "string"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "execution_mode",
+          "dataset_id",
+          "trial_count",
+          "started_at",
+          "finished_at",
+          "cancel_requested_at"
+        ],
+        "title": "EvalRunListItem",
+        "type": "object"
+      },
+      "EvalRunListResponse": {
+        "additionalProperties": false,
+        "description": "Paginated response for GET /api/v1/eval/runs.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EvalRunListResponse",
+        "type": "object"
+      },
+      "EvalRunProgressResponse": {
+        "additionalProperties": false,
+        "description": "Lightweight progress view distinct from the heavy report payload.",
+        "properties": {
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "cancelled_count": {
+            "title": "Cancelled Count",
+            "type": "integer"
+          },
+          "completed_count": {
+            "title": "Completed Count",
+            "type": "integer"
+          },
+          "estimated_progress": {
+            "title": "Estimated Progress",
+            "type": "number"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "failed_count": {
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "in_flight_trial_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "In Flight Trial Ids",
+            "type": "array"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "last_event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event Type"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "running_count": {
+            "title": "Running Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timed_out_count": {
+            "title": "Timed Out Count",
+            "type": "integer"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "status",
+          "trial_count",
+          "completed_count",
+          "running_count",
+          "pending_count",
+          "failed_count",
+          "cancelled_count",
+          "timed_out_count",
+          "in_flight_trial_ids",
+          "cancel_requested_at",
+          "estimated_progress"
+        ],
+        "title": "EvalRunProgressResponse",
+        "type": "object"
+      },
       "EvalRunReportResponse": {
         "additionalProperties": false,
         "description": "Strongly-typed envelope for ``ExperimentReport.to_dict()`` (PR-6).",
@@ -1204,6 +1452,18 @@
           "any_score_generated": {
             "title": "Any Score Generated",
             "type": "boolean"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
           },
           "case_stats": {
             "additionalProperties": {
@@ -1241,6 +1501,11 @@
           "hard_gate_pass_fraction": {
             "title": "Hard Gate Pass Fraction",
             "type": "number"
+          },
+          "revision": {
+            "default": 0,
+            "title": "Revision",
+            "type": "integer"
           },
           "scored_trial_count": {
             "title": "Scored Trial Count",
@@ -3899,6 +4164,99 @@
       }
     },
     "/api/v1/eval/runs": {
+      "get": {
+        "description": "Paginated list of eval experiments (PR-9b). Newest first.",
+        "operationId": "list_eval_runs_api_v1_eval_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Eval Runs",
+        "tags": [
+          "eval-runs"
+        ]
+      },
       "post": {
         "operationId": "create_eval_run_api_v1_eval_runs_post",
         "requestBody": {
@@ -4062,6 +4420,174 @@
         ]
       }
     },
+    "/api/v1/eval/runs/{experiment_id}/cancel": {
+      "post": {
+        "description": "Stage a Cancel request against a running or queued Experiment.\n\nIdempotent: returns 202 even when the Experiment is already terminal,\nin which case ``cancel_requested=false`` and no timestamp is stamped.\n``status`` in the response is the Experiment status *at the moment*\nthe request was processed; subsequent status transitions to\n``cancelled`` happen in the background once in-flight Trials land\nin their terminal states.",
+        "operationId": "request_eval_run_cancel_api_v1_eval_runs__experiment_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Eval Run Cancel",
+        "tags": [
+          "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{experiment_id}/progress": {
+      "get": {
+        "description": "Lightweight progress view (PR-9b).\n\nReturns Trial-status counts rather than the full graded report. The\n``in_flight_trial_ids`` list surfaces only Trials currently marked\n``running`` -- we do NOT infer \"current step\" inside a Trial; if a\nfine-grained view is later needed we can surface ``agent_steps.event_type``\nof the latest non-terminal row, but for v1 we keep the contract narrow.",
+        "operationId": "get_eval_run_progress_api_v1_eval_runs__experiment_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunProgressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Eval Run Progress",
+        "tags": [
+          "eval-runs"
+        ]
+      }
+    },
     "/api/v1/eval/runs/{experiment_id}/report": {
       "get": {
         "operationId": "get_eval_run_report_api_v1_eval_runs__experiment_id__report_get",
@@ -4145,6 +4671,95 @@
           }
         ],
         "summary": "Get Eval Run Report",
+        "tags": [
+          "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{experiment_id}/report/regenerate": {
+      "post": {
+        "description": "Pure-aggregate rebuild of the report (PR-9b).\n\nNever spawns Trials, calls Providers, or touches their audit rows.\nBumps ``report_revision`` only when the content hash of the\nrebuilt report changed.",
+        "operationId": "regenerate_eval_run_report_api_v1_eval_runs__experiment_id__report_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regenerate Eval Run Report",
         "tags": [
           "eval-runs"
         ]

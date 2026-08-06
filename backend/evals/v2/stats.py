@@ -35,33 +35,63 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.harness.errors import (
+    RUNTIME_FAILURE_CATEGORIES,
+    EvalFailureCode,
+    FailureCategory,
+)
+from app.harness.errors import (
+    USER_CANCEL_CODES as _USER_CANCEL_CODES_TAXONOMY,
+)
+from app.harness.errors import (
+    category as _failure_category,
+)
+
 if TYPE_CHECKING:
     # Avoid an import-time cycle: experiment_runner -> stats is fine; the
     # reverse direction (stats -> experiment_runner) is guarded here.
     from evals.v2.experiment_runner import TrialSummary
 
-
 # 95% two-sided z-infinity (more than enough precision for 30-case datasets).
 _Z_95 = 1.959963984540054
 
-# Error codes that signal a *runtime* failure rather than a model-quality
-# failure. Such trials count toward the denominator of success-rate (the
-# experiment did not produce a usable output) but never the numerator.
-RUNTIME_FAILURE_CODES: tuple[str, ...] = (
-    "RUN_NOT_COMPLETED",
-    "STATE_RUN_ALREADY_ACTIVE",
-    "RUN_DEADLINE_EXCEEDED",
-    "PROVIDER_UNAVAILABLE",
-    "TOOL_PROVIDER_UNAVAILABLE",
-)
 
-# Error codes that mean the user / harness aborted the Trial — not counted
-# as a runtime failure either (separate bucket, currently informational only).
-USER_CANCEL_CODES: tuple[str, ...] = (
-    "USER_REQUESTED_CANCEL",
-    "COOPERATIVE_CANCEL",
-    "RUN_CANCELLED",
-)
+def runtime_failure_codes() -> frozenset[str]:
+    """Return every canonical code currently classified as a runtime failure.
+
+    Used by tests to assert the bucket is non-empty and by other tests
+    to construct stub trials whose ``error_code`` lands in the bucket.
+    """
+
+    return frozenset(
+        code.value
+        for code in EvalFailureCode
+        if _failure_category(code.value) in RUNTIME_FAILURE_CATEGORIES
+    )
+
+
+def _is_runtime_failure(code: str | None) -> bool:
+    if not code:
+        return False
+    return _failure_category(code) in RUNTIME_FAILURE_CATEGORIES
+
+
+def _is_configuration_failure(code: str | None) -> bool:
+    if not code:
+        return False
+    return _failure_category(code) == FailureCategory.CONFIG
+
+
+def _is_user_cancel(code: str | None) -> bool:
+    if not code:
+        return False
+    return _failure_category(code) == FailureCategory.USER_ACTION
+
+
+# Back-compat module-level exports (some callers read these constants
+# directly). They are computed from the taxonomy above and frozen.
+RUNTIME_FAILURE_CODES: tuple[str, ...] = tuple(sorted(runtime_failure_codes()))
+USER_CANCEL_CODES: tuple[str, ...] = tuple(sorted(_USER_CANCEL_CODES_TAXONOMY))
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +157,11 @@ class CaseStat:
     completed_count: int
     hard_gate_passed_count: int
     runtime_failure_count: int
+    # PR-9b: independent buckets so a misconfigured / cancelled Trial does
+    # not inflate the runtime-failure or success-rate denominators. Always
+    # populated by compute_case_stats (no default needed; ordering invariant).
+    configuration_failure_count: int
+    cancelled_by_user_count: int
     first_attempt_passed: bool | None
     pass_at_n: bool | None
     pass_all_n: bool | None
@@ -152,6 +187,10 @@ class ExperimentStat:
     completed_count: int
     hard_gate_passed_count: int
     runtime_failure_count: int
+    # PR-9b rollups of the new CaseStat buckets. No defaults —
+    # ``compute_experiment_stats`` always populates them.
+    configuration_failure_count: int
+    cancelled_by_user_count: int
     first_attempt_success_rate: float
     first_attempt_success_rate_ci: CIInterval
     pass_at_n_rate: float
@@ -184,14 +223,18 @@ def _trial_passed(rows: list[GradeRow]) -> bool | None:
 def compute_case_stats(
     summaries: list[TrialSummary],
     grade_lookup: Mapping[UUID, list[GradeRow]],
-    *,
-    runtime_failure_codes: tuple[str, ...] = RUNTIME_FAILURE_CODES,
 ) -> dict[str, CaseStat]:
     """Group ``TrialSummary`` rows by ``case_id`` (variant is None only).
 
     Variant-tagged trials belong to a counterfactual pair and are excluded
     from this aggregation. Their per-variant deltas live in
     ``ExperimentReport.counterfactual_pairs``.
+
+    Failure classification (runtime / configuration / cancel) is sourced
+    from ``app.harness.errors``. PR-9a tests that asserted
+    ``RUNTIME_FAILURE_CODES`` membership still pass because the tuple is
+    re-exported here for back-compat, but the bucket is now derived from
+    the canonical ``FailureCategory`` classifier.
     """
 
     grouped: dict[str, list[TrialSummary]] = {}
@@ -216,7 +259,21 @@ def compute_case_stats(
             1
             for s in group
             if s.error_code is not None
-            and s.error_code in runtime_failure_codes
+            and _is_runtime_failure(s.error_code)
+        )
+        # PR-9b: classify cancelled Trials. Currently counted in the
+        # USER_ACTION bucket which neither inflates runtime_failure nor
+        # success_rate. ``cancelled_by_user_count`` is exposed separately.
+        cancelled_by_user_count = sum(
+            1
+            for s in group
+            if s.error_code is not None and _is_user_cancel(s.error_code)
+        )
+        configuration_failure_count = sum(
+            1
+            for s in group
+            if s.error_code is not None
+            and _is_configuration_failure(s.error_code)
         )
 
         first_attempt = next(
@@ -256,6 +313,8 @@ def compute_case_stats(
             completed_count=completed_count,
             hard_gate_passed_count=hard_gate_passed_count,
             runtime_failure_count=runtime_failure_count,
+            configuration_failure_count=configuration_failure_count,
+            cancelled_by_user_count=cancelled_by_user_count,
             first_attempt_passed=first_attempt_passed,
             pass_at_n=pass_at_n,
             pass_all_n=pass_all_n,
@@ -286,6 +345,8 @@ def compute_experiment_stats(
             completed_count=0,
             hard_gate_passed_count=0,
             runtime_failure_count=0,
+            configuration_failure_count=0,
+            cancelled_by_user_count=0,
             first_attempt_success_rate=0.0,
             first_attempt_success_rate_ci=CIInterval(low=0.0, high=0.0),
             pass_at_n_rate=0.0,
@@ -298,6 +359,11 @@ def compute_experiment_stats(
     completed_count = sum(c.completed_count for c in rows)
     hard_gate_passed_count = sum(c.hard_gate_passed_count for c in rows)
     runtime_failure_count = sum(c.runtime_failure_count for c in rows)
+    # PR-9b: roll the new independent buckets up to the experiment level.
+    configuration_failure_count = sum(
+        c.configuration_failure_count for c in rows
+    )
+    cancelled_by_user_count = sum(c.cancelled_by_user_count for c in rows)
 
     first_attempts = [c for c in rows if c.first_attempt_passed is not None]
     first_attempt_successes = sum(
@@ -325,6 +391,8 @@ def compute_experiment_stats(
         completed_count=completed_count,
         hard_gate_passed_count=hard_gate_passed_count,
         runtime_failure_count=runtime_failure_count,
+        configuration_failure_count=configuration_failure_count,
+        cancelled_by_user_count=cancelled_by_user_count,
         first_attempt_success_rate=first_attempt_rate,
         first_attempt_success_rate_ci=CIInterval(low=fa_low, high=fa_high),
         pass_at_n_rate=pass_at_n_cases / case_count,

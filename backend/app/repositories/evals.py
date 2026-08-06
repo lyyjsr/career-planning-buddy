@@ -30,6 +30,31 @@ class EvalRepository:
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def list_experiments(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[EvalExperiment]:
+        """Paginated listing for ``GET /api/v1/eval/runs``.
+
+        Ordering is ``created_at desc`` so the newest Experiments surface
+        first; pagination is the standard limit/offset style used by the
+        agent-runs list endpoint.
+        """
+
+        statement = select(EvalExperiment)
+        if status is not None:
+            statement = statement.where(EvalExperiment.status == status)
+        statement = (
+            statement.order_by(EvalExperiment.created_at.desc())
+            .limit(max(1, min(limit, 200)))
+            .offset(max(0, offset))
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars())
+
     async def create_trials(self, trials: Sequence[EvalTrial]) -> list[EvalTrial]:
         self._session.add_all(trials)
         await self._session.flush()
