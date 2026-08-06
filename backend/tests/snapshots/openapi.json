@@ -2137,6 +2137,592 @@
         "title": "NextPlanAction",
         "type": "string"
       },
+      "PairwiseAnnotationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/PairwiseAnnotationResponse"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "has_adjudication": {
+            "title": "Has Adjudication",
+            "type": "boolean"
+          },
+          "pair_consensus_status": {
+            "title": "Pair Consensus Status",
+            "type": "string"
+          },
+          "pair_id": {
+            "format": "uuid",
+            "title": "Pair Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pair_id",
+          "annotations",
+          "has_adjudication",
+          "pair_consensus_status"
+        ],
+        "title": "PairwiseAnnotationListResponse",
+        "type": "object"
+      },
+      "PairwiseAnnotationResponse": {
+        "additionalProperties": false,
+        "description": "Single annotation response.",
+        "properties": {
+          "annotation_id": {
+            "format": "uuid",
+            "title": "Annotation Id",
+            "type": "string"
+          },
+          "annotation_schema_version": {
+            "title": "Annotation Schema Version",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "frozen_review_surface_sha256": {
+            "title": "Frozen Review Surface Sha256",
+            "type": "string"
+          },
+          "is_adjudication": {
+            "title": "Is Adjudication",
+            "type": "boolean"
+          },
+          "judge_model_id": {
+            "title": "Judge Model Id",
+            "type": "string"
+          },
+          "judge_prompt_version": {
+            "title": "Judge Prompt Version",
+            "type": "string"
+          },
+          "normalized_winner": {
+            "enum": [
+              "baseline",
+              "candidate",
+              "tie",
+              "both_unacceptable"
+            ],
+            "title": "Normalized Winner",
+            "type": "string"
+          },
+          "pair_id": {
+            "format": "uuid",
+            "title": "Pair Id",
+            "type": "string"
+          },
+          "position_variant": {
+            "enum": [
+              "baseline",
+              "swapped"
+            ],
+            "title": "Position Variant",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "raw_winner": {
+            "enum": [
+              "a",
+              "b",
+              "tie",
+              "both_unacceptable"
+            ],
+            "title": "Raw Winner",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "reviewer_role": {
+            "enum": [
+              "primary",
+              "adjudicator"
+            ],
+            "title": "Reviewer Role",
+            "type": "string"
+          },
+          "rubric_version": {
+            "title": "Rubric Version",
+            "type": "string"
+          },
+          "sweep_id": {
+            "format": "uuid",
+            "title": "Sweep Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "annotation_id",
+          "pair_id",
+          "sweep_id",
+          "reviewer_id",
+          "reviewer_role",
+          "is_adjudication",
+          "raw_winner",
+          "normalized_winner",
+          "position_variant",
+          "annotation_schema_version",
+          "rubric_version",
+          "judge_prompt_version",
+          "judge_model_id",
+          "frozen_review_surface_sha256",
+          "created_at"
+        ],
+        "title": "PairwiseAnnotationResponse",
+        "type": "object"
+      },
+      "PairwiseAnnotationSubmitRequest": {
+        "additionalProperties": false,
+        "description": "Body of POST /api/v1/eval/runs/pairwise/annotations.\n\nServer-authoritative fields NOT accepted here (per supplementary\nconstraint #6):\n\n* reviewer_id — derived from JWT subject\n* position_variant — derived by the service from (pair, reviewer,\n  annotation_schema_version) via ``derive_position_variant``\n* normalized_winner / normalized_dimensions — recomputed from raw +\n  position_variant\n* display_a_trial_id / display_b_trial_id — recomputed from the sweep\n  item's frozen review surface\n\nThe reviewer only submits the raw display-side verdicts.",
+        "properties": {
+          "is_adjudication": {
+            "default": false,
+            "title": "Is Adjudication",
+            "type": "boolean"
+          },
+          "pair_id": {
+            "format": "uuid",
+            "title": "Pair Id",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "raw_dimension_verdicts": {
+            "additionalProperties": {
+              "enum": [
+                "a",
+                "b",
+                "tie",
+                "both_unacceptable"
+              ],
+              "type": "string"
+            },
+            "propertyNames": {
+              "enum": [
+                "actionability",
+                "alignment",
+                "personalization",
+                "clarity",
+                "consistency"
+              ]
+            },
+            "title": "Raw Dimension Verdicts",
+            "type": "object"
+          },
+          "raw_winner": {
+            "enum": [
+              "a",
+              "b",
+              "tie",
+              "both_unacceptable"
+            ],
+            "title": "Raw Winner",
+            "type": "string"
+          },
+          "sweep_id": {
+            "format": "uuid",
+            "title": "Sweep Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pair_id",
+          "sweep_id",
+          "raw_winner",
+          "raw_dimension_verdicts"
+        ],
+        "title": "PairwiseAnnotationSubmitRequest",
+        "type": "object"
+      },
+      "PairwiseAnnotationSubmitResponse": {
+        "additionalProperties": false,
+        "description": "Wrapped response carrying the HTTP status code difference (200 vs\n201). ``status`` tells the caller whether the row was newly inserted\nor already present.",
+        "properties": {
+          "annotation": {
+            "$ref": "#/components/schemas/PairwiseAnnotationResponse"
+          },
+          "status": {
+            "enum": [
+              "created",
+              "existing"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "annotation"
+        ],
+        "title": "PairwiseAnnotationSubmitResponse",
+        "type": "object"
+      },
+      "PairwiseCalibrationReportRequest": {
+        "additionalProperties": false,
+        "description": "Explicit sweep identity gate per supplementary constraint #7:\nthe caller MUST pass the exact list of sweep_ids whose JudgeResults\n+ annotations form the report's input set.",
+        "properties": {
+          "dataset_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "sweep_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Sweep Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "dataset_version",
+          "sweep_ids"
+        ],
+        "title": "PairwiseCalibrationReportRequest",
+        "type": "object"
+      },
+      "PairwiseCalibrationReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "annotation_schema_version": {
+            "title": "Annotation Schema Version",
+            "type": "string"
+          },
+          "calibration_policy_version": {
+            "title": "Calibration Policy Version",
+            "type": "string"
+          },
+          "calibration_status": {
+            "enum": [
+              "passing",
+              "failing",
+              "insufficient"
+            ],
+            "title": "Calibration Status",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "input_hash": {
+            "title": "Input Hash",
+            "type": "string"
+          },
+          "judge_model_id": {
+            "title": "Judge Model Id",
+            "type": "string"
+          },
+          "judge_prompt_version": {
+            "title": "Judge Prompt Version",
+            "type": "string"
+          },
+          "judge_rubric_version": {
+            "title": "Judge Rubric Version",
+            "type": "string"
+          },
+          "report_id": {
+            "format": "uuid",
+            "title": "Report Id",
+            "type": "string"
+          },
+          "report_payload": {
+            "additionalProperties": true,
+            "title": "Report Payload",
+            "type": "object"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "created",
+              "existing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "usage_mode": {
+            "enum": [
+              "diagnostic_only",
+              "gate_eligible"
+            ],
+            "title": "Usage Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_id",
+          "dataset_id",
+          "dataset_version",
+          "source_sha256",
+          "judge_model_id",
+          "judge_prompt_version",
+          "judge_rubric_version",
+          "annotation_schema_version",
+          "calibration_policy_version",
+          "input_hash",
+          "content_hash",
+          "calibration_status",
+          "usage_mode",
+          "requested_by",
+          "created_at",
+          "report_payload",
+          "status"
+        ],
+        "title": "PairwiseCalibrationReportResponse",
+        "type": "object"
+      },
+      "PairwiseRunCancelResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "sweep_id": {
+            "format": "uuid",
+            "title": "Sweep Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sweep_id",
+          "cancel_requested"
+        ],
+        "title": "PairwiseRunCancelResponse",
+        "type": "object"
+      },
+      "PairwiseRunRequest": {
+        "additionalProperties": false,
+        "description": "Body of POST /api/v1/eval/runs/{baseline_exp}/pairwise/run.",
+        "properties": {
+          "candidate_experiment_id": {
+            "format": "uuid",
+            "title": "Candidate Experiment Id",
+            "type": "string"
+          },
+          "dataset_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_experiment_id",
+          "dataset_id",
+          "dataset_version"
+        ],
+        "title": "PairwiseRunRequest",
+        "type": "object"
+      },
+      "PairwiseRunStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "annotation_schema_version": {
+            "title": "Annotation Schema Version",
+            "type": "string"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "comparison_group_id": {
+            "title": "Comparison Group Id",
+            "type": "string"
+          },
+          "completed_judge_run_count": {
+            "title": "Completed Judge Run Count",
+            "type": "integer"
+          },
+          "completed_pair_count": {
+            "title": "Completed Pair Count",
+            "type": "integer"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "failed_judge_run_count": {
+            "title": "Failed Judge Run Count",
+            "type": "integer"
+          },
+          "judge_model_id": {
+            "title": "Judge Model Id",
+            "type": "string"
+          },
+          "judge_prompt_version": {
+            "title": "Judge Prompt Version",
+            "type": "string"
+          },
+          "judge_rubric_version": {
+            "title": "Judge Rubric Version",
+            "type": "string"
+          },
+          "position_pair_count": {
+            "title": "Position Pair Count",
+            "type": "integer"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "requested_judge_run_count": {
+            "title": "Requested Judge Run Count",
+            "type": "integer"
+          },
+          "requested_pair_count": {
+            "title": "Requested Pair Count",
+            "type": "integer"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "sweep_id": {
+            "format": "uuid",
+            "title": "Sweep Id",
+            "type": "string"
+          },
+          "terminal_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal At"
+          }
+        },
+        "required": [
+          "sweep_id",
+          "comparison_group_id",
+          "status",
+          "dataset_id",
+          "dataset_version",
+          "source_sha256",
+          "judge_model_id",
+          "judge_prompt_version",
+          "judge_rubric_version",
+          "annotation_schema_version",
+          "requested_pair_count",
+          "requested_judge_run_count",
+          "completed_judge_run_count",
+          "failed_judge_run_count",
+          "completed_pair_count",
+          "position_pair_count",
+          "requested_by",
+          "started_at"
+        ],
+        "title": "PairwiseRunStatusResponse",
+        "type": "object"
+      },
       "PlanListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4163,6 +4749,319 @@
         ]
       }
     },
+    "/api/v1/eval/pairwise/calibration": {
+      "post": {
+        "description": "Generate or reuse a calibration report.\n\nCaller MUST specify exact ``sweep_ids`` (supplementary constraint #7)\nand all sweeps MUST share the same judge identity.",
+        "operationId": "create_calibration_report_api_v1_eval_pairwise_calibration_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairwiseCalibrationReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseCalibrationReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Calibration Report",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/pairwise/calibration/{dataset_id}/{dataset_version}/history": {
+      "get": {
+        "operationId": "list_calibration_reports_api_v1_eval_pairwise_calibration__dataset_id___dataset_version__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset_version",
+            "required": true,
+            "schema": {
+              "title": "Dataset Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PairwiseCalibrationReportResponse"
+                  },
+                  "title": "Response List Calibration Reports Api V1 Eval Pairwise Calibration  Dataset Id   Dataset Version  History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calibration Reports",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/pairwise/calibration/{dataset_id}/{dataset_version}/latest": {
+      "get": {
+        "operationId": "get_latest_calibration_report_api_v1_eval_pairwise_calibration__dataset_id___dataset_version__latest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset_version",
+            "required": true,
+            "schema": {
+              "title": "Dataset Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseCalibrationReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Latest Calibration Report",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
     "/api/v1/eval/runs": {
       "get": {
         "description": "Paginated list of eval experiments (PR-9b). Newest first.",
@@ -4339,6 +5238,527 @@
         "summary": "Create Eval Run",
         "tags": [
           "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/pairwise/annotations": {
+      "post": {
+        "description": "Submit a reviewer annotation (primary or adjudication).\n\nServer-authoritative fields (reviewer_id, position_variant,\nnormalized verdicts, trial id mapping) are derived from the frozen\nreview surface + JWT subject; the body only carries the raw\ndisplay-side verdicts.",
+        "operationId": "submit_annotation_api_v1_eval_runs_pairwise_annotations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairwiseAnnotationSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseAnnotationSubmitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Annotation",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/pairwise/annotations/{pair_id}": {
+      "get": {
+        "description": "List annotations for one Pair. ``suggested_label`` is never\nreturned by this endpoint per supplementary constraint #6.",
+        "operationId": "list_pairwise_annotations_api_v1_eval_runs_pairwise_annotations__pair_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pair_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pair Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseAnnotationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Pairwise Annotations",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{baseline_experiment_id}/pairwise/run": {
+      "post": {
+        "description": "Spawn a pairwise Judge sweep.\n\nThe service creates the Sweep + SweepItem rows synchronously (frozen\nPair Export JSONL materialized verbatim), then the executor picks up\nthe work in the background. Returns 202 with the queued Sweep status.",
+        "operationId": "start_pairwise_run_api_v1_eval_runs__baseline_experiment_id__pairwise_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Baseline Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairwiseRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseRunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Pairwise Run",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}": {
+      "get": {
+        "operationId": "get_pairwise_run_status_api_v1_eval_runs__baseline_experiment_id__pairwise_run__sweep_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Baseline Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sweep_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Sweep Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseRunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pairwise Run Status",
+        "tags": [
+          "pairwise-calibration"
+        ]
+      }
+    },
+    "/api/v1/eval/runs/{baseline_experiment_id}/pairwise/run/{sweep_id}/cancel": {
+      "post": {
+        "operationId": "cancel_pairwise_run_api_v1_eval_runs__baseline_experiment_id__pairwise_run__sweep_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Baseline Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sweep_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Sweep Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairwiseRunCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Pairwise Run",
+        "tags": [
+          "pairwise-calibration"
         ]
       }
     },

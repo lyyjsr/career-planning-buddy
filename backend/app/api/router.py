@@ -8,6 +8,7 @@ from app.api.dev import router as dev_router
 from app.api.evals import router as eval_router
 from app.api.health import router as health_router
 from app.api.memories import router as memories_router
+from app.api.pairwise_calibration import router as pairwise_router
 from app.api.plans import plans_router, tasks_router
 from app.api.profile import router as profile_router
 from app.api.reviews import router as reviews_router
@@ -24,5 +25,6 @@ api_v1_router.include_router(tasks_router)
 api_v1_router.include_router(reviews_router)
 api_v1_router.include_router(memories_router)
 api_v1_router.include_router(eval_router)
+api_v1_router.include_router(pairwise_router)
 api_v1_router.include_router(dev_router)
 api_router.include_router(api_v1_router)

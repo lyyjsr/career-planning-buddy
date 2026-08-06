@@ -128,3 +128,153 @@ class EvalRunCancelResponse(StrictModel):
     status: str
     cancel_requested: bool
     cancel_requested_at: datetime | None = None
+
+
+# ===========================================================================
+# PR-9c.2 Pairwise Calibration Workflow
+# ===========================================================================
+
+
+class PairwiseRunRequest(StrictModel):
+    """Body of POST /api/v1/eval/runs/{baseline_exp}/pairwise/run."""
+
+    candidate_experiment_id: UUID
+    dataset_id: str = Field(min_length=1, max_length=128)
+    dataset_version: str = Field(min_length=1, max_length=32)
+
+
+class PairwiseRunStatusResponse(StrictModel):
+    sweep_id: UUID
+    comparison_group_id: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    dataset_id: str
+    dataset_version: str
+    source_sha256: str
+    judge_model_id: str
+    judge_prompt_version: str
+    judge_rubric_version: str
+    annotation_schema_version: str
+    requested_pair_count: int
+    requested_judge_run_count: int
+    completed_judge_run_count: int
+    failed_judge_run_count: int
+    completed_pair_count: int
+    position_pair_count: int
+    requested_by: str
+    started_at: datetime
+    cancel_requested_at: datetime | None = None
+    terminal_at: datetime | None = None
+
+
+class PairwiseRunCancelResponse(StrictModel):
+    sweep_id: UUID
+    cancel_requested: bool
+    cancel_requested_at: datetime | None = None
+
+
+class PairwiseAnnotationSubmitRequest(StrictModel):
+    """Body of POST /api/v1/eval/runs/pairwise/annotations.
+
+    Server-authoritative fields NOT accepted here (per supplementary
+    constraint #6):
+
+    * reviewer_id — derived from JWT subject
+    * position_variant — derived by the service from (pair, reviewer,
+      annotation_schema_version) via ``derive_position_variant``
+    * normalized_winner / normalized_dimensions — recomputed from raw +
+      position_variant
+    * display_a_trial_id / display_b_trial_id — recomputed from the sweep
+      item's frozen review surface
+
+    The reviewer only submits the raw display-side verdicts.
+    """
+
+    pair_id: UUID
+    sweep_id: UUID
+    raw_winner: Literal["a", "b", "tie", "both_unacceptable"]
+    raw_dimension_verdicts: dict[
+        Literal[
+            "actionability",
+            "alignment",
+            "personalization",
+            "clarity",
+            "consistency",
+        ],
+        Literal["a", "b", "tie", "both_unacceptable"],
+    ]
+    rationale: str | None = None
+    is_adjudication: bool = False
+
+
+class PairwiseAnnotationResponse(StrictModel):
+    """Single annotation response."""
+
+    annotation_id: UUID
+    pair_id: UUID
+    sweep_id: UUID
+    reviewer_id: str
+    reviewer_role: Literal["primary", "adjudicator"]
+    is_adjudication: bool
+    raw_winner: Literal["a", "b", "tie", "both_unacceptable"]
+    normalized_winner: Literal[
+        "baseline", "candidate", "tie", "both_unacceptable"
+    ]
+    position_variant: Literal["baseline", "swapped"]
+    annotation_schema_version: str
+    rubric_version: str
+    judge_prompt_version: str
+    judge_model_id: str
+    frozen_review_surface_sha256: str
+    created_at: datetime
+    rationale: str | None = None
+
+
+class PairwiseAnnotationSubmitResponse(StrictModel):
+    """Wrapped response carrying the HTTP status code difference (200 vs
+    201). ``status`` tells the caller whether the row was newly inserted
+    or already present."""
+
+    status: Literal["created", "existing"]
+    annotation: PairwiseAnnotationResponse
+
+
+class PairwiseAnnotationListResponse(StrictModel):
+    pair_id: UUID
+    annotations: list[PairwiseAnnotationResponse]
+    has_adjudication: bool
+    pair_consensus_status: str
+
+
+# ---------------------------------------------------------------- calibration
+
+
+class PairwiseCalibrationReportRequest(StrictModel):
+    """Explicit sweep identity gate per supplementary constraint #7:
+    the caller MUST pass the exact list of sweep_ids whose JudgeResults
+    + annotations form the report's input set."""
+
+    dataset_id: str = Field(min_length=1, max_length=128)
+    dataset_version: str = Field(min_length=1, max_length=32)
+    sweep_ids: list[UUID] = Field(min_length=1)
+
+
+class PairwiseCalibrationReportResponse(StrictModel):
+    report_id: UUID
+    dataset_id: str
+    dataset_version: str
+    source_sha256: str
+    judge_model_id: str
+    judge_prompt_version: str
+    judge_rubric_version: str
+    annotation_schema_version: str
+    calibration_policy_version: str
+    input_hash: str
+    content_hash: str
+    calibration_status: Literal[
+        "passing", "failing", "insufficient"
+    ]
+    usage_mode: Literal["diagnostic_only", "gate_eligible"]
+    requested_by: str
+    created_at: datetime
+    report_payload: dict[str, object]
+    status: Literal["created", "existing"]

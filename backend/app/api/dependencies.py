@@ -13,6 +13,10 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
 from app.core.exceptions import AppError
 from app.core.security import AuthenticatedUser, TokenService
+from app.harness.pairwise_sweep_executor import (
+    PairwiseSweepExecutor,
+    pairwise_sweep_executor,
+)
 from app.providers.embedding import EmbeddingProvider, build_embedding_provider
 from app.repositories.users import UserRepository
 from app.services.agent_runs import AgentRunService
@@ -55,6 +59,10 @@ def get_agent_run_executor() -> AgentRunExecutor:
 
 def get_eval_runner_executor() -> EvalRunnerExecutor:
     return eval_runner_executor
+
+
+def get_pairwise_sweep_executor() -> PairwiseSweepExecutor:
+    return pairwise_sweep_executor
 
 
 def get_agent_run_service(

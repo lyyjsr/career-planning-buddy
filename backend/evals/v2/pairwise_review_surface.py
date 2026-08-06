@@ -24,9 +24,11 @@ Architecture invariant: this module never imports ``app.agent.*`` /
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, Protocol
+from uuid import UUID
 
 from evals.v2.contracts import canonical_sha256
 from evals.v2.pairwise import (
@@ -37,6 +39,18 @@ from evals.v2.pairwise import (
 )
 
 REVIEW_SURFACE_VERSION = "v1"
+
+
+class EvalTrialPairLike(Protocol):
+    """Structural type for what
+    :func:`build_frozen_review_surface_for_pair_row` needs from a Pair
+    row. Implementations include the SQLAlchemy ``EvalTrialPair`` and
+    the storage layer's frozen Pair DTOs."""
+
+    pair_hash: str
+    baseline_trial_id: UUID
+    candidate_trial_id: UUID
+    case_id: str
 
 # The review surface shares the same minimal allowed-evidence set as the
 # Judge (PR-9c.1 ``JUDGE_ALLOWED_KINDS``). If either expands, the surface
@@ -267,7 +281,7 @@ def normalize_raw_to_baseline_candidate(
 
 
 def normalize_raw_dimensions(
-    raw_dims: dict[str, Literal["a", "b", "tie", "both_unacceptable"]],
+    raw_dims: Mapping[str, Literal["a", "b", "tie", "both_unacceptable"]],
     position_variant: PositionVariant,
 ) -> dict[str, BaselineCandidateLabel]:
     """Apply ``normalize_raw_to_baseline_candidate`` to each dimension."""
@@ -296,3 +310,67 @@ __all__ = [
 # re-exported so callers building a test surface can construct Projections
 # without reaching into ``evals.v2.pairwise`` separately.
 _ = TrialEvidenceProjection
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewSurfaceFrozenInput:
+    """Result of building a frozen review surface FROM a Pair row +
+    reviewer identity — grouped so the HTTP layer can pass a single
+    object around."""
+
+    position_variant: str
+    frozen_review_surface_sha256: str
+    display_a_trial_id: UUID
+    display_b_trial_id: UUID
+
+
+def build_frozen_review_surface_for_pair_row(
+    *,
+    pair_row: EvalTrialPairLike,
+    reviewer_id: str,
+    rubric_version: str,
+    annotation_schema_version: str,
+    rubric: list[dict[str, object]] | None = None,
+) -> ReviewSurfaceFrozenInput:
+    """Build a frozen review surface FROM an ``EvalTrialPair`` row.
+
+    ``pair_row`` carries only ``pair_hash``, ``baseline_trial_id``,
+    ``candidate_trial_id``, ``case_id`` — the projection payloads are
+    NOT on the Pair row. We approximate a minimal surface by reusing
+    the Pair's trial ids as the display candidates (the Judge sees the
+    same set). The frozen-review-surface SHA is computed over the
+    pair_hash + versions + empty projection payloads; this is stable
+    per (pair, reviewer, version) and serves as ``review_input_hash``
+    on the annotation row.
+    """
+
+    from uuid import UUID as _UUID
+
+    pair = Pair(
+        baseline_trial_id=_UUID(str(pair_row.baseline_trial_id))
+        if not isinstance(pair_row.baseline_trial_id, _UUID)
+        else pair_row.baseline_trial_id,
+        candidate_trial_id=_UUID(str(pair_row.candidate_trial_id))
+        if not isinstance(pair_row.candidate_trial_id, _UUID)
+        else pair_row.candidate_trial_id,
+        case_id=pair_row.case_id,
+        baseline_projection=TrialEvidenceProjection(
+            request_constraints=None, plan_projection=None
+        ),
+        candidate_projection=TrialEvidenceProjection(
+            request_constraints=None, plan_projection=None
+        ),
+    )
+    surface = build_frozen_review_surface(
+        pair=pair,
+        reviewer_id=reviewer_id,
+        rubric=rubric or [],
+        rubric_version=rubric_version,
+        annotation_schema_version=annotation_schema_version,
+    )
+    return ReviewSurfaceFrozenInput(
+        position_variant=surface.position_variant.value,
+        frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+        display_a_trial_id=_UUID(surface.display_a_trial_id),
+        display_b_trial_id=_UUID(surface.display_b_trial_id),
+    )
