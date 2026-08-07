@@ -456,15 +456,20 @@ class MockPlanningProvider:
                 ),
             }
         if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
+            # PR-9c.2 Stage B repair-path fault-injection: force every task's
+            # estimated_minutes above the time budget so the rule validator
+            # downstream is guaranteed to fire. Originally hard-coded to
+            # ``tasks[0]`` / ``tasks[1]``, which assumed ≥2 tasks; PairSmoke
+            # ``compact_v1`` legitimately produces a single-task candidate,
+            # tripping IndexError that ``AgentRunExecutor`` swallowed into
+            # ``AGENT_EXECUTION_FAILED``. Iterate over whatever tasks exist.
             invalid_candidate = candidate.model_copy(
                 update={
                     "tasks": [
-                        candidate.tasks[0].model_copy(
+                        task.model_copy(
                             update={"estimated_minutes": context.time_budget_minutes}
-                        ),
-                        candidate.tasks[1].model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        ),
+                        )
+                        for task in candidate.tasks
                     ]
                 }
             )
@@ -559,15 +564,18 @@ class MockPlanningProvider:
                 ),
             }
         if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
+            # PR-9c.2 Stage B repair-path fault-injection (see note on the
+            # generate_agent_turn branch above): inflate every task's
+            # estimated_minutes past the budget so the rule validator fires.
+            # Originally hard-coded to ``tasks[0]`` / ``tasks[1]`` which
+            # assumed ≥2 tasks.
             invalid_candidate = candidate.model_copy(
                 update={
                     "tasks": [
-                        candidate.tasks[0].model_copy(
+                        task.model_copy(
                             update={"estimated_minutes": context.time_budget_minutes}
-                        ),
-                        candidate.tasks[1].model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        ),
+                        )
+                        for task in candidate.tasks
                     ]
                 }
             )
