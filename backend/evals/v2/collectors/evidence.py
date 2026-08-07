@@ -208,9 +208,22 @@ async def collect_evidence(
     # --- step / event / tool projections (transcript-derived facts) ---
     for step in outcome.steps:
         # outcome.steps are dicts already projected by ``_step_projection``.
+        # PCA-1 / PR-9c.2 Stage B: nodes that retry (e.g. ``rule_validator``
+        # on repair-path cases) produce one AgentStep per attempt; using
+        # just the node name as ``source_id`` collided on the
+        # ``uq_eval_evidence_items_trial_kind_source`` UNIQUE constraint.
+        # Mirror the tool_call-projection hotfix by folding the attempt
+        # index into ``source_id`` so re-attempts no longer collide.
+        node_name = str(step.get("node"))
+        attempt = step.get("attempt")
+        source_id = (
+            f"{node_name}#attempt{attempt}"
+            if attempt is not None
+            else node_name
+        )
         items.append(_item(
             trial_id=trial_id, kind=EvidenceKind.STEP_PROJECTION,
-            source_type="step", source_id=str(step.get("node")),
+            source_type="step", source_id=source_id,
             projection=step,
         ))
     for event in outcome.events:

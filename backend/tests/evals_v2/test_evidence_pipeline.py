@@ -359,3 +359,71 @@ async def test_pca1_tool_call_projections_deduplicate_per_call_id(
     assert len(source_ids) == len(set(source_ids)), (
         f"duplicate tool_call source_ids after PCA-1 fix: {source_ids}"
     )
+
+
+@pytest.mark.asyncio
+async def test_pr9c2_step_projections_deduplicate_per_attempt(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    """PR-9c.2 Stage B regression: a Trial whose graph retries the same
+    node (e.g. ``rule_validator`` on a repair-path case under the
+    ``compact_execution_v1`` variant) gets one ``step_projection`` row
+    per attempt instead of crashing on
+    ``uq_eval_evidence_items_trial_kind_source``.
+
+    The original collector used ``step.get("node")`` as ``source_id``;
+    nodes that retry produce one AgentStep per attempt with the same
+    node name, so the second INSERT tripped the UNIQUE constraint and
+    was swallowed into ``AGENT_EXECUTION_FAILED`` during grading. The
+    fix folds the attempt index into ``source_id``
+    (``"<node>#attempt<N>"``), mirroring the PCA-1 tool_call hotfix.
+    """
+
+    settings = get_settings()
+    bundle = filter_cases(load_dataset(), ["repair-03"])
+    case = bundle.cases[0]
+    config = _config(bundle.manifest).model_copy(
+        update={"agent_variant": "compact_execution_v1"}
+    )
+    _, trials = await EvalService(db_session).create_experiment(
+        dataset=bundle, config=config
+    )
+    trial = trials[0]
+    runner = TrialRunner(
+        session_factory=runtime_factory(db_connection),
+        settings=settings,
+    )
+    await runner.run_trial(trial, case)
+
+    # Grading re-collects evidence; pre-fix this raised IntegrityError
+    # (duplicate key on step_projection / rule_validator). Notably we do
+    # NOT assert on trial.status first -- grade_trial consults the
+    # persisted Trial row (the runner wrote from its own session), and
+    # the db_session fixture's view of the row may still show "pending"
+    # because the outer fixture transaction hides the runner's commit.
+    results = await EvalService(db_session).grade_trial(trial.id, case)
+    assert len(results) > 0
+
+    async with session_transaction(db_session):
+        items = await EvalRepository(db_session).list_evidence_items(trial.id)
+    step_items = [i for i in items if i.kind == "step_projection"]
+    # The repair path retries rule_validator at least twice, so we expect
+    # at least two step_projection rows for that node alone.
+    rule_validator_items = [
+        i for i in step_items if i.source_id.startswith("rule_validator")
+    ]
+    assert len(rule_validator_items) >= 2, (
+        f"expected >=2 rule_validator step projections (one per attempt), "
+        f"got {len(rule_validator_items)}: {[i.source_id for i in rule_validator_items]}"
+    )
+    # Every step_projection source_id must be unique within the Trial.
+    source_ids = [i.source_id for i in step_items]
+    assert len(source_ids) == len(set(source_ids)), (
+        f"duplicate step_projection source_ids after PR-9c.2 fix: {source_ids}"
+    )
+    # And each retried node's source_id must carry the attempt suffix.
+    for sv in rule_validator_items:
+        assert "#attempt" in sv.source_id, (
+            f"step_projection source_id missing attempt suffix: {sv.source_id!r}"
+        )
