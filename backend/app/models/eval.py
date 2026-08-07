@@ -88,6 +88,14 @@ class EvalExperiment(Base):
         ForeignKey("eval_experiments.id", ondelete="RESTRICT"),
     )
     trial_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_variant: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment=(
+            "Stage B-1a-lite agent variant identifier "
+            "(compact_execution_v1 / structured_reasoning_v1). NULL = legacy."
+        ),
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="draft")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

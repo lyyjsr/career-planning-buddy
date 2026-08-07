@@ -62,6 +62,7 @@ from app.services.reviews import ReviewService
 from app.tools.registry import build_tool_registry
 from evals.v2.collectors.outcome import RunOutcome, collect_outcome
 from evals.v2.contracts import EvalCase, EvalScenario
+from evals.v2.experiment_runtime_context import ExperimentRuntimeContext
 from evals.v2.fixture_loader import FixtureLoader
 from evals.v2.scenario_adapter import RuntimeLaunch, adapt_scenario
 from evals.v2.terminal_waiter import TerminalWaiter, WaitOutcome, WaitResult
@@ -108,6 +109,7 @@ class TrialRunner:
         session_factory: async_sessionmaker[AsyncSession],
         settings: Settings,
         config: TrialRunnerConfig | None = None,
+        runtime_context: ExperimentRuntimeContext | None = None,
     ) -> None:
         self._session_factory = session_factory
         # Revision #4: do not inherit Tool/Round defaults from the host .env.
@@ -121,6 +123,10 @@ class TrialRunner:
             }
         )
         self._config = config or TrialRunnerConfig()
+        # Stage B-1a-lite: frozen experiment-level context for provider
+        # selection. ``None`` = legacy path (all existing callers that
+        # don't pass this param keep their current behavior).
+        self._runtime_context = runtime_context
 
     async def run_trial(self, trial: EvalTrial, case: EvalCase) -> RunOutcome:
         """Execute one Trial end to end and freeze its terminal outcome."""
@@ -311,19 +317,29 @@ class TrialRunner:
             base_embedding = build_embedding_provider(self._settings)
             base_search = build_search_provider(self._settings)
         else:  # mock or fixture
-            # PR-9c.2 Commit 3.4 (Stage A E′): optional Pair-Smoke
-            # planning profile substitution. Defaulting to None yields
-            # the legacy MockPlanningProvider; setting the field to
-            # compact_v1 / structured_v1 swaps in a deterministic
-            # two-profile provider that produces byte-different
-            # PLAN_PROJECTION summaries for the same PlanningContext.
-            pair_smoke_profile = getattr(
-                self._settings, "eval_pair_smoke_planning_profile", None
+            # Stage B-1a-lite (Commit 3.5): experiment-level agent_variant
+            # takes PRIORITY over the Stage-A global Settings profile.
+            # When runtime_context is present and carries a non-null
+            # agent_variant, build_planning_provider selects the
+            # variant-specific deterministic provider.
+            agent_variant = (
+                self._runtime_context.agent_variant
+                if self._runtime_context is not None
+                else None
             )
-            if pair_smoke_profile is not None:
-                base_planning = PairSmokePlanningProvider(pair_smoke_profile)
+            if agent_variant is not None:
+                base_planning = build_planning_provider(
+                    self._settings, agent_variant=agent_variant
+                )
             else:
-                base_planning = MockPlanningProvider()
+                # Stage A fallback: global Settings profile (unchanged).
+                pair_smoke_profile = getattr(
+                    self._settings, "eval_pair_smoke_planning_profile", None
+                )
+                if pair_smoke_profile is not None:
+                    base_planning = PairSmokePlanningProvider(pair_smoke_profile)
+                else:
+                    base_planning = MockPlanningProvider()
             base_embedding = MockEmbeddingProvider()
             base_search = MockSearchProvider()
 

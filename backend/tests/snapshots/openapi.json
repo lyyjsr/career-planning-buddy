@@ -1136,6 +1136,20 @@
         "additionalProperties": false,
         "description": "Body of POST /api/v1/eval/runs.\n\nThe server loads the named dataset (mirroring the CLI) instead of asking\nthe caller to ship a fully-validated ``DatasetBundle`` over the wire.",
         "properties": {
+          "agent_variant": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stage B-1a-lite experiment-level agent variant.",
+            "title": "Agent Variant"
+          },
           "baseline_experiment_id": {
             "anyOf": [
               {

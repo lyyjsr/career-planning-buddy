@@ -137,6 +137,7 @@ class ExperimentCreate(StrictModel):
     variant_role: Literal["baseline", "candidate"]
     baseline_experiment_id: UUID | None = None
     trial_count: Annotated[int, Field(ge=1, le=100)] = 1
+    agent_variant: Annotated[str | None, Field(min_length=1, max_length=64)] = None
 
     @model_validator(mode="after")
     def validate_baseline_role(self) -> Self:

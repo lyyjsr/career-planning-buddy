@@ -927,9 +927,32 @@ class PairSmokePlanningProvider(MockPlanningProvider):
         )
 
 
-def build_planning_provider(settings: Settings) -> PlanningProvider:
-    """Build exactly the configured Provider; never silently substitute Mock."""
+_AGENT_VARIANT_PROFILE_MAP: dict[str, str] = {
+    "compact_execution_v1": "compact_v1",
+    "structured_reasoning_v1": "structured_v1",
+}
+
+
+def build_planning_provider(
+    settings: Settings,
+    agent_variant: str | None = None,
+) -> PlanningProvider:
+    """Build exactly the configured Provider; never silently substitute Mock.
+
+    Stage B-1a-lite (Commit 3.5): when ``agent_variant`` is set and
+    ``llm_provider == "mock"``, select a variant-specific deterministic
+    provider by mapping the variant name to a PairSmoke profile. This
+    lets experiments carry their own variant identity rather than
+    relying on the global ``Settings.eval_pair_smoke_planning_profile``.
+
+    ``agent_variant=None`` (or an unrecognized variant under mock) falls
+    through to the legacy ``MockPlanningProvider`` path.
+    """
     if settings.llm_provider == "mock":
+        if agent_variant is not None:
+            profile = _AGENT_VARIANT_PROFILE_MAP.get(agent_variant)
+            if profile is not None:
+                return PairSmokePlanningProvider(profile)
         return MockPlanningProvider()
     if settings.llm_api_key is None or settings.llm_base_url is None or settings.llm_model is None:
         raise ProviderConfigurationError(

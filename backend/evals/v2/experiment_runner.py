@@ -23,6 +23,7 @@ from app.services.evals import EvalService
 from evals.v2.collectors.outcome import RunOutcome
 from evals.v2.contracts import EvalCase
 from evals.v2.dataset_loader import DatasetBundle
+from evals.v2.experiment_runtime_context import ExperimentRuntimeContext
 from evals.v2.stats import CaseStat, ExperimentStat, compute_case_stats, compute_experiment_stats
 from evals.v2.trial_runner import TrialRunner
 
@@ -159,8 +160,29 @@ class ExperimentRunner:
                     experiment_id, "running"
                 )
 
+        # Build the experiment runtime context once from the persisted
+        # row (Stage B-1a-lite). This is the ONLY DB read of the
+        # experiment's agent_variant; the frozen dataclass is then
+        # passed into TrialRunner so the trial execution layer never
+        # touches the ORM for experiment metadata.
+        async with self._session_factory() as session:
+            experiment = await session.get(EvalExperiment, experiment_id)
+            if experiment is None:
+                raise RuntimeError(
+                    f"experiment {experiment_id} vanished after transition"
+                )
+            runtime_context = ExperimentRuntimeContext(
+                experiment_id=experiment.id,
+                agent_variant=experiment.agent_variant,
+                graph_version=experiment.graph_version,
+                prompt_version=experiment.prompt_version,
+                model_version=experiment.model_version,
+            )
+
         trial_runner = TrialRunner(
-            session_factory=self._session_factory, settings=self._settings
+            session_factory=self._session_factory,
+            settings=self._settings,
+            runtime_context=runtime_context,
         )
         async with self._session_factory() as session:
             trials = await EvalRepository(session).list_trials(experiment_id)

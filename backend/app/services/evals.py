@@ -150,6 +150,7 @@ class EvalService:
                 variant_role=config.variant_role,
                 baseline_experiment_id=config.baseline_experiment_id,
                 trial_count=config.trial_count,
+                agent_variant=config.agent_variant,
                 status="draft",
             )
             await self._evals.create_experiment(experiment)
@@ -703,6 +704,7 @@ class EvalService:
                 "memory_version": experiment.memory_version,
                 "execution_mode": experiment.execution_mode,
                 "variant_role": experiment.variant_role,
+                "agent_variant": experiment.agent_variant,
             }
         )
 

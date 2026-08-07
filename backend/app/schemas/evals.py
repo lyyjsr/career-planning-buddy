@@ -25,6 +25,12 @@ class EvalRunCreateRequest(StrictModel):
     trial_count: int = Field(default=1, ge=1, le=100)
     grade: bool = True
     baseline_experiment_id: UUID | None = None
+    agent_variant: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Stage B-1a-lite experiment-level agent variant.",
+    )
 
 
 class EvalRunCreatedResponse(StrictModel):
