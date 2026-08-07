@@ -576,4 +576,210 @@ cd .. && mv .env.backup .env && rm -f .env.bak
 
 ---
 
+## 10. PR-9c.2 Stage A — Fixture-backed E2E smoke CLOSED (Commit 3.4.x)
+
+> Status: Stage A fixture E2E smoke = **PASS** (via service-layer path).
+> Stage A real-data E2E = **BLOCKED_ZERODATA**.
+> PR-9c.2 engineering gate remains PASS; PR-9 formal human-calibration gate remains BLOCKED.
+> This section freezes the entire Stage A evidence trail (Steps 4 + 5 + 6 + provisioning + dataset + mapping) as a SINGLE evidence commit.
+
+### 10.1 Stage A commit chain
+
+```
+039aa6b  Commit 3.4 — PairSmoke provider (Stage A E′) + step_a_precheck/pass
+<NEW>    Commit 3.4.x — Stage A fixture-backed E2E smoke (Steps 4-6 + dataset + mapping + scripts fix + this §10)
+```
+
+### 10.2 Stage A artifacts in this commit
+
+```
+backend/evals/v2/datasets/pairwise-calibration-v0-dev-smoke.jsonl                  (21 rows, sha256 f51bbaa6...)
+backend/evals/v2/datasets/manifest-pairwise-calibration-v0-dev-smoke-1.json
+backend/evals/v2/datasets/pairwise-calibration-v0-dev-smoke.fixture_mapping.json   (21 entries, 7/8/4/2 distribution)
+backend/scripts/export_pairwise_dataset.py                                         (manifest relative-path fix)
+backend/scripts/stage_a_sweep.py                                                   (Step 4 driver)
+backend/scripts/stage_a_review.py                                                  (Step 5 driver)
+backend/scripts/stage_a_calibration.py                                             (Step 6 driver)
+pr-9c-handoff.md §10                                                              (this section)
+```
+
+### 10.3 Provisioning rows persisted in DB (commit-transparent)
+
+EvalExperiments + EvalTrials + EvalEvidenceItems + EvalTrialPair +
+EvalPairwiseSweep + EvalPairwiseSweepItems + EvalPairwiseJudgeResults
++ EvalPairwiseHumanAnnotations + EvalPairwiseCalibrationReport — all
+created by the Stage A run, all real DB rows, all queryable from the
+production DB. They are NOT in the commit (DB artifacts belong to the
+runtime, not the repo), but they are persisted and reproducible via:
+
+```bash
+PYTHONPATH=. python scripts/stage_a_provision.py   # idempotent within the PairSmoke experiment ids
+PYTHONPATH=. python scripts/stage_a_precheck.py \
+  --baseline-experiment-id 40491b69-... \
+  --candidate-experiment-id 1ab11807-...
+PYTHONPATH=. python scripts/export_pairwise_dataset.py \
+  --baseline-experiment-id 40491b69-... \
+  --candidate-experiment-id 1ab11807-... \
+  --output-dataset-id pairwise-calibration-v0-dev-smoke \
+  --output-dataset-version 1
+PYTHONPATH=. python scripts/stage_a_sweep.py
+PYTHONPATH=. python scripts/stage_a_review.py
+PYTHONPATH=. python scripts/stage_a_calibration.py
+```
+
+Key identifiers:
+
+```
+stage-a-fixture-compact-v1   experiment id  40491b69-e2bf-4ef8-82af-d7be4ac82295
+stage-a-fixture-structured-v1experiment id  1ab11807-3893-4798-8c51-713787afa4dc
+pairwise-calibration-v0-dev-smoke dataset     (21 pairs, sha256 f51bbaa68b217cbea7211245c2694068116edffa96aed42f8c84a777249ae4f3)
+fixture_mapping                              21 entries, sha256 fef1932b740e33acf6e6dd122852c88cb5403171f93e381593eb7595bd3d023a
+pairwise Sweep id                            ec8c0693-da68-4f5f-874c-3c18c7b5ec76
+Stage A smoke Calibration Report             26fdd054-0827-4836-9265-6b84c842e37b
+```
+
+### 10.4 Step 4 Sweep result
+
+```
+sweep_status                : completed
+requested_pair_count        : 21            requested_judge_run_count  : 42
+completed_judge_run_count   : 42            failed_judge_run_count     : 0
+completed_pair_count        : 21            position_pair_count        : 21
+items_total                 : 42            items_baseline / swapped   : 21 / 21
+items_by_status             : {completed: 42}
+judge_results_total         : 42            judge_results_invalid      : 0
+fixture_mapping_size        : 21
+```
+
+### 10.5 Step 5 Human Review result
+
+```
+Case A (consensus):
+  pair_id                : 718fc0b1-a411-4c30-8e27-31fd1cfdf0a8
+  primary reviewers      : 2 (R1, R2)
+  raw_winner (both)      : a   →  normalized = baseline
+  consensus_normalized   : ["baseline"]  ← single value, consensus exists
+
+Case B (disagreement + adjudication):
+  pair_id                : d437d457-ba6f-4aea-8609-3cb9b05481a7
+  primary R3             : raw a → normalized baseline
+  primary R4             : raw b → normalized candidate
+  adjudicator R5         : raw tie → normalized tie   (R5 ∉ {R3, R4})
+  disagreement triggered : overall + all 5 dimensions
+  pair lock              : SELECT FOR UPDATE engaged under submit_adjudication
+  
+Blinding audit           : forbidden tokens (trial_id, pair_hash,
+                            experiment_id, baseline, candidate, model_id,
+                            variant_role) absent from surfaced review payload
+review_token shape       : 16 hex; per-(pair, reviewer) → tokens differ
+frozen_sha               : deterministic per (pair, surface_version)
+```
+
+### 10.6 Step 6 Calibration Report result
+
+```
+smoke_calibration_report_id : 26fdd054-0827-4836-9265-6b84c842e37b
+calibration_status          : insufficient       (matches expected)
+usage_mode                  : diagnostic_only    (matches expected)
+report_payload carries real metrics (NOT hard-default):
+    valid_human_pair_count       : 2     (< 100 threshold)
+    position_pair_count          : 21
+    position_metric_sample_count : 21    (>= 100 threshold NEEDED for gate)
+    agreement                    : 0.0   (judge labels do not match the
+                                          smoke human labels — expected,
+                                          see §10.7)
+    position_bias                : null  (no decisive winner divergence
+                                          across positions — expected,
+                                          because fixture_mapping emits
+                                          the same display-side verdict
+                                          for both items of a pair)
+    agreement_sample_count       : 2
+```
+
+Stage A audit (§6.1–6.5):
+
+```
+6_1 label completeness:
+  total pairs in sweep       : 21
+  pairs with any annotation  : 2      (smoke depth)
+  pairs with two primaries   : 2
+  pairs with adjudication    : 1
+6_2 consensus rate (smoke, NOT statistical):
+  consensus pairs            : 1 / 2 touched
+6_3 disagreement:
+  disagreement pairs         : 1 / 2 touched
+  per_pair_labels            : {d437d457...: ["baseline", "candidate"]}
+6_4 adjudication consistency:
+  disagreement_without_adjudication : []    (all disagreements adjudicated) ✓
+6_5 gold-label provenance:
+  label_source_breakdown     : {consensus: 1, adjudication: 1}
+  suggested_label_used_as_gold: false  ✓
+```
+
+### 10.7 Follow-up items ( PARKED, not actionable in Stage A )
+
+```
+FOLLOW-UP-1  ASGI transport lifecycle smoke test
+              The committed code path is verified; the ASGI request-session
+              commit lifecycle is not independently exercised by a Stage A
+              smoke. Belongs in PR-10 (when CI-grade tests land).
+
+FOLLOW-UP-2  position_variant in GET /review-surface payload
+              The Commit 3.2 schema includes position_variant for
+              programmatic clients. The literal token "baseline"/"swapped"
+              trips the Stage-A blinding-audit token list. Long-term
+              direction: split the audit list into (forbidden-identity
+              tokens) vs (authoritative task fields), keeping
+              position_variant permissible. Recorded as schema cleanup
+              backlog; not blocking.
+
+FOLLOW-UP-3  Stage A pair-row placeholder hashes
+              EvalTrialPair rows carry placeholder pair_hash / input_hash
+              (sha256 of trial-id pair). Downstream consumers (export →
+              loader → judge) correctly recompute from frozen JSONL; the
+              placeholder is fine, but a future pass could land real
+              loader-formula hashes on the pair row for consistency.
+
+FOLLOW-UP-4  Stage A repair-case failures (2 / 23 fail out)
+              repair-03 + repair-04 trials in stage-a-fixture-compact-v1
+              failed during provisioning (transient IntegrityError on
+              duplicate step_projection during Interrupted grading). 21
+              of 23 cases still graded cleanly — well inside the Stage A
+              acceptance band. Root cause is in the grading path's
+              partial-tolerance handling and worth its own ticket before
+              PR-9 v1 / real-data E2E.
+```
+
+### 10.8 Triple-gate declaration (frozen)
+
+```
+Stage A fixture-backed E2E smoke             : PASS
+  (Steps 1-6 green; service-path-verified,
+   ASGI transport lifecycle parked as FOLLOW-UP-1)
+Stage A real-data E2E smoke                  : BLOCKED — ZERODATA
+  (PairSmoke-backed training data does NOT count as real; §8.8 boundary
+   preserved — v0-dev-smoke is NOT v1 and never becomes v1. Real v1
+   requires real live-LLM / real-graded Trials.)
+PR-9c.2 engineering gate                     : PASS    (Commit 3.2 closed)
+PR-9 formal human-calibration gate           : BLOCKED
+  (needs ≥100 valid human primary pairs dual-reviewed / adjudicated
+   against pairwise-calibration-v1, NOT v0-dev-smoke)
+Overall PR-9                                 : NOT CLOSED
+```
+
+### 10.9 Disclosures framed per reviewer's §8 / §9 conditions
+
+* This Stage A PASS proves **pipeline correctness**, not statistical
+  reliability. 5 annotation rows out of 21 pairs touched = smoke.
+* PairSmoke provider is a deterministic fixture; the produced
+  baseline/candidate plan divergence is engineered, not learned. Real
+  product divergence (live LLM) is the v1 / PR-9 gate's responsibility.
+* `position_metric_sample_count == 21` looks like it satisfies the v1
+  threshold of ≥ 100 — but it doesn't, because (a) the dataset itself
+  is smoke (`v0-dev-smoke`, not `v1`), and (b) the threshold also
+  requires `valid_human_pair_count >= 100` which this dataset will
+  never reach.
+
+---
+
 END

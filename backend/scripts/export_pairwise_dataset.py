@@ -52,7 +52,18 @@ from app.models.eval import EvalEvidenceItem, EvalTrial, EvalTrialPair  # noqa: 
 from evals.v2.contracts import canonical_sha256  # noqa: E402
 
 EXPORT_SCHEMA_VERSION = "pairwise-calibration-export/v1"
-CASE_SCHEMA_VERSION = "eval-trial-pair/v1"
+# Manifest's case_schema_version tracks the variant of the *pair_hash*
+# canonical_sha256 payload (loader recomputes with schema_version
+# "eval-trial-pair/v1" inside the payload). However the committed
+# fixture manifest (manifest-pairwise-calibration-fixture...) records
+# "pairwise-calibration-export/v1" here — loader only echos it back to
+# the caller; it does not validate its value. Pick the
+# export-version form for parity with the fixture.
+MANIFEST_CASE_SCHEMA_VERSION = "pairwise-calibration-export/v1"
+
+# Canonical schema_version tag embedded INSIDE the pair_hash payload
+# (calibration_loader._recompute_pair_hash line ~237).
+_PAIR_HASH_PAYLOAD_SCHEMA = "eval-trial-pair/v1"
 MANIFEST_VERSION = "2"
 
 # Evidence kinds the loader knows how to freeze into a Pair's request
@@ -113,7 +124,7 @@ def _row_from_pair(
     )
     pair_hash = canonical_sha256(
         {
-            "schema_version": CASE_SCHEMA_VERSION,
+            "schema_version": _PAIR_HASH_PAYLOAD_SCHEMA,
             "case_id": pair.case_id,
             "baseline_trial_id": str(pair.baseline_trial_id),
             "candidate_trial_id": str(pair.candidate_trial_id),
@@ -144,14 +155,24 @@ def write_dataset(
     output_dataset_id: str,
     output_dataset_version: str,
     datasets_dir: Path,
+    eval_root: Path | None = None,
 ) -> tuple[Path, str, int]:
     """Persist JSONL + manifest. Returns ``(jsonl_path, source_sha256,
-    pair_count)`` so the caller can surface them."""
+    pair_count)`` so the caller can surface them.
+
+    ``datasets_dir`` is the absolute output directory where the JSONL
+    file lives; the manifest's ``source_path`` is recorded relative to
+    ``eval_root`` (the loader's ``EVAL_ROOT``, defaults to
+    ``datasets_dir.parent.parent``) so the loader's path resolver —
+    which joins source_path onto ``EVAL_ROOT`` — finds the file."""
 
     datasets_dir.mkdir(parents=True, exist_ok=True)
     jsonl_name = f"{output_dataset_id}.jsonl"
     manifest_name = f"manifest-{output_dataset_id}-{output_dataset_version}.json"
     jsonl_path = datasets_dir / jsonl_name
+
+    if eval_root is None:
+        eval_root = datasets_dir.parent.parent
 
     # Stable byte ordering: sort each row's keys alphabetically and use
     # compact separators. Matches the loader's per-line JSON parse
@@ -163,13 +184,17 @@ def write_dataset(
 
     source_bytes = jsonl_path.read_bytes()
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    # source_path stored relative to EVAL_ROOT because
+    # calibration_loader._resolve_source_under_eval_root joins itself
+    # with EVAL_ROOT (not DATASETS_DIR).
+    source_path_rel = jsonl_path.resolve().relative_to(eval_root.resolve()).as_posix()
 
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "dataset_id": output_dataset_id,
         "dataset_version": output_dataset_version,
-        "case_schema_version": CASE_SCHEMA_VERSION,
-        "source_path": jsonl_name,
+        "case_schema_version": MANIFEST_CASE_SCHEMA_VERSION,
+        "source_path": source_path_rel,
         "source_sha256": source_sha256,
         "pair_count": len(rows),
     }
