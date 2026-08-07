@@ -89,10 +89,28 @@ class ProviderCall(Base):
             "(status = 'error') = (error_code IS NOT NULL)",
             name="ck_provider_calls_error_pair",
         ),
+        # PR-9c.2 Commit 3.6: the original single tokens-pair CHECK was
+        # split into two single-responsibility CHECKs (migration 0018).
+        # (a) The kind-vs-tokens relationship is expressed as a
+        #     disjunction below (non-LLM ⇒ NULL tokens; LLM ⇒
+        #     unconstrained at this layer).
+        # (b) The status-vs-tokens relationship now lives separately so
+        #     error/cancelled LLM rows can legitimately carry NULL tokens
+        #     (no usage info on the failure path -- previously this
+        #     tripped an IntegrityError that ``AgentRunExecutor``
+        #     swallowed into AGENT_EXECUTION_FAILED, masking Stage B's
+        #     retry/error audit trail).
         CheckConstraint(
-            "(provider_kind IN ('embedding','search')) "
-            "= (tokens_in IS NULL AND tokens_out IS NULL)",
-            name="ck_provider_calls_tokens_pair",
+            "(provider_kind IN ('embedding','search') "
+            "  AND tokens_in IS NULL AND tokens_out IS NULL) "
+            "OR (provider_kind = 'llm')",
+            name="ck_provider_calls_tokens_kind_pair",
+        ),
+        CheckConstraint(
+            "(provider_kind <> 'llm') "
+            "OR (status IN ('error', 'cancelled')) "
+            "OR (tokens_in IS NOT NULL AND tokens_out IS NOT NULL)",
+            name="ck_provider_calls_llm_success_tokens",
         ),
     )
 
