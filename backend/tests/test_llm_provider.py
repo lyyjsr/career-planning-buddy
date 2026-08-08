@@ -256,8 +256,8 @@ def test_provider_factory_switches_explicitly_without_fallback() -> None:
     assert real_snapshot.prompt_versions["career_planning"] == (
         "openai_compatible_plan_stage6_context_v1"
     )
-    assert real_snapshot.node_timeouts_seconds["career_planning_agent"] == 90.0
-    assert real_snapshot.node_timeouts_seconds["revise_or_fallback"] == 60.0
+    assert real_snapshot.node_timeouts_seconds["career_planning_agent"] == 120.0
+    assert real_snapshot.node_timeouts_seconds["revise_or_fallback"] == 120.0
 
     mock_snapshot = SnapshotService.build_config(mock_settings)
     assert mock_snapshot.node_timeouts_seconds["career_planning_agent"] == 30

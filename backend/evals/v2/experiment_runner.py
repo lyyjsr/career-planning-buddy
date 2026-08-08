@@ -24,7 +24,14 @@ from evals.v2.collectors.outcome import RunOutcome
 from evals.v2.contracts import EvalCase
 from evals.v2.dataset_loader import DatasetBundle
 from evals.v2.experiment_runtime_context import ExperimentRuntimeContext
-from evals.v2.stats import CaseStat, ExperimentStat, compute_case_stats, compute_experiment_stats
+from evals.v2.stats import (
+    CaseStat,
+    ExperimentStat,
+    compute_case_stats,
+    compute_experiment_stats,
+    compute_hard_gate_pass_fraction,
+    gate_requirement_passed,
+)
 from evals.v2.trial_runner import TrialRunner
 
 
@@ -255,7 +262,8 @@ class ExperimentRunner:
         cases_by_id = {case.case_id: case for case in dataset.cases}
         scored = 0
         passed = 0
-        # PR-8: map trial_id -> list of (grader_name, score, hard_gate).
+        # PR-8: map trial_id -> list of
+        # (grader_name, score, gate_requirement_passed).
         # Used to assemble the counterfactual paired diffs below.
         grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
 
@@ -283,11 +291,17 @@ class ExperimentRunner:
                         (
                             row.grader_name,
                             float(row.score) if row.score is not None else 0.0,
-                            bool(row.hard_gate),
+                            gate_requirement_passed(
+                                hard_gate=row.hard_gate,
+                                passed=row.passed,
+                            ),
                         )
                         for row in rows
                     ]
-                if rows and all(score.hard_gate for score in rows):
+                if rows and all(
+                    gate_passed
+                    for _, _, gate_passed in grade_lookup[trial_summary.trial_id]
+                ):
                     passed += 1
 
         # PR-8: assemble counterfactual paired diffs for any Trials sharing a
@@ -309,14 +323,16 @@ class ExperimentRunner:
         case_stats = compute_case_stats(list(report.trials), grade_lookup)
         experiment_stats = compute_experiment_stats(case_stats)
 
-        completed = report.completed_trial_count or 1
         return ExperimentReport(
             experiment_id=report.experiment_id,
             experiment_status=report.experiment_status,
             trial_count=report.trial_count,
             trials=list(report.trials),
             scored_trial_count=scored,
-            hard_gate_pass_fraction=round(passed / completed, 6),
+            hard_gate_pass_fraction=compute_hard_gate_pass_fraction(
+                passed_count=passed,
+                summaries=list(report.trials),
+            ),
             counterfactual_pairs=pairs,
             case_stats=case_stats,
             experiment_stats=experiment_stats,

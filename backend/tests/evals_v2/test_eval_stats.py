@@ -19,6 +19,8 @@ from evals.v2.stats import (
     ExperimentStat,
     compute_case_stats,
     compute_experiment_stats,
+    compute_hard_gate_pass_fraction,
+    gate_requirement_passed,
     normal_ci,
     wilson_ci,
 )
@@ -90,9 +92,65 @@ def _summary(
 
 
 def _grades_flag(passed: bool) -> list[tuple[str, float, bool]]:
-    """One grade row carrying the requested hard_gate flag."""
+    """One grade row carrying the requested gate verdict."""
 
     return [("model.token_usage_nonzero", 1.0, passed)]
+
+
+def test_gate_requirement_passed_uses_verdict_only_for_hard_gates() -> None:
+    assert gate_requirement_passed(hard_gate=True, passed=True) is True
+    assert gate_requirement_passed(hard_gate=True, passed=False) is False
+    assert gate_requirement_passed(hard_gate=True, passed=None) is False
+    assert gate_requirement_passed(hard_gate=False, passed=False) is True
+    assert gate_requirement_passed(hard_gate=False, passed=None) is True
+
+
+def test_compute_case_stats_non_gate_failure_does_not_block_trial() -> None:
+    summary = _summary()
+    grade_lookup = {
+        summary.trial_id: [
+            (
+                "task.required_constraint",
+                1.0,
+                gate_requirement_passed(hard_gate=True, passed=True),
+            ),
+            (
+                "model.advisory_quality",
+                0.0,
+                gate_requirement_passed(hard_gate=False, passed=False),
+            ),
+        ]
+    }
+
+    stat = compute_case_stats([summary], grade_lookup)["c1"]
+
+    assert stat.first_attempt_passed is True
+    assert stat.hard_gate_passed_count == 1
+    assert stat.success_rate == 1.0
+
+
+def test_compute_case_stats_failed_hard_gate_blocks_trial() -> None:
+    summary = _summary()
+    grade_lookup = {
+        summary.trial_id: [
+            (
+                "task.required_constraint",
+                0.0,
+                gate_requirement_passed(hard_gate=True, passed=False),
+            ),
+            (
+                "model.advisory_quality",
+                1.0,
+                gate_requirement_passed(hard_gate=False, passed=True),
+            ),
+        ]
+    }
+
+    stat = compute_case_stats([summary], grade_lookup)["c1"]
+
+    assert stat.first_attempt_passed is False
+    assert stat.hard_gate_passed_count == 0
+    assert stat.success_rate == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +219,62 @@ def test_compute_case_stats_runtime_failure_count_excludes_user_cancelled() -> N
     assert stat.trial_count == 2
     assert stat.completed_count == 0  # neither completed
     assert stat.hard_gate_passed_count == 0
-    assert stat.success_rate == 0.0  # 0 / max(0, 1)
+    assert stat.first_attempt_passed is None  # user cancellation stays neutral
+    assert stat.success_rate == 0.0  # one runtime failure in the denominator
+
+
+def test_runtime_failure_reduces_case_and_experiment_success_rates() -> None:
+    passed = _summary(case_id="c1", trial_index=0)
+    runtime_failed = _summary(
+        case_id="c1",
+        trial_index=1,
+        status="failed",
+        error_code="PROVIDER_TIMEOUT",
+    )
+    case_stats = compute_case_stats(
+        [passed, runtime_failed],
+        {passed.trial_id: _grades_flag(True)},
+    )
+
+    stat = case_stats["c1"]
+    assert stat.completed_count == 1
+    assert stat.runtime_failure_count == 1
+    assert stat.hard_gate_passed_count == 1
+    assert stat.success_rate == 0.5
+    assert stat.pass_at_n is True
+    assert stat.pass_all_n is False
+
+    experiment = compute_experiment_stats(case_stats)
+    assert experiment.success_rate == 0.5
+
+
+def test_runtime_failure_on_first_attempt_counts_as_failed_attempt() -> None:
+    runtime_failed = _summary(
+        case_id="c1",
+        trial_index=0,
+        status="failed",
+        error_code="PROVIDER_RATE_LIMITED",
+    )
+
+    stat = compute_case_stats([runtime_failed], {})["c1"]
+
+    assert stat.first_attempt_passed is False
+
+
+def test_report_hard_gate_fraction_includes_runtime_failures() -> None:
+    passed = _summary(case_id="passed")
+    runtime_failed = _summary(
+        case_id="runtime-failed",
+        status="failed",
+        error_code="PROVIDER_TIMEOUT",
+    )
+
+    fraction = compute_hard_gate_pass_fraction(
+        passed_count=1,
+        summaries=[passed, runtime_failed],
+    )
+
+    assert fraction == 0.5
 
 
 def test_compute_case_stats_drops_non_null_variants() -> None:

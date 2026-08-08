@@ -129,3 +129,136 @@ Judge labels.
 
 The two API keys were supplied in chat text. Rotate both keys after this
 validation and update the ignored local `.env`; never commit the current keys.
+
+## Hard-Gate Semantics Correction
+
+The report aggregation previously treated an EvalScore row's `hard_gate`
+classification as if it were the row's pass verdict. This could reject a Trial
+merely because it contained advisory metrics, and could accept a failed hard
+gate merely because that row was configured as a gate.
+
+The corrected rule is:
+
+```text
+score gate requirement passed = not hard_gate or passed is true
+trial passed = every persisted score gate requirement passed
+```
+
+Both the immediate ExperimentRunner report and the database-backed report
+rebuild now use the same rule. Regression coverage includes a passing hard
+gate, a failed hard gate, and a failed advisory metric that must remain neutral.
+
+Current automated verification after the correction:
+
+- Eval and Eval API tests: 394 passed.
+- Full backend suite: 549 passed.
+- Ruff: all checks passed.
+- Mypy strict: 234 source files passed.
+
+## Three-Case Live Debug Run
+
+This run was performed after the hard-gate correction. It is a stability and
+diagnostic run, not a comparative-quality acceptance run.
+
+- B0 experiment: `b3f7035f-99a1-4df4-b44d-0f289762b466`
+- B3 experiment: `f51425d2-ec7d-4cc9-aebe-b30a1f2a6d4f`
+- Cases: `create-01`, `create-03`, `replan-03`
+- Agent: GLM `glm-4.7`
+- Judge: DeepSeek `deepseek-v4-pro`
+- Search and embedding providers remained explicitly mock-scoped.
+
+| Case | B0 result | B3 result | Position-balanced Judge |
+|---|---|---|---|
+| `create-01` | pass; 28,935 ms; 2,620 tokens | pass; 15,968 ms; 2,647 tokens | B0 / B0; stable |
+| `create-03` | pass; 25,038 ms; 2,670 tokens | pass; 19,424 ms; 2,739 tokens | both unacceptable / B0; unstable |
+| `replan-03` | degraded and gate-failed; 81,411 ms; 7,124 tokens | failed at 90,197 ms | skipped |
+
+For `replan-03`, B0 exhausted business-rule repair and failed
+`behavioral.graph_branch`, `model.structured_output`, and
+`task.allowed_run_status`. B3 timed out in `career_planning_agent` with
+`AGENT_DEADLINE_EXCEEDED`; no ToolCall row was persisted for that Trial.
+
+### Debug Decision
+
+Do not expand directly to the balanced 10-case acceptance run yet. First:
+
+1. reproduce and diagnose the B3 `replan-03` node timeout;
+2. rerun the affected pair after the runtime fix or bounded-timeout decision;
+3. inspect the two `create-03` Judge outputs before accepting its label;
+4. proceed to 10 cases only when all selected pairs complete and position
+   instability is explicitly flagged rather than treated as a quality win.
+
+### Timeout Follow-Up
+
+The first `replan-03` rerun froze a 180-second Run deadline but still ended at
+90 seconds. The frozen node configuration revealed that real-provider
+`career_planning_agent` was independently capped at 90 seconds, even though
+the node may perform an initial call plus bounded format repair. Cancellation
+audit also attempted to store `status=cancelled` together with a non-null
+`error_code`, contradicting the database contract and dropping the audit row.
+
+The runtime was corrected so real LLM nodes use the frozen Run deadline as
+their ceiling while each physical provider call retains its own HTTP timeout.
+Cancelled provider calls now persist `status=cancelled` with a null error code,
+then re-raise cancellation unchanged.
+
+Post-fix `replan-03` rerun:
+
+- B0 experiment: `ac763b56-1b7e-4684-a38c-57a736c6a50a`
+- B3 experiment: `eea70909-72bb-4526-a9a7-734255ca6154`
+- B0: degraded, hard-gate fail, 68,126 ms.
+- B3: completed, all hard gates passed, 14,113 ms.
+- Judge: B3 / B3 across baseline and swapped positions; stable.
+
+## Balanced Ten-Case Acceptance Run
+
+The acceptance set contained five create cases and five replan cases:
+`create-01` through `create-05`, and `replan-01` through `replan-05`.
+The Run deadline was frozen at 180 seconds.
+
+- B0 experiment: `1135049c-5883-4c48-a6e0-5faf05a7f4e3`
+- B3 experiment: `6e81f139-f56f-4437-9e49-1e2f146db52d`
+
+| Outcome | B0 Direct LLM | B3 Full Agent |
+|---|---:|---:|
+| Trials | 10 | 10 |
+| Completed | 5 | 2 |
+| Runtime failures | 5 | 8 |
+| Hard-gate passes | 4 | 2 |
+| Overall success rate | 40% | 20% |
+| Wilson 95% CI | 16.8%-68.7% | 5.7%-51.0% |
+
+B0 runtime failures comprised four `PROVIDER_TIMEOUT` results and one
+`AGENT_BUDGET_EXCEEDED`. B3 runtime failures comprised two
+`PROVIDER_TIMEOUT` results and six `PROVIDER_RATE_LIMITED` results.
+
+Only `create-01` completed in both arms. Its position-balanced Judge outputs
+were `tie` and B3, so the pair was position-unstable. The other nine Judge
+comparisons were correctly skipped because both Trials had not completed.
+
+### Acceptance Decision
+
+**Fail for comparative-quality acceptance.** The run cannot support a B0-vs-B3
+quality claim because provider timeouts and rate limiting dominate the sample,
+and only one pair was comparable.
+
+**Valid reliability finding.** The Harness preserved every Trial status,
+provider failure category, deterministic score, skipped-Judge reason, and
+report reconstruction input. It also exposed a second aggregation defect:
+runtime failures were counted in a separate bucket but omitted from
+`success_rate` and `hard_gate_pass_fraction` denominators. Both metrics now use
+completed Trials plus runtime failures, while configuration failures and user
+cancellations remain separate. Database-backed report reconstruction confirms
+B0 at 40% and B3 at 20%; the former misleading values were 80% and 100%.
+
+Search and embedding remained mock-scoped throughout this acceptance run.
+Human Judge spot-checking remains deferred because there is not yet a viable
+set of 5-10 completed, position-stable real pairs.
+
+Before rerunning acceptance:
+
+1. define and freeze a provider retry/backoff and pacing policy for live Eval;
+2. allow the GLM account's rate-limit window to recover;
+3. rerun in paced batches while preserving one frozen acceptance manifest;
+4. require at least 8 of 10 pairs to complete before quality comparison;
+5. send 5-10 completed pairs to human spot-check only after that gate passes.

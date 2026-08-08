@@ -92,7 +92,6 @@ async def test_run_experiment_and_grade_smoke_produces_scores(
     assert report.completed_trial_count == 1
     assert report.scored_trial_count > 0
     assert report.any_score_generated is True
-    assert 0.0 <= report.hard_gate_pass_fraction <= 1.0
 
     # The completed Stage-5 Trial carries Score rows across all domains.
     async with session_transaction(db_session):
@@ -105,6 +104,21 @@ async def test_run_experiment_and_grade_smoke_produces_scores(
             assert DOMAINS.issubset(scored_domains), (
                 f"trial {trial.trial_id} missing domains: {DOMAINS - scored_domains}"
             )
+            expected_gate_passed = all(
+                not score.hard_gate or score.passed is True for score in scores
+            )
+            assert report.hard_gate_pass_fraction == float(expected_gate_passed)
+
+    # Rebuilding from persisted rows must use exactly the same gate semantics.
+    # A report request starts in a fresh Session. Reusing ``db_session`` here
+    # would retain the pre-run transaction snapshot and observe the original
+    # draft Experiment instead of the rows committed by the runner Sessions.
+    async with factory() as report_session:
+        rebuilt = await EvalService(report_session).build_report(
+            stage5_experiment.id, stage5
+        )
+    assert rebuilt.hard_gate_pass_fraction == report.hard_gate_pass_fraction
+    assert rebuilt.case_stats == report.case_stats
 
 
 @pytest.mark.asyncio

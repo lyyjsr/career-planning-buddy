@@ -462,6 +462,10 @@ class EvalService:
             VariantGradeDiff,
             _build_counterfactual_pair,
         )
+        from evals.v2.stats import (
+            compute_hard_gate_pass_fraction,
+            gate_requirement_passed,
+        )
 
         async with session_transaction(self._session):
             experiment = await self._evals.get_experiment(experiment_id)
@@ -492,11 +496,17 @@ class EvalService:
                             (
                                 row.grader_name,
                                 float(row.score) if row.score is not None else 0.0,
-                                bool(row.hard_gate),
+                                gate_requirement_passed(
+                                    hard_gate=row.hard_gate,
+                                    passed=row.passed,
+                                ),
                             )
                             for row in scores
                         ]
-                        if all(score.hard_gate for score in scores):
+                        if all(
+                            gate_passed
+                            for _, _, gate_passed in grade_lookup[trial.id]
+                        ):
                             passed += 1
             # PR-8: build counterfactual paired diffs (mirror of
             # ExperimentRunner.run_experiment_and_grade's grouping).
@@ -524,14 +534,16 @@ class EvalService:
 
             case_stats = _cf_stats(summaries, grade_lookup)
             experiment_stats = _cf_exp_stats(case_stats)
-            completed = sum(1 for s in summaries if s.status == "completed") or 1
             return ExperimentReport(
                 experiment_id=experiment.id,
                 experiment_status=experiment.status,
                 trial_count=len(trials),
                 trials=summaries,
                 scored_trial_count=scored,
-                hard_gate_pass_fraction=round(passed / completed, 6),
+                hard_gate_pass_fraction=compute_hard_gate_pass_fraction(
+                    passed_count=passed,
+                    summaries=summaries,
+                ),
                 counterfactual_pairs=pairs,
                 case_stats=case_stats,
                 experiment_stats=experiment_stats,

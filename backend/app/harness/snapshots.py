@@ -29,12 +29,13 @@ class SnapshotService:
         is_real = settings.llm_provider == "openai_compatible"
         node_timeouts = dict(NODE_TIMEOUTS)
         if is_real:
-            node_timeouts["career_planning_agent"] = min(
-                90.0, float(settings.agent_deadline_seconds)
-            )
-            node_timeouts["revise_or_fallback"] = min(
-                60.0, float(settings.agent_deadline_seconds)
-            )
+            # LLM nodes may legitimately perform an initial generation plus
+            # bounded format/business repair calls. Let the frozen Run budget
+            # be the node ceiling; each physical provider call still has its
+            # own HTTP timeout and BudgetGuard enforces the remaining total.
+            llm_node_timeout = float(settings.agent_deadline_seconds)
+            node_timeouts["career_planning_agent"] = llm_node_timeout
+            node_timeouts["revise_or_fallback"] = llm_node_timeout
         return RuntimeConfigSnapshot(
             graph_version=settings.agent_graph_version,
             feature_stage=settings.agent_feature_stage,

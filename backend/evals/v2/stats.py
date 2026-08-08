@@ -18,8 +18,9 @@ Aggregation semantics
   their contamination / context / tool measurements do not dilute the main
   regression pass-rate; per-variant deltas live in
   ``ExperimentReport.counterfactual_pairs``.
-* "Passed" means every EvalScore row that landed for the Trial carried
-  ``hard_gate=True``. No EvalScore -> None (no signal).
+* "Passed" means every EvalScore row marked as a hard gate has
+  ``passed=True``. Non-hard-gate rows do not block a Trial. No EvalScore ->
+  None (no signal).
 * "First attempt" is the Trial with ``trial_index == 0`` in the group.
   ``first_attempt_passed`` is None when that index is missing.
 * Runtime failures (``error_code in runtime_failure_codes``) count toward
@@ -203,21 +204,56 @@ class ExperimentStat:
 # Aggregations
 # ---------------------------------------------------------------------------
 
-#: ``grade_lookup`` value type: list of (grader_name, score, hard_gate).
+#: ``grade_lookup`` value type: list of
+#: (grader_name, score, gate_requirement_passed).
 GradeRow = tuple[str, float, bool]
+
+
+def gate_requirement_passed(*, hard_gate: bool, passed: bool | None) -> bool:
+    """Return whether one score row satisfies the Trial's gate requirement.
+
+    A non-gating metric is always neutral. A hard gate passes only when its
+    explicit boolean verdict is true; ``None`` therefore fails closed.
+    """
+
+    return not hard_gate or passed is True
 
 
 def _trial_passed(rows: list[GradeRow]) -> bool | None:
     """Three-valued trial-passed verdict.
 
-    * ``True`` when every EvalScore carried ``hard_gate=True`` (>=1 row).
-    * ``False`` when any row carried ``hard_gate=False``.
+    * ``True`` when every score row's gate requirement passed (>=1 row).
+    * ``False`` when any hard-gate score failed.
     * ``None`` when no scores were persisted (no signal).
     """
 
     if not rows:
         return None
-    return all(hard_gate for _, _, hard_gate in rows)
+    return all(gate_passed for _, _, gate_passed in rows)
+
+
+def quality_trial_count(summaries: list[TrialSummary]) -> int:
+    """Count Trials eligible for a quality-success denominator.
+
+    Completed Trials and runtime failures are product outcomes. Configuration
+    failures and user cancellations are reported in separate buckets and do
+    not become model-quality failures.
+    """
+
+    return sum(
+        1
+        for summary in summaries
+        if summary.status == "completed" or _is_runtime_failure(summary.error_code)
+    )
+
+
+def compute_hard_gate_pass_fraction(
+    *, passed_count: int, summaries: list[TrialSummary]
+) -> float:
+    """Compute the report-level pass fraction over quality-eligible Trials."""
+
+    quality_count = quality_trial_count(summaries)
+    return round(passed_count / quality_count, 6) if quality_count else 0.0
 
 
 def compute_case_stats(
@@ -248,8 +284,13 @@ def compute_case_stats(
         trial_count = len(group)
         # Pass verdicts per trial (None=unknown).
         verdicts: list[bool | None] = []
+        verdict_by_trial_id: dict[UUID, bool | None] = {}
         for s in group:
-            verdicts.append(_trial_passed(grade_lookup.get(s.trial_id, [])))
+            verdict = _trial_passed(grade_lookup.get(s.trial_id, []))
+            if verdict is None and _is_runtime_failure(s.error_code):
+                verdict = False
+            verdicts.append(verdict)
+            verdict_by_trial_id[s.trial_id] = verdict
 
         hard_gate_passed_count = sum(1 for v in verdicts if v is True)
         completed_count = sum(
@@ -282,9 +323,7 @@ def compute_case_stats(
         if first_attempt is None:
             first_attempt_passed: bool | None = None
         else:
-            first_attempt_passed = _trial_passed(
-                grade_lookup.get(first_attempt.trial_id, [])
-            )
+            first_attempt_passed = verdict_by_trial_id[first_attempt.trial_id]
 
         pass_at_n: bool | None
         pass_all_n: bool | None
@@ -295,9 +334,11 @@ def compute_case_stats(
             pass_at_n = hard_gate_passed_count >= 1
             pass_all_n = hard_gate_passed_count == trial_count
 
-        denom = max(completed_count, 1)
-        success_rate = hard_gate_passed_count / denom
-        low, high = wilson_ci(hard_gate_passed_count, completed_count)
+        quality_count = quality_trial_count(group)
+        success_rate = (
+            hard_gate_passed_count / quality_count if quality_count else 0.0
+        )
+        low, high = wilson_ci(hard_gate_passed_count, quality_count)
 
         tokens_in_values = [float(s.tokens_in) for s in group]
         tokens_out_values = [float(s.tokens_out) for s in group]
@@ -380,10 +421,11 @@ def compute_experiment_stats(
     pass_at_n_cases = sum(1 for c in rows if c.pass_at_n is True)
     pass_all_n_cases = sum(1 for c in rows if c.pass_all_n is True)
 
+    quality_count = completed_count + runtime_failure_count
     success_rate = (
-        hard_gate_passed_count / completed_count if completed_count else 0.0
+        hard_gate_passed_count / quality_count if quality_count else 0.0
     )
-    sr_low, sr_high = wilson_ci(hard_gate_passed_count, completed_count)
+    sr_low, sr_high = wilson_ci(hard_gate_passed_count, quality_count)
 
     return ExperimentStat(
         case_count=case_count,

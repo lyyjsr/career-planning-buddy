@@ -135,9 +135,11 @@ class ProviderCallRecorder:
             agent_error = exc
         except asyncio.CancelledError:
             # The CancelledError is re-raised after we persist the row so the
-            # executor's cancel-cooperative path is preserved exactly.
+            # executor's cancel-cooperative path is preserved exactly. The
+            # schema reserves error_code for status="error"; cancellation is
+            # represented by its distinct status and therefore stores NULL.
             status = "cancelled"
-            error_code = "RUN_CANCELLED"
+            error_code = None
             try:
                 await self._persist(
                     sequence=sequence,
