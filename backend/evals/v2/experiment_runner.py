@@ -259,13 +259,17 @@ class ExperimentRunner:
         # Used to assemble the counterfactual paired diffs below.
         grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
 
-        async with self._session_factory() as session:
-            repo = EvalRepository(session)
-            service = EvalService(session)
-            for trial_summary in report.trials:
-                case = cases_by_id.get(trial_summary.case_id)
-                if case is None or trial_summary.status != "completed":
-                    continue
+        for trial_summary in report.trials:
+            case = cases_by_id.get(trial_summary.case_id)
+            if case is None or trial_summary.status != "completed":
+                continue
+            # Keep each Trial in its own Session. Reading scores starts an
+            # implicit transaction; reusing that Session would make the next
+            # grade_trial commit only a nested savepoint and then roll it back
+            # when the shared Session closes.
+            async with self._session_factory() as session:
+                repo = EvalRepository(session)
+                service = EvalService(session)
                 try:
                     await service.grade_trial(trial_summary.trial_id, case)
                 except AppError as exc:

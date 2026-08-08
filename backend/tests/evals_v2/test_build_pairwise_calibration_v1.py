@@ -15,9 +15,9 @@ Pins:
   ``human_label`` / ``winner`` / etc. — regression guard for the
   forbidden-field contract.
 
-The DB-bound tests reuse the existing ``db_connection`` fixture and the
-two Stage B-1 experiments already provisioned in the dev DB
-(`compact_execution_v1` vs `structured_reasoning_v1`).
+The DB-bound tests provision their own Stage B-1 experiments
+(`compact_execution_v1` vs `structured_reasoning_v1`) so they remain
+reproducible against the empty PostgreSQL database used by CI.
 """
 
 from __future__ import annotations
@@ -29,7 +29,9 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+import pytest_asyncio
 
+from app.core.config import get_settings
 from app.models.eval import EvalTrialPair
 from scripts.build_pairwise_calibration_v1 import (
     DATASET_ID,
@@ -222,21 +224,35 @@ def test_loader_rejects_row_with_human_label() -> None:
 
 # ----------------------------------------------------- DB-bound gate tests
 #
-# These hit the dev DB to confirm the gate check + dry-run behaviour
-# against the real Stage B-1 experiments (23 variant-backed pairs, 0
-# human annotations today).
+# These provision 23 variant-backed pairs with no human annotations, then
+# confirm the formal gate and dry-run behaviour against that isolated data.
 
 
-# Stable IDs of the two Stage B-1 experiments provisioned earlier in
-# this session. Used only by the gate-state tests; if those experiments
-# ever roll out of the dev DB, refresh these constants.
-_STAGE_B1_BASELINE = UUID("e6576f45-d2eb-4a0c-a943-11c752e316d8")
-_STAGE_B1_CANDIDATE = UUID("c8d9a500-2040-4e13-a77c-a1041c7909e7")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def stage_b1_experiment_ids() -> tuple[UUID, UUID]:
+    """Create the Stage B-1 comparison data required by the builder tests."""
+
+    from scripts.stage_b1_provision import provision
+
+    settings = get_settings().model_copy(
+        update={
+            "llm_provider": "mock",
+            "eval_provider_mode": "fixture",
+            "search_provider": "mock",
+            "embedding_provider": "mock",
+        }
+    )
+    outcome = await provision(settings=settings)
+    assert outcome["ok"] is True
+    return (
+        UUID(str(outcome["baseline_experiment_id"])),
+        UUID(str(outcome["candidate_experiment_id"])),
+    )
 
 
 @pytest.mark.asyncio
 async def test_builder_dry_run_reports_gate_unmet_on_stage_b1(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    stage_b1_experiment_ids: tuple[UUID, UUID], tmp_path: Path
 ) -> None:
     """Dry-run on the current Stage B-1 pairs (0 human annotations)
     returns ``{ok: False, reason: "gate_unmet", valid: 0, required: 100}``
@@ -244,10 +260,11 @@ async def test_builder_dry_run_reports_gate_unmet_on_stage_b1(
 
     from scripts import build_pairwise_calibration_v1 as builder
 
+    baseline_id, candidate_id = stage_b1_experiment_ids
     # Ensure the build path doesn't touch committed datasets.
     out = await builder.build_v1(
-        baseline_experiment_id=_STAGE_B1_BASELINE,
-        candidate_experiment_id=_STAGE_B1_CANDIDATE,
+        baseline_experiment_id=baseline_id,
+        candidate_experiment_id=candidate_id,
         datasets_dir=tmp_path,
         dry_run=True,
     )
@@ -261,7 +278,7 @@ async def test_builder_dry_run_reports_gate_unmet_on_stage_b1(
 
 @pytest.mark.asyncio
 async def test_builder_refuses_to_write_v1_below_gate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    stage_b1_experiment_ids: tuple[UUID, UUID], tmp_path: Path
 ) -> None:
     """Non-dry-run below the gate raises CalibrationGateUnmet and
     writes no JSONL."""
@@ -269,16 +286,19 @@ async def test_builder_refuses_to_write_v1_below_gate(
     from scripts.build_pairwise_calibration_v1 import CalibrationGateUnmet
 
     with pytest.raises(CalibrationGateUnmet):
-        await build_v1_for_test(tmp_path)
+        await build_v1_for_test(tmp_path, stage_b1_experiment_ids)
     assert not (tmp_path / f"{DATASET_ID}.jsonl").exists()
 
 
-async def build_v1_for_test(tmp_path: Path) -> dict[str, Any]:
+async def build_v1_for_test(
+    tmp_path: Path, experiment_ids: tuple[UUID, UUID]
+) -> dict[str, Any]:
     from scripts.build_pairwise_calibration_v1 import build_v1
 
+    baseline_id, candidate_id = experiment_ids
     return await build_v1(
-        baseline_experiment_id=_STAGE_B1_BASELINE,
-        candidate_experiment_id=_STAGE_B1_CANDIDATE,
+        baseline_experiment_id=baseline_id,
+        candidate_experiment_id=candidate_id,
         datasets_dir=tmp_path,
         dry_run=False,
     )
@@ -286,7 +306,9 @@ async def build_v1_for_test(tmp_path: Path) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_builder_emits_v1_and_round_trips_when_gate_passes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    stage_b1_experiment_ids: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """Lower the gate threshold to 0 so the build actually emits; verify
     the output round-trips the loader and carries no forbidden fields.
@@ -309,9 +331,10 @@ async def test_builder_emits_v1_and_round_trips_when_gate_passes(
     loader_mod.DATASETS_DIR = tmp_path
     loader_mod.EVAL_ROOT = tmp_path.parent
 
+    baseline_id, candidate_id = stage_b1_experiment_ids
     out = await builder.build_v1(
-        baseline_experiment_id=_STAGE_B1_BASELINE,
-        candidate_experiment_id=_STAGE_B1_CANDIDATE,
+        baseline_experiment_id=baseline_id,
+        candidate_experiment_id=candidate_id,
         datasets_dir=tmp_path,
         dry_run=False,
     )
@@ -339,7 +362,9 @@ async def test_builder_emits_v1_and_round_trips_when_gate_passes(
 
 @pytest.mark.asyncio
 async def test_builder_output_is_idempotent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    stage_b1_experiment_ids: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """Two consecutive builds into different dirs produce byte-identical
     JSONL and manifest — the builder is a pure function of DB state."""
@@ -359,9 +384,10 @@ async def test_builder_output_is_idempotent(
     # the verification.
     loader_mod.DATASETS_DIR = dir_a
     loader_mod.EVAL_ROOT = dir_a.parent
+    baseline_id, candidate_id = stage_b1_experiment_ids
     out_a = await builder.build_v1(
-        baseline_experiment_id=_STAGE_B1_BASELINE,
-        candidate_experiment_id=_STAGE_B1_CANDIDATE,
+        baseline_experiment_id=baseline_id,
+        candidate_experiment_id=candidate_id,
         datasets_dir=dir_a,
         dry_run=False,
     )
@@ -370,8 +396,8 @@ async def test_builder_output_is_idempotent(
     loader_mod.DATASETS_DIR = dir_b
     loader_mod.EVAL_ROOT = dir_b.parent
     out_b = await builder.build_v1(
-        baseline_experiment_id=_STAGE_B1_BASELINE,
-        candidate_experiment_id=_STAGE_B1_CANDIDATE,
+        baseline_experiment_id=baseline_id,
+        candidate_experiment_id=candidate_id,
         datasets_dir=dir_b,
         dry_run=False,
     )
