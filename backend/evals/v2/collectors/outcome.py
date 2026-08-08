@@ -166,6 +166,7 @@ def _task_projection(task: Task) -> dict[str, object]:
         "title": task.title,
         "task_type": task.task_type,
         "state": task.state,
+        "starter_action": task.starter_action,
         "deliverable": task.deliverable,
         "estimated_minutes": task.estimated_minutes,
         "scheduled_date": task.scheduled_date.isoformat(),

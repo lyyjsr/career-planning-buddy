@@ -156,6 +156,14 @@ async def test_grade_trial_persists_evidence_items_and_scores_per_domain(
     # A completed plan run also persisted plan + task projections.
     assert "plan_projection" in kinds_present
     assert "task_projection" in kinds_present
+    task_items = [item for item in items if item.kind == "task_projection"]
+    assert task_items
+    assert all(item.projection_json.get("starter_action") for item in task_items)
+
+    startability = next(
+        result for result in results if result.grader_name == "task.startability"
+    )
+    assert startability.passed is True
 
     # eval_scores rows cover every domain.
     async with session_transaction(db_session):
@@ -411,7 +419,9 @@ async def test_pr9c2_step_projections_deduplicate_per_attempt(
     # The repair path retries rule_validator at least twice, so we expect
     # at least two step_projection rows for that node alone.
     rule_validator_items = [
-        i for i in step_items if i.source_id.startswith("rule_validator")
+        i
+        for i in step_items
+        if i.source_id is not None and i.source_id.startswith("rule_validator")
     ]
     assert len(rule_validator_items) >= 2, (
         f"expected >=2 rule_validator step projections (one per attempt), "
@@ -424,6 +434,7 @@ async def test_pr9c2_step_projections_deduplicate_per_attempt(
     )
     # And each retried node's source_id must carry the attempt suffix.
     for sv in rule_validator_items:
+        assert sv.source_id is not None
         assert "#attempt" in sv.source_id, (
             f"step_projection source_id missing attempt suffix: {sv.source_id!r}"
         )
