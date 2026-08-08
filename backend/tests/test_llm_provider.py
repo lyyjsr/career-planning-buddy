@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -17,11 +18,12 @@ from app.core.config import Settings
 from app.harness.snapshots import SnapshotService
 from app.models.plan import Plan
 from app.providers.llm import (
+    DirectLLMPlanningProvider,
     MockPlanningProvider,
     OpenAICompatiblePlanningProvider,
     build_planning_provider,
 )
-from app.schemas.agent_runs import ProviderPlanResponse
+from app.schemas.agent_runs import AgentTurnResponse, MemoryContext, ProviderPlanResponse
 from app.schemas.enums import ReplanMode
 from tests.test_agent_nodes import candidate
 from tests.test_agent_runtime import (
@@ -136,6 +138,49 @@ async def test_openai_compatible_provider_returns_validated_envelope_metadata() 
 
 
 @pytest.mark.asyncio
+async def test_direct_llm_provider_hides_tools_memory_and_evidence() -> None:
+    plan, context = candidate()
+    hidden_memory = "must-not-appear-in-direct-baseline"
+    context = context.model_copy(
+        update={
+            "pinned_memories": [
+                MemoryContext(
+                    memory_id=uuid4(),
+                    version=1,
+                    memory_type="preference",
+                    summary=hidden_memory,
+                )
+            ]
+        }
+    )
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body: object = json.loads(request.content)
+        assert isinstance(body, dict)
+        assert "tools" not in body
+        messages = body.get("messages")
+        assert isinstance(messages, list)
+        rendered = json.dumps(messages, ensure_ascii=False)
+        assert hidden_memory not in rendered
+        assert "retrieved_memories" not in rendered
+        assert "<evidence_catalog>" not in rendered
+        assert "<available_tools>" not in rendered
+        return response_handler(plan.model_dump_json())(request)
+
+    provider = DirectLLMPlanningProvider(provider_for(handle))
+    raw = await provider.generate_agent_turn(
+        message="制定计划",
+        context=context,
+        replan_mode=ReplanMode.INITIAL,
+        available_tools=[],
+        evidence_catalog=[],
+        force_final=False,
+    )
+
+    assert AgentTurnResponse.model_validate(raw).final == plan
+
+
+@pytest.mark.asyncio
 async def test_invalid_json_can_be_repaired_once_through_explicit_provider_call() -> None:
     plan, context = candidate()
     calls = 0
@@ -197,6 +242,7 @@ def test_provider_factory_switches_explicitly_without_fallback() -> None:
         llm_api_key="unit-test-key",
         llm_base_url="https://llm.example.test/v1",
         llm_model="configured-model",
+        agent_deadline_seconds=120,
     )
 
     assert isinstance(build_planning_provider(mock_settings), MockPlanningProvider)
@@ -210,6 +256,12 @@ def test_provider_factory_switches_explicitly_without_fallback() -> None:
     assert real_snapshot.prompt_versions["career_planning"] == (
         "openai_compatible_plan_stage6_context_v1"
     )
+    assert real_snapshot.node_timeouts_seconds["career_planning_agent"] == 90.0
+    assert real_snapshot.node_timeouts_seconds["revise_or_fallback"] == 60.0
+
+    mock_snapshot = SnapshotService.build_config(mock_settings)
+    assert mock_snapshot.node_timeouts_seconds["career_planning_agent"] == 30
+    assert mock_snapshot.node_timeouts_seconds["revise_or_fallback"] == 12
 
 
 @pytest.mark.asyncio

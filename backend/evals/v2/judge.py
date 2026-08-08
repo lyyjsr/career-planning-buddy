@@ -380,7 +380,10 @@ class OpenAICompatiblePairwiseJudge:
         latency_ms = int((monotonic() - started) * 1000)
         content = self._extract_content(response)
         if content is None:
-            raise ProviderUnavailableError("Pairwise Judge returned empty content")
+            details = self._empty_content_details(response)
+            raise ProviderUnavailableError(
+                f"Pairwise Judge returned empty content ({details})"
+            )
         return content, latency_ms
 
     @staticmethod
@@ -402,6 +405,35 @@ class OpenAICompatiblePairwiseJudge:
             return None
         content = message.get("content")
         return content if isinstance(content, str) and content.strip() else None
+
+    @staticmethod
+    def _empty_content_details(response: httpx.Response) -> str:
+        """Return non-content diagnostics without leaking model reasoning."""
+
+        try:
+            body: object = response.json()
+        except ValueError:
+            return "invalid_json=true"
+        if not isinstance(body, Mapping):
+            return "invalid_body=true"
+        choices = body.get("choices")
+        first = choices[0] if isinstance(choices, list) and choices else None
+        finish_reason = first.get("finish_reason") if isinstance(first, Mapping) else None
+        message = first.get("message") if isinstance(first, Mapping) else None
+        has_reasoning = bool(
+            isinstance(message, Mapping)
+            and isinstance(message.get("reasoning_content"), str)
+            and message.get("reasoning_content")
+        )
+        usage = body.get("usage")
+        completion_tokens = (
+            usage.get("completion_tokens") if isinstance(usage, Mapping) else None
+        )
+        return (
+            f"finish_reason={finish_reason!s},"
+            f"has_reasoning={str(has_reasoning).lower()},"
+            f"completion_tokens={completion_tokens!s}"
+        )
 
     @staticmethod
     def _parse(body_text: str) -> PairwiseJudgeOutput | None:
