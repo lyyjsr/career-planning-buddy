@@ -77,12 +77,13 @@ class NodeRunner:
             raise AgentDeadlineExceededError from exc
         except BaseException as exc:
             code = exc.code if isinstance(exc, AgentError) else "NODE_EXECUTION_FAILED"
+            error_message = str(exc) if isinstance(exc, AgentError) else type(exc).__name__
             await self.fail_step(
                 run_id,
                 step.id,
                 latency_ms=int((monotonic() - started) * 1000),
                 error_code=code,
-                error_message=type(exc).__name__,
+                error_message=error_message,
             )
             raise
         traced_latency = output.telemetry.trace_data.get("latency_ms")
@@ -125,12 +126,13 @@ class NodeRunner:
             raise AgentDeadlineExceededError from exc
         except BaseException as exc:
             code = exc.code if isinstance(exc, AgentError) else "NODE_EXECUTION_FAILED"
+            error_message = str(exc) if isinstance(exc, AgentError) else type(exc).__name__
             await self.fail_step(
                 run_id,
                 step.id,
                 latency_ms=int((monotonic() - started) * 1000),
                 error_code=code,
-                error_message=type(exc).__name__,
+                error_message=error_message,
             )
             raise
         traced_latency = output.telemetry.trace_data.get("latency_ms")

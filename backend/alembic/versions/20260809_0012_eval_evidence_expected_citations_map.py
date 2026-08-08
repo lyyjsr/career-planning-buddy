@@ -34,7 +34,7 @@ _NEW_LIST = _OLD_LIST[:-1] + ",'expected_citations_map')"
 
 def upgrade() -> None:
     op.execute(
-        f"ALTER TABLE eval_evidence_items DROP CONSTRAINT ck_eval_evidence_items_kind"
+        "ALTER TABLE eval_evidence_items DROP CONSTRAINT ck_eval_evidence_items_kind"
     )
     op.execute(
         f"ALTER TABLE eval_evidence_items ADD CONSTRAINT ck_eval_evidence_items_kind "
@@ -44,7 +44,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        f"ALTER TABLE eval_evidence_items DROP CONSTRAINT ck_eval_evidence_items_kind"
+        "ALTER TABLE eval_evidence_items DROP CONSTRAINT ck_eval_evidence_items_kind"
     )
     op.execute(
         f"ALTER TABLE eval_evidence_items ADD CONSTRAINT ck_eval_evidence_items_kind "

@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 )
 
 from app.core.config import Settings, get_settings  # noqa: E402
-from app.models.eval import EvalTrial, EvalTrialPair  # noqa: E402
+from app.models.eval import EvalTrialPair  # noqa: E402
 from app.repositories.evals import EvalRepository  # noqa: E402
 from app.services.evals import EvalService  # noqa: E402
 from evals.v2.contracts import ExperimentCreate  # noqa: E402

@@ -9,14 +9,16 @@ tests in this file and tests/evals_v2/.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from http import HTTPStatus
 from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
+from app.agent.eval_executor import EvalRunnerExecutor
 from app.core.config import get_settings
 from app.core.security import TokenService
 from app.models.eval import EvalExperiment
@@ -252,14 +254,53 @@ async def test_get_eval_run_report_returns_200_when_experiment_is_terminal(
 # ---------------------------------------------------------------------------
 # EvalRunnerExecutor recovery
 #
-# recover_interrupted() opens its own session via the executor's
-# session_factory. Production wires that factory to the global
-# AsyncSessionFactory (its own engine); in tests the db_connection fixture's
-# rolled-back transaction is bound to one specific connection and sharing it
-# across an engine-less session_factory raises ``MissingGreenlet`` deep in
-# asyncpg. The recovery body is a straightforward select + transition;
-# verified manually against a real DB rather than covered by automated tests.
+# recover_interrupted() opens its own session, so this test binds both setup
+# and recovery sessions to the fixture connection using nested savepoints.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_eval_executor_recovers_pending_and_running_trials(
+    db_connection: AsyncConnection,
+) -> None:
+    session_factory = async_sessionmaker(
+        bind=db_connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    bundle = filter_cases(load_dataset(), ["create-01", "create-02"])
+
+    async with session_factory() as session:
+        experiment, trials = await EvalService(session).create_experiment(
+            dataset=bundle,
+            config=_stage5_config(bundle.manifest),
+        )
+        await EvalService(session).transition_experiment(experiment.id, "running")
+        await EvalRepository(session).mark_trial_running(
+            trials[1].id,
+            started_at=datetime.now(UTC),
+        )
+        await session.commit()
+
+    executor = EvalRunnerExecutor(
+        session_factory=session_factory,
+        settings=get_settings(),
+    )
+    assert await executor.recover_interrupted() == 1
+
+    async with session_factory() as session:
+        recovered_experiment = await EvalRepository(session).get_experiment(
+            experiment.id
+        )
+        recovered_trials = await EvalRepository(session).list_trials(experiment.id)
+
+    assert recovered_experiment is not None
+    assert recovered_experiment.status == "failed"
+    assert [trial.status for trial in recovered_trials] == ["cancelled", "failed"]
+    assert {trial.error_code for trial in recovered_trials} == {
+        "PROCESS_INTERRUPTED"
+    }
 
 
 

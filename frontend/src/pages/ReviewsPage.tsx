@@ -189,8 +189,11 @@ export function ReviewsPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const resolvedPlan = me.data?.active_plan ?? activePlan.data;
   const hasPlan =
-    me.data?.profile_complete === true && (me.data?.active_plan ?? activePlan.data) !== null;
+    me.data?.profile_complete === true &&
+    resolvedPlan !== null &&
+    resolvedPlan !== undefined;
 
   function onStartNext(reviewId: string): void {
     if (startNext.isPending) return;

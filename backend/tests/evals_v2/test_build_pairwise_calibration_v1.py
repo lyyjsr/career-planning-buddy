@@ -24,11 +24,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
 
+from app.models.eval import EvalTrialPair
 from scripts.build_pairwise_calibration_v1 import (
     DATASET_ID,
     DATASET_VERSION,
@@ -62,24 +64,24 @@ def _restore_loader_paths() -> Iterator[None]:
 def _pair_stub(
     *,
     case_id: str = "create-01",
-    baseline_trial_id: Any = None,
-    candidate_trial_id: Any = None,
-    pair_id: Any = None,
-) -> Any:
+    baseline_trial_id: UUID | None = None,
+    candidate_trial_id: UUID | None = None,
+    pair_id: UUID | None = None,
+) -> EvalTrialPair:
     """Lightweight stand-in for ``EvalTrialPair`` — only the attributes
     ``_validate_row`` reads (``id``, ``case_id``, ``baseline_trial_id``,
     ``candidate_trial_id``). Avoids a round-trip to the DB for the
     pure-logic validation tests."""
 
-    class _Stub:
-        pass
-
-    s = _Stub()
-    s.id = pair_id or uuid4()
-    s.case_id = case_id
-    s.baseline_trial_id = baseline_trial_id or uuid4()
-    s.candidate_trial_id = candidate_trial_id or uuid4()
-    return s
+    return cast(
+        EvalTrialPair,
+        SimpleNamespace(
+            id=pair_id or uuid4(),
+            case_id=case_id,
+            baseline_trial_id=baseline_trial_id or uuid4(),
+            candidate_trial_id=candidate_trial_id or uuid4(),
+        ),
+    )
 
 
 def _valid_row(
@@ -87,7 +89,7 @@ def _valid_row(
     request: dict[str, Any] | None = None,
     baseline_plan: dict[str, Any] | None = None,
     candidate_plan: dict[str, Any] | None = None,
-    pair: Any = None,
+    pair: EvalTrialPair | None = None,
 ) -> dict[str, Any]:
     """Return a row that passes all 5 validations. Caller can mutate
     fields before invoking ``_validate_row`` to trigger a specific
@@ -141,7 +143,7 @@ def test_validate_row_accepts_well_formed_row() -> None:
 def test_validate_row_rejects_missing_projection() -> None:
     pair = _pair_stub()
     row = _valid_row(pair=pair)
-    row["frozen_baseline_plan_projection"] = None  # type: ignore[assignment]
+    row["frozen_baseline_plan_projection"] = None
     with pytest.raises(MissingProjectionError) as exc_info:
         _validate_row(row, pair=pair)
     assert "frozen_baseline_plan_projection" in exc_info.value.kinds
@@ -179,7 +181,7 @@ def test_validate_row_rejects_pair_hash_drift() -> None:
 def test_validate_row_rejects_forbidden_field() -> None:
     pair = _pair_stub()
     row = _valid_row(pair=pair)
-    row["human_label"] = "a"  # type: ignore[assignment]
+    row["human_label"] = "a"
     with pytest.raises(ForbiddenFieldError) as exc_info:
         _validate_row(row, pair=pair)
     assert exc_info.value.field == "human_label"
@@ -212,7 +214,7 @@ def test_loader_rejects_row_with_human_label() -> None:
     from evals.v2.calibration_loader import CalibrationExportLine
 
     row = _valid_row()
-    row["human_label"] = "a"  # type: ignore[assignment]
+    row["human_label"] = "a"
     with pytest.raises(ValidationError) as exc_info:
         CalibrationExportLine.model_validate(row)
     assert "extra_forbidden" in str(exc_info.value)
@@ -228,8 +230,8 @@ def test_loader_rejects_row_with_human_label() -> None:
 # Stable IDs of the two Stage B-1 experiments provisioned earlier in
 # this session. Used only by the gate-state tests; if those experiments
 # ever roll out of the dev DB, refresh these constants.
-_STAGE_B1_BASELINE = "e6576f45-d2eb-4a0c-a943-11c752e316d8"
-_STAGE_B1_CANDIDATE = "c8d9a500-2040-4e13-a77c-a1041c7909e7"
+_STAGE_B1_BASELINE = UUID("e6576f45-d2eb-4a0c-a943-11c752e316d8")
+_STAGE_B1_CANDIDATE = UUID("c8d9a500-2040-4e13-a77c-a1041c7909e7")
 
 
 @pytest.mark.asyncio
@@ -271,7 +273,7 @@ async def test_builder_refuses_to_write_v1_below_gate(
     assert not (tmp_path / f"{DATASET_ID}.jsonl").exists()
 
 
-async def build_v1_for_test(tmp_path: Path) -> Any:
+async def build_v1_for_test(tmp_path: Path) -> dict[str, Any]:
     from scripts.build_pairwise_calibration_v1 import build_v1
 
     return await build_v1(
@@ -386,7 +388,7 @@ async def test_builder_output_is_idempotent(
     import json as _json
 
     def _manifest_payload_minus_source(path: Path) -> dict[str, Any]:
-        data = _json.loads(path.read_text(encoding="utf-8"))
+        data = cast(dict[str, Any], _json.loads(path.read_text(encoding="utf-8")))
         data.pop("source_path", None)
         return data
 

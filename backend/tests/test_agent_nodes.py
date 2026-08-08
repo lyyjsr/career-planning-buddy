@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.agent.errors import BudgetExceededError
 from app.agent.graph import FixedPlanningGraph
 from app.agent.nodes import (
     build_planning_context,
@@ -155,6 +156,8 @@ def test_stage2_budget_and_tool_registry_enforce_empty_tool_list() -> None:
         CancellationToken(),
     )
     guard.record_llm_call(100, 100)
+    with pytest.raises(BudgetExceededError, match="input_tokens"):
+        guard.record_llm_call(settings.max_input_tokens_per_call + 1, 0)
     guard.claim_format_repair()
     assert guard.format_repairs == 1
     assert ToolRegistry(feature_stage=2).available_specs() == []
