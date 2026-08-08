@@ -120,6 +120,7 @@ class ProviderCallRecorder:
         response_hash: str | None = None
         tokens_in: int | None = None
         tokens_out: int | None = None
+        agent_error: AgentError | None = None
         try:
             raw_response = await coro_factory()
         except AgentError as exc:
@@ -131,6 +132,7 @@ class ProviderCallRecorder:
             # ``type(exc).__name__`` (the Python class name) which never
             # matched the StatsShell taxonomy.
             error_code = exc.code
+            agent_error = exc
         except asyncio.CancelledError:
             # The CancelledError is re-raised after we persist the row so the
             # executor's cancel-cooperative path is preserved exactly.
@@ -189,6 +191,9 @@ class ProviderCallRecorder:
             latency_ms=latency_ms,
             model_id=self.model_id if provider_kind == "llm" else None,
         )
+
+        if agent_error is not None:
+            raise agent_error
 
         return ProviderInvocationResult(
             sequence=sequence,

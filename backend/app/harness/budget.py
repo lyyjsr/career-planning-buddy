@@ -49,7 +49,10 @@ class BudgetGuard:
         if datetime.now(UTC) >= self._deadline_at:
             raise AgentDeadlineExceededError
         if self.tokens_in + self.tokens_out > self._config.max_total_tokens:
-            raise BudgetExceededError
+            raise BudgetExceededError(
+                "total_tokens "
+                f"{self.tokens_in + self.tokens_out} > {self._config.max_total_tokens}"
+            )
 
     def remaining_seconds(self) -> float:
         self.check()
@@ -57,11 +60,19 @@ class BudgetGuard:
 
     def record_llm_call(self, tokens_in: int, tokens_out: int) -> None:
         if self.llm_calls >= self._config.max_llm_calls:
-            raise BudgetExceededError
+            raise BudgetExceededError(
+                f"llm_calls {self.llm_calls + 1} > {self._config.max_llm_calls}"
+            )
         if tokens_in > self._config.max_input_tokens_per_call:
-            raise BudgetExceededError
+            raise BudgetExceededError(
+                "input_tokens "
+                f"{tokens_in} > {self._config.max_input_tokens_per_call}"
+            )
         if tokens_out > self._config.max_output_tokens_per_call:
-            raise BudgetExceededError
+            raise BudgetExceededError(
+                "output_tokens "
+                f"{tokens_out} > {self._config.max_output_tokens_per_call}"
+            )
         self.llm_calls += 1
         self.tokens_in += tokens_in
         self.tokens_out += tokens_out

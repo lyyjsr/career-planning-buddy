@@ -123,19 +123,21 @@ class EvalRunnerExecutor:
                     except AppError:
                         # Illegal transition (rare race) -- never block startup.
                         continue
-                    # Stamp the interrupt code on any non-terminal Trial that
-                    # the crash stranded. We bypass the trial transition
-                    # trigger here because the DB trigger accepts
-                    # (running -> failed) and we are writing from the harness
-                    # post-mortem.
+                    # Preserve the DB lifecycle contract during recovery:
+                    # work that never started is cancelled, while in-flight
+                    # work is failed. Both retain the interrupt reason.
                     trials = await service._evals.list_trials(exp.id)  # noqa: SLF001
                     for trial in trials:
-                        if trial.status in {"pending", "running"}:
+                        if trial.status == "pending":
+                            trial.status = "cancelled"
+                        elif trial.status == "running":
                             trial.status = "failed"
-                            if not trial.error_code:
-                                trial.error_code = (
-                                    _PROCESS_INTERRUPTED_CODE
-                                )
+                        else:
+                            continue
+                        if not trial.error_code:
+                            trial.error_code = (
+                                _PROCESS_INTERRUPTED_CODE
+                            )
         return len(rows)
 
     async def _cancel_was_requested(self, experiment_id: UUID) -> bool:
