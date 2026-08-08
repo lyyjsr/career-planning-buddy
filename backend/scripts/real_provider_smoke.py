@@ -26,10 +26,17 @@ if TYPE_CHECKING:
 class SmokeRunError(RuntimeError):
     """Safe smoke failure carrying only a stable, non-sensitive error code."""
 
-    def __init__(self, error_code: str, *, stage: str) -> None:
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        stage: str,
+        details: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(error_code)
         self.error_code = error_code
         self.stage = stage
+        self.details = details or {}
 
 
 async def run_smoke(settings: Settings) -> dict[str, object]:
@@ -188,7 +195,45 @@ async def _load_successful_run(
         .where(AgentStep.run_id == run_id, AgentStep.model_id.is_not(None))
     )
     if run.status not in {"completed", "degraded"} or run.final_plan_id is None:
-        raise SmokeRunError(run.error_code or "SMOKE_RUN_FAILED", stage=stage)
+        steps = list(
+            (
+                await session.scalars(
+                    select(AgentStep)
+                    .where(AgentStep.run_id == run_id)
+                    .order_by(AgentStep.sequence)
+                )
+            ).all()
+        )
+        config = run.config_snapshot_json
+        raise SmokeRunError(
+            run.error_code or "SMOKE_RUN_FAILED",
+            stage=stage,
+            details={
+                "run_status": run.status,
+                "limits": {
+                    "max_llm_calls": config.get("max_llm_calls"),
+                    "max_total_tokens": config.get("max_total_tokens"),
+                    "max_input_tokens_per_call": config.get(
+                        "max_input_tokens_per_call"
+                    ),
+                    "max_output_tokens_per_call": config.get(
+                        "max_output_tokens_per_call"
+                    ),
+                },
+                "steps": [
+                    {
+                        "node": item.node_name,
+                        "status": item.status,
+                        "tokens_in": item.tokens_in,
+                        "tokens_out": item.tokens_out,
+                        "latency_ms": item.latency_ms,
+                        "error_code": item.error_code,
+                        "error_message": item.error_message,
+                    }
+                    for item in steps
+                ],
+            },
+        )
     if terminal_count != 1 or not provider_calls:
         raise SmokeRunError("SMOKE_TRACE_INVARIANT_FAILED", stage=stage)
     return {
@@ -242,6 +287,7 @@ def main() -> int:
                     "error_code": getattr(exc, "error_code", "SMOKE_EXECUTION_FAILED"),
                     "stage": getattr(exc, "stage", "smoke_setup"),
                     "error_type": type(exc).__name__,
+                    "details": getattr(exc, "details", {}),
                 }
             )
         )
