@@ -27,6 +27,14 @@ class SnapshotService:
     @staticmethod
     def build_config(settings: Settings) -> RuntimeConfigSnapshot:
         is_real = settings.llm_provider == "openai_compatible"
+        node_timeouts = dict(NODE_TIMEOUTS)
+        if is_real:
+            node_timeouts["career_planning_agent"] = min(
+                90.0, float(settings.agent_deadline_seconds)
+            )
+            node_timeouts["revise_or_fallback"] = min(
+                60.0, float(settings.agent_deadline_seconds)
+            )
         return RuntimeConfigSnapshot(
             graph_version=settings.agent_graph_version,
             feature_stage=settings.agent_feature_stage,
@@ -57,7 +65,7 @@ class SnapshotService:
             max_input_tokens_per_call=settings.agent_max_input_tokens_per_call,
             max_output_tokens_per_call=settings.agent_max_output_tokens_per_call,
             deadline_seconds=settings.agent_deadline_seconds,
-            node_timeouts_seconds=NODE_TIMEOUTS,
+            node_timeouts_seconds=node_timeouts,
             memory_semantic_retrieval_enabled=(settings.memory_semantic_retrieval_enabled),
             memory_retrieval_limit=settings.memory_retrieval_limit,
             memory_context_max_items=settings.memory_context_max_items,

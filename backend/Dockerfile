@@ -6,14 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.lock pyproject.toml ./
+RUN python -m pip install --no-cache-dir --requirement requirements.lock
+
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY evals ./evals
 COPY tests ./tests
 COPY scripts ./scripts
-RUN python -m pip install --no-cache-dir --requirement requirements.lock \
-    && python -m pip install --no-cache-dir --no-deps .
+RUN python -m pip install --no-cache-dir --no-deps .
 
 EXPOSE 8000
 
