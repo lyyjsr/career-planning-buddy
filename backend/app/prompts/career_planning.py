@@ -8,6 +8,7 @@ from app.schemas.agent_runs import EvidenceCatalogItem, PlanCandidate, PlanningC
 from app.schemas.enums import ReplanMode
 
 PLAN_PROMPT_VERSION = "openai_compatible_plan_stage6_context_v1"
+DIRECT_BASELINE_PROMPT_VERSION = "direct_llm_baseline_v1"
 FORMAT_REPAIR_PROMPT_VERSION = "openai_compatible_format_repair_v1"
 BUSINESS_REPAIR_PROMPT_VERSION = "openai_compatible_business_repair_v1"
 
@@ -52,6 +53,55 @@ def generation_messages(
             evidence_catalog=evidence_catalog or [],
             replan_mode=replan_mode,
         ),
+        payload=payload,
+    )
+
+
+def direct_baseline_messages(
+    *,
+    message: str,
+    context: PlanningContext,
+    replan_mode: ReplanMode,
+) -> list[dict[str, str]]:
+    """Render the minimal LLM-only arm used by controlled Eval comparisons.
+
+    The baseline receives explicit request/profile state and, for replans,
+    the current source plan/review. It never receives retrieved memories,
+    history summaries, evidence catalogs, or tool definitions.
+    """
+
+    profile = context.profile.model_dump(
+        mode="json", exclude={"user_id", "version"}
+    )
+    baseline_context: dict[str, object] = {
+        "user_request": message,
+        "replan_mode": replan_mode.value,
+        "profile": profile,
+        "planning_window": context.planning_window.model_dump(mode="json"),
+        "time_budget_minutes": context.time_budget_minutes,
+        "source_plan": (
+            context.source_plan.model_dump(mode="json")
+            if context.source_plan is not None
+            else None
+        ),
+        "source_review": (
+            context.source_review.model_dump(mode="json")
+            if context.source_review is not None
+            else None
+        ),
+    }
+    payload: dict[str, object] = {
+        "operation": "direct_llm_baseline",
+        "instruction": (
+            "Create the plan directly from the supplied explicit inputs. "
+            "No tools, retrieval, memory, or external evidence are available."
+        ),
+        "output_schema": plan_json_schema(),
+    }
+    return _messages(
+        context_text="<direct_baseline_input>\n"
+        + json.dumps(baseline_context, ensure_ascii=False, separators=(",", ":"))
+        + "\n</direct_baseline_input>",
         payload=payload,
     )
 

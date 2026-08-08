@@ -21,6 +21,7 @@ from app.agent.errors import (
 from app.core.config import Settings
 from app.prompts.career_planning import (
     business_repair_messages,
+    direct_baseline_messages,
     format_repair_messages,
     generation_messages,
 )
@@ -123,6 +124,21 @@ class OpenAICompatiblePlanningProvider:
                 context=context,
                 replan_mode=replan_mode,
                 evidence_catalog=evidence_catalog,
+            )
+        )
+
+    async def generate_direct_plan(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+    ) -> Mapping[str, object]:
+        return await self._generate(
+            direct_baseline_messages(
+                message=message,
+                context=context,
+                replan_mode=replan_mode,
             )
         )
 
@@ -306,6 +322,7 @@ class OpenAICompatiblePlanningProvider:
         if self._supports_thinking_control:
             request_body["thinking"] = {"type": "disabled"}
 
+
     @staticmethod
     def _response_mapping(response: httpx.Response) -> Mapping[object, object]:
         try:
@@ -417,6 +434,102 @@ class OpenAICompatiblePlanningProvider:
     @staticmethod
     def _nonnegative_int(value: object) -> int:
         return value if isinstance(value, int) and value >= 0 else 0
+
+
+class DirectLLMPlanningProvider:
+    """LLM-only Eval arm with no tool, memory, or evidence visibility."""
+
+    def __init__(self, delegate: OpenAICompatiblePlanningProvider) -> None:
+        self._delegate = delegate
+
+    async def generate_agent_turn(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        available_tools: list[ModelToolSpec],
+        evidence_catalog: list[EvidenceCatalogItem],
+        force_final: bool,
+    ) -> Mapping[str, object]:
+        del available_tools, evidence_catalog, force_final
+        raw = await self.generate_plan(
+            message=message,
+            context=context,
+            replan_mode=replan_mode,
+            evidence_catalog=[],
+        )
+        candidate = raw.get("candidate")
+        usage = raw.get("usage")
+        if candidate is None or usage is None:
+            return raw
+        return {"final": candidate, "tool_calls": [], "usage": usage}
+
+    async def generate_plan(
+        self,
+        *,
+        message: str,
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
+    ) -> Mapping[str, object]:
+        del evidence_catalog
+        return await self._delegate.generate_direct_plan(
+            message=message,
+            context=context,
+            replan_mode=replan_mode,
+        )
+
+    async def repair_format(
+        self,
+        *,
+        raw_output: Mapping[str, object],
+        context: PlanningContext,
+        replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
+    ) -> Mapping[str, object]:
+        del evidence_catalog
+        return await self._delegate.repair_format(
+            raw_output=raw_output,
+            context=_direct_context(context),
+            replan_mode=replan_mode,
+            evidence_catalog=[],
+        )
+
+    async def repair_business_rules(
+        self,
+        *,
+        candidate: PlanCandidate,
+        context: PlanningContext,
+        repair_instructions: list[str],
+        message: str,
+        replan_mode: ReplanMode,
+        evidence_catalog: list[EvidenceCatalogItem],
+    ) -> Mapping[str, object]:
+        del evidence_catalog
+        return await self._delegate.repair_business_rules(
+            candidate=candidate,
+            context=_direct_context(context),
+            repair_instructions=repair_instructions,
+            message=message,
+            replan_mode=replan_mode,
+            evidence_catalog=[],
+        )
+
+
+def _direct_context(context: PlanningContext) -> PlanningContext:
+    return context.model_copy(
+        update={
+            "recent_tasks": [],
+            "recent_reviews": [],
+            "completed_facts": [],
+            "blockers": [],
+            "pinned_memories": [],
+            "task_history_summary": None,
+            "review_history_summary": None,
+            "token_estimate": 0,
+        }
+    )
 
 
 class MockPlanningProvider:
@@ -966,9 +1079,13 @@ def build_planning_provider(
         raise ProviderConfigurationError(
             "openai_compatible requires LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL"
         )
-    return OpenAICompatiblePlanningProvider(
+    provider = OpenAICompatiblePlanningProvider(
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=str(settings.llm_base_url),
         model=settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
         max_output_tokens=settings.agent_max_output_tokens_per_call,
     )
+    if agent_variant == "direct_llm_v1":
+        return DirectLLMPlanningProvider(provider)
+    return provider

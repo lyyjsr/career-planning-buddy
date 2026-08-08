@@ -15,9 +15,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.providers.llm import (
+    DirectLLMPlanningProvider,
     MockPlanningProvider,
+    OpenAICompatiblePlanningProvider,
     PairSmokePlanningProvider,
     build_planning_provider,
 )
@@ -116,6 +118,22 @@ def test_build_provider_unknown_variant_falls_back_to_mock() -> None:
         settings, agent_variant="unknown_future_variant_v3"
     )
     assert isinstance(provider, MockPlanningProvider)
+
+
+def test_live_provider_dispatches_direct_and_full_variants() -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_provider="openai_compatible",
+        llm_api_key="unit-test-key",
+        llm_base_url="https://llm.example.test/v1",
+        llm_model="configured-model",
+    )
+
+    direct = build_planning_provider(settings, agent_variant="direct_llm_v1")
+    full = build_planning_provider(settings, agent_variant="full_agent_v1")
+
+    assert isinstance(direct, DirectLLMPlanningProvider)
+    assert isinstance(full, OpenAICompatiblePlanningProvider)
 
 
 # ---------------------------------------------------------------------------

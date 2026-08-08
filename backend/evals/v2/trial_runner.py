@@ -47,6 +47,7 @@ from app.harness.provider_calls import (
 from app.models.agent_run import AgentRun
 from app.models.eval import EvalTrial
 from app.models.provider_call import EvalProviderFixtureItem
+from app.prompts.career_planning import DIRECT_BASELINE_PROMPT_VERSION
 from app.providers.embedding import MockEmbeddingProvider, build_embedding_provider
 from app.providers.llm import (
     MockPlanningProvider,
@@ -122,7 +123,9 @@ class TrialRunner:
                 "agent_max_tool_calls": 4,
             }
         )
-        self._config = config or TrialRunnerConfig()
+        self._config = config or TrialRunnerConfig(
+            deadline_seconds=float(self._settings.agent_deadline_seconds) + 5.0
+        )
         # Stage B-1a-lite: frozen experiment-level context for provider
         # selection. ``None`` = legacy path (all existing callers that
         # don't pass this param keep their current behavior).
@@ -313,7 +316,14 @@ class TrialRunner:
         base_embedding: Any
         base_search: Any
         if mode == "live":
-            base_planning = build_planning_provider(self._settings)
+            agent_variant = (
+                self._runtime_context.agent_variant
+                if self._runtime_context is not None
+                else None
+            )
+            base_planning = build_planning_provider(
+                self._settings, agent_variant=agent_variant
+            )
             base_embedding = build_embedding_provider(self._settings)
             base_search = build_search_provider(self._settings)
         else:  # mock or fixture
@@ -397,12 +407,15 @@ class TrialRunner:
             embedding_provider = AuditEmbeddingProvider(base_embedding, recorder)
             search_provider = AuditSearchProvider(base_search, recorder)
 
+        tool_override = self._derive_tool_override(provider_fixtures)
+        if self._is_direct_llm_variant():
+            tool_override = set()
         tool_registry = build_tool_registry(
             settings=self._settings,
             session_factory=self._session_factory,
             embedding_provider=embedding_provider,
             search_provider=search_provider,
-            available_tools_override=self._derive_tool_override(provider_fixtures),
+            available_tools_override=tool_override,
         )
         return AgentRunExecutor(
             session_factory=self._session_factory,
@@ -456,7 +469,33 @@ class TrialRunner:
                     await self._apply_counterfactual_overrides(
                         session, run_id, provider_fixtures
                     )
+                if self._is_direct_llm_variant():
+                    await self._apply_direct_llm_overrides(session, run_id)
                 return run_id
+
+    async def _apply_direct_llm_overrides(
+        self,
+        session: AsyncSession,
+        run_id: UUID,
+    ) -> None:
+        run = await session.get(AgentRun, run_id, with_for_update=True)
+        if run is None or run.config_snapshot_json is None:
+            return
+        snapshot = dict(run.config_snapshot_json)
+        snapshot["available_tools"] = []
+        raw_prompt_versions = snapshot.get("prompt_versions")
+        prompt_versions = (
+            dict(raw_prompt_versions) if isinstance(raw_prompt_versions, dict) else {}
+        )
+        prompt_versions["career_planning"] = DIRECT_BASELINE_PROMPT_VERSION
+        snapshot["prompt_versions"] = prompt_versions
+        run.config_snapshot_json = snapshot
+
+    def _is_direct_llm_variant(self) -> bool:
+        return bool(
+            self._runtime_context is not None
+            and self._runtime_context.agent_variant == "direct_llm_v1"
+        )
 
     async def _apply_counterfactual_overrides(
         self,
