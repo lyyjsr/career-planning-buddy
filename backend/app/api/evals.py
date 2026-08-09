@@ -197,7 +197,12 @@ async def create_eval_run(
         baseline_experiment_id=payload.baseline_experiment_id,
         agent_variant=payload.agent_variant,
     )
-    experiment, _ = await service.create_experiment(dataset=bundle, config=config)
+    experiment, _ = await service.create_experiment(
+        dataset=bundle,
+        config=config,
+        run_type=payload.run_type,
+        fixture_source_experiment_id=payload.fixture_source_experiment_id,
+    )
     # create_experiment's session_transaction commits before we submit, so
     # the EvalExperiment + EvalTrial rows are visible to the executor task.
     executor.submit(experiment.id, bundle, grade=payload.grade)
@@ -237,6 +242,7 @@ async def get_eval_run_status(
             run_status=None,
             result_kind=None,
             error_code=trial.error_code,
+            fixture_source_trial_id=trial.fixture_source_trial_id,
         )
         for trial in trials
     ]

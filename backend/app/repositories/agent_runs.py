@@ -16,10 +16,15 @@ class AgentRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_for_user(self, run_id: UUID, user_id: UUID) -> AgentRun | None:
-        result = await self._session.execute(
-            select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id)
+    async def get_for_user(
+        self, run_id: UUID, user_id: UUID, *, for_update: bool = False
+    ) -> AgentRun | None:
+        statement = select(AgentRun).where(
+            AgentRun.id == run_id, AgentRun.user_id == user_id
         )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
     async def get_by_id(self, run_id: UUID, *, for_update: bool = False) -> AgentRun | None:

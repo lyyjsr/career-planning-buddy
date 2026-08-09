@@ -48,6 +48,68 @@ class RunOutcome:
     transcript_hash: str
 
 
+def outcome_from_snapshot(
+    snapshot: dict[str, object], *, transcript_hash: str
+) -> RunOutcome:
+    """Rebuild the immutable grader input persisted by ``TrialRunner``.
+
+    Grading deliberately uses this representation instead of querying the
+    mutable Run/Plan/Task tables again.  A malformed historical snapshot is
+    an integrity failure, not a signal to fall back to live state.
+    """
+
+    run_raw = snapshot.get("run")
+    if not isinstance(run_raw, dict):
+        raise ValueError("outcome snapshot is missing the run block")
+
+    def object_list(name: str) -> list[dict[str, object]]:
+        raw = snapshot.get(name)
+        if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+            raise ValueError(f"outcome snapshot {name} must be a list of objects")
+        return [dict(item) for item in raw]
+
+    plan_raw = snapshot.get("plan")
+    if plan_raw is not None and not isinstance(plan_raw, dict):
+        raise ValueError("outcome snapshot plan must be an object or null")
+    final_plan_raw = run_raw.get("final_plan_id")
+    try:
+        return RunOutcome(
+            run_id=UUID(str(run_raw["id"])),
+            user_id=UUID(str(run_raw["user_id"])),
+            status=str(run_raw["status"]),
+            result_kind=(
+                str(run_raw["result_kind"])
+                if run_raw.get("result_kind") is not None
+                else None
+            ),
+            final_plan_id=(
+                UUID(str(final_plan_raw)) if final_plan_raw is not None else None
+            ),
+            error_code=(
+                str(run_raw["error_code"])
+                if run_raw.get("error_code") is not None
+                else None
+            ),
+            fallback_reason=(
+                str(run_raw["fallback_reason"])
+                if run_raw.get("fallback_reason") is not None
+                else None
+            ),
+            total_tokens_in=int(run_raw.get("total_tokens_in", 0)),
+            total_tokens_out=int(run_raw.get("total_tokens_out", 0)),
+            total_latency_ms=int(run_raw.get("total_latency_ms", 0)),
+            plan=dict(plan_raw) if isinstance(plan_raw, dict) else None,
+            tasks=object_list("tasks"),
+            steps=object_list("steps"),
+            events=object_list("events"),
+            tool_calls=object_list("tool_calls"),
+            provider_calls=object_list("provider_calls"),
+            transcript_hash=transcript_hash,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("outcome snapshot contains invalid run fields") from exc
+
+
 async def collect_outcome(
     session: AsyncSession,
     run: AgentRun,
@@ -222,7 +284,7 @@ def _compute_transcript_hash(
 ) -> str:
     """Hash only stable, semantically-meaningful transcript fields.
 
-    Excluded by design: ``run.id``, ``user_id``, all timestamps
+    Excluded by design: ``run.id``, ``user_id``, ToolCall UUIDs, all timestamps
     (``created_at``/``started_at``/``finished_at``), ``total_latency_ms``,
     token counts, latency per step, ``result_hash`` content UUIDs, args
     payloads. What remains is the *shape* of what happened: node graph branch,
@@ -250,13 +312,13 @@ def _compute_transcript_hash(
         ],
         "tool_calls": [
             {
-                "id": str(tc.id) if tc.id is not None else f"r{tc.round}:{tc.tool_name}",
+                "ordinal": ordinal,
                 "tool_name": tc.tool_name,
                 "round": tc.round,
                 "success": tc.success,
                 "error_code": tc.error_code,
             }
-            for tc in tool_calls
+            for ordinal, tc in enumerate(tool_calls)
         ],
     }
     return canonical_sha256(projection)

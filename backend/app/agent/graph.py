@@ -814,6 +814,9 @@ class FixedPlanningGraph:
             "provider": usage.provider,
             "evidence_call_id": visibility.call_id,
             "evidence_catalog_hash": visibility.catalog_hash,
+            "visible_evidence_refs": [
+                item.model_dump(mode="json") for item in visibility.visible_refs
+            ],
             "visible_evidence_ids": [str(item.id) for item in visibility.visible_refs],
             "visible_evidence_count": len(visibility.visible_refs),
             "truncated_evidence_ids": [str(item.id) for item in visibility.truncated_refs],

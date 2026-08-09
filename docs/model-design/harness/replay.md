@@ -48,3 +48,18 @@ Replay 不修改原 Run、原 Plan、原 Trace。默认只保存实验结果，�
 只有同时满足以下条件，才可把执行种类标记为 Replay：从不可变 input/config snapshot
 重建上下文；按 fixture contract 执行 Tool；重新运行 Graph/Provider；生成独立结果；对新旧
 输出、规则、成本和 Trace 做 diff。复制旧结果不属于 Replay。
+
+## Eval Harness V2 编排入口
+
+Eval 控制面通过 `run_type=fixture_replay` 和必填的
+`fixture_source_experiment_id` 创建回放实验。创建阶段按
+`case_id + trial_index + variant` 将每个新 Trial 绑定到一个已完成、同数据集、
+非回放且拥有唯一 Fixture Bundle 的源 Trial，并把绑定持久化到
+`eval_trials.fixture_source_trial_id`。ExperimentRunner 只读取该冻结绑定，不在执行时猜测来源。
+
+CLI 等价参数为：
+
+```text
+python -m evals.v2 run --provider-mode fixture --run-type fixture_replay \
+  --fixture-source-experiment-id <uuid>
+```

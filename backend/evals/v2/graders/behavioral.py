@@ -76,7 +76,7 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
     #    terminal kind. We use *set membership* of nodes rather than full
     #    ordering to keep the grader robust to mock provider variation, but
     #    we require a few specifics (risk_gate precedes either safe_response
-    #    or intent_router; persist only appears on completed plan paths).
+    #    or intent_router; persist appears on completed and fallback plan paths).
     has_risk_gate = "risk_gate" in nodes
     has_planning = "career_planning_agent" in nodes
     has_validator = "rule_validator" in nodes
@@ -90,6 +90,12 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
         # intent_router present, persist absent; planning may or may not run.
         branch_ok = "intent_router" in nodes and not has_persist
         branch_expected = "intent_router present, persist absent (clarification short-circuits)"
+    elif outcome.status == "degraded" and outcome.result_kind == "plan":
+        branch_ok = has_risk_gate and has_planning and has_validator and has_persist
+        branch_expected = (
+            "risk_gate + career_planning_agent + rule_validator + persist all present "
+            "for fallback plan"
+        )
     elif outcome.status == "completed":
         # Full plan path: risk_gate + intent_router + planning + validator + persist.
         branch_ok = has_risk_gate and has_planning and has_validator and has_persist
@@ -114,8 +120,8 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
         repair_item.projection.get("total_repair_attempts", 0) if repair_item else 0
     )
     repair_count = int(repair_count_raw) if isinstance(repair_count_raw, (int, float)) else 0
-    if outcome.status == "completed":
-        # Completed runs may legitimately invoke repair, but only once per kind.
+    if outcome.result_kind == "plan" and outcome.status in {"completed", "degraded"}:
+        # Plan runs may legitimately invoke repair, but only once before fallback.
         results.append(_boolean_grade(
             name="repair_at_most_once",
             passed=repair_count <= 1,
@@ -128,7 +134,7 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
         results.append(_not_applicable(
             "repair_at_most_once",
             [repair_id] if repair_id else [],
-            "non-completed runs do not exercise the repair path",
+            "non-plan runs do not exercise the plan repair contract",
         ))
 
     # 3. fallback_correct -- fallback_reason non-None ⇒ status must be degraded;

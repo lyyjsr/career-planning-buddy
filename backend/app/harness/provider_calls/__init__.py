@@ -19,8 +19,10 @@ from app.harness.provider_calls.audit import (
     AuditSearchProvider,
 )
 from app.harness.provider_calls.fixture_store import (
+    MAX_FIXTURE_PAYLOAD_BYTES,
     FixtureDesyncError,
     FixtureEntry,
+    FixturePayloadPolicyError,
     FixtureStore,
 )
 from app.harness.provider_calls.providers import (
@@ -49,11 +51,13 @@ __all__ = [
     "FixtureDesyncError",
     "FixtureEmbeddingProvider",
     "FixtureEntry",
+    "FixturePayloadPolicyError",
     "FixturePlanningProvider",
     "FixtureSearchProvider",
     "FixtureStore",
     "LiveEvalCallController",
     "LiveEvalRetryPolicy",
+    "MAX_FIXTURE_PAYLOAD_BYTES",
     "ProviderCallRecorder",
     "ProviderCallRepository",
     "ProviderInvocationResult",

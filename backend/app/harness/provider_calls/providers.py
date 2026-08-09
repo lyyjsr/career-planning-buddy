@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic_core import to_jsonable_python
+
 from app.harness.provider_calls.fixture_store import (
     FixtureDesyncError,
     FixtureStore,
@@ -84,17 +86,15 @@ class _BaseFixtureProvider:
         (a dict) on replay path. Callers ``isinstance``-narrow before use.
         """
 
-        # Pre-allocate a sequence number from the shared recorder so audit
-        # and fixture rows line up on the same (run_id, sequence) address.
-        sequence, logical = self._recorder.allocate_sequence(
-            provider_kind=self._provider_kind,
-            provider_method=provider_method,
-            retry_attempt=retry_attempt,
-        )
         # Replay path: short-circuit the inner call, persist the audit row
         # with the recorded response projection, and return a rehydrated raw
         # response from the fixture entry.
-        if self._store.is_replay() and self._store.has_sequence(sequence):
+        if self._store.is_replay():
+            sequence, logical = self._recorder.allocate_sequence(
+                provider_kind=self._provider_kind,
+                provider_method=provider_method,
+                retry_attempt=retry_attempt,
+            )
             entry = self._store.consume(
                 sequence=sequence,
                 provider_kind=self._provider_kind,
@@ -102,6 +102,14 @@ class _BaseFixtureProvider:
                 retry_attempt=retry_attempt,
                 request_projection=request_projection,
             )
+            usage = (
+                entry.response_payload.get("usage", {})
+                if isinstance(entry.response_payload, dict)
+                else {}
+            )
+            tokens_in = usage.get("tokens_in") if isinstance(usage, dict) else None
+            tokens_out = usage.get("tokens_out") if isinstance(usage, dict) else None
+            model_id = usage.get("model_id") if isinstance(usage, dict) else None
             await self._recorder._persist(  # noqa: SLF001
                 sequence=sequence,
                 provider_kind=self._provider_kind,
@@ -114,12 +122,12 @@ class _BaseFixtureProvider:
                 response_hash=entry.response_projection_hash,
                 status="ok",
                 error_code=None,
-                tokens_in=None,
-                tokens_out=None,
+                tokens_in=tokens_in if isinstance(tokens_in, int) else None,
+                tokens_out=tokens_out if isinstance(tokens_out, int) else None,
                 latency_ms=0,
-                model_id=self._recorder.model_id,
+                model_id=model_id if isinstance(model_id, str) else self._recorder.model_id,
             )
-            return entry.response_projection
+            return entry.response_payload
 
         # Record path: invoke the real provider, write audit + raw fixture.
         raw_holder: dict[str, object] = {}
@@ -140,12 +148,13 @@ class _BaseFixtureProvider:
         # Record the fixture entry (response_projection comes from result).
         if result.response_projection is not None:
             self._store.record(
-                sequence=sequence,
+                sequence=result.sequence,
                 provider_kind=self._provider_kind,
                 provider_method=provider_method,
                 retry_attempt=retry_attempt,
                 request_projection=request_projection,
                 response_projection=result.response_projection,
+                response_payload=to_jsonable_python(raw_holder.get("raw")),
             )
         return raw_holder.get("raw")
 

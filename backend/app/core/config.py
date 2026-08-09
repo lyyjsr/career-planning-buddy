@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     eval_live_max_attempts: int = Field(default=3, ge=1, le=5)
     eval_live_retry_base_seconds: float = Field(default=1, ge=0, le=30)
     eval_live_retry_max_seconds: float = Field(default=8, ge=0, le=60)
+    # Trial-level concurrency is process-local and defaults to serial. It is
+    # independent from the stricter live provider-call concurrency below.
+    eval_trial_concurrency: int = Field(default=1, ge=1, le=8)
     eval_live_concurrency: int = Field(default=2, ge=1, le=8)
     eval_live_pacing_seconds: float = Field(default=0.5, ge=0, le=10)
     # PR-9c.2 Commit 3.4 (Stage A, Option E′): when set, TrialRunner

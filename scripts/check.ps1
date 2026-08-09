@@ -48,14 +48,17 @@ try {
     Invoke-Checked -Executable $backendPython -CommandArguments @(
         "-m", "alembic", "upgrade", "head"
     )
+    Invoke-Checked -Executable $backendPython -CommandArguments @(
+        "-m", "alembic", "check"
+    )
     Invoke-Checked -Executable $backendPython -CommandArguments @("-m", "pytest")
     Invoke-Checked -Executable $backendPython -CommandArguments @(
         "-m", "scripts.run_eval", "--no-persist"
     )
     Invoke-Checked -Executable $backendPython -CommandArguments @(
-        "-m", "evals.v2", "run", "--dataset", "runtime-smoke",
-        "--cases", "runtime-tool-error-01", "--provider-mode", "mock",
-        "--trial-count", "1"
+        "-m", "evals.v2", "run", "--dataset", "stage5",
+        "--provider-mode", "mock",
+        "--trial-count", "1", "--require-all-hard-gates"
     )
 }
 finally {

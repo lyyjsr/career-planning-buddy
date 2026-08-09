@@ -26,10 +26,11 @@ fi
 "$backend_python" -m ruff check .
 "$backend_python" -m mypy app tests scripts evals
 "$backend_python" -m alembic upgrade head
+"$backend_python" -m alembic check
 "$backend_python" -m pytest
 "$backend_python" -m scripts.run_eval --no-persist
-"$backend_python" -m evals.v2 run --dataset runtime-smoke \
-  --cases runtime-tool-error-01 --provider-mode mock --trial-count 1
+"$backend_python" -m evals.v2 run --dataset stage5 \
+  --provider-mode mock --trial-count 1 --require-all-hard-gates
 popd >/dev/null
 
 pushd "$repository_root/frontend" >/dev/null

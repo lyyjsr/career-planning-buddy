@@ -253,6 +253,9 @@ class EvalProviderFixtureItem(Base):
     response_projection: Mapped[dict[str, object]] = mapped_column(
         JSONB, nullable=False
     )
+    # NULL identifies pre-0020 projection-only bundles, which are intentionally
+    # rejected for replay because they cannot reconstruct the provider response.
+    response_payload_json: Mapped[object | None] = mapped_column(JSONB)
     response_projection_hash: Mapped[str] = mapped_column(
         String(64), nullable=False
     )

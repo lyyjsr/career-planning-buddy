@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.harness.provider_calls.repository import ProviderCallRepository
 from app.models.eval import (
     EvalEvidenceItem,
     EvalExperiment,
@@ -18,10 +19,8 @@ from app.models.eval import (
     EvalTrial,
     EvalTrialPair,
 )
-from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
-from evals.v2.collectors.evidence import collect_evidence
-from evals.v2.collectors.outcome import collect_outcome
+from evals.v2.collectors.outcome import outcome_from_snapshot
 from evals.v2.contracts import (
     EvalCase,
     ExperimentCreate,
@@ -65,6 +64,7 @@ class EvalService:
         dataset: DatasetBundle,
         config: ExperimentCreate,
         run_type: str = "evaluation",
+        fixture_source_experiment_id: UUID | None = None,
     ) -> tuple[EvalExperiment, list[EvalTrial]]:
         manifest = dataset.manifest
         if (
@@ -86,6 +86,25 @@ class EvalService:
             raise AppError(
                 code="EVAL_RUN_TYPE_INVALID",
                 message="Eval Trial run_type is invalid",
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
+        if run_type == "fixture_replay":
+            if fixture_source_experiment_id is None:
+                raise AppError(
+                    code="EVAL_FIXTURE_SOURCE_REQUIRED",
+                    message="fixture_replay requires fixture_source_experiment_id",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            if config.execution_mode != "fixture_provider":
+                raise AppError(
+                    code="EVAL_FIXTURE_PROVIDER_REQUIRED",
+                    message="fixture_replay requires execution_mode=fixture_provider",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+        elif fixture_source_experiment_id is not None:
+            raise AppError(
+                code="EVAL_FIXTURE_SOURCE_INVALID",
+                message="fixture_source_experiment_id is only valid for fixture_replay",
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             )
         # PR-9b: refuse execution_mode=live_provider when the global
@@ -110,6 +129,50 @@ class EvalService:
             )
         frozen_hash = canonical_sha256(config.frozen_config())
         async with session_transaction(self._session):
+            fixture_sources: dict[tuple[str, int, str | None], EvalTrial] = {}
+            if fixture_source_experiment_id is not None:
+                source_experiment = await self._evals.get_experiment(
+                    fixture_source_experiment_id
+                )
+                if source_experiment is None:
+                    raise AppError(
+                        code="EVAL_FIXTURE_SOURCE_NOT_FOUND",
+                        message="Fixture source Experiment was not found",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                if source_experiment.status != "completed":
+                    raise AppError(
+                        code="EVAL_FIXTURE_SOURCE_NOT_COMPLETED",
+                        message="Fixture source Experiment must be completed",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                if source_experiment.execution_mode != "fixture_provider":
+                    raise AppError(
+                        code="EVAL_FIXTURE_SOURCE_MODE_INVALID",
+                        message="Fixture source Experiment must use fixture_provider",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                if (
+                    source_experiment.dataset_id,
+                    source_experiment.dataset_version,
+                    source_experiment.dataset_hash,
+                ) != (
+                    config.dataset_id,
+                    config.dataset_version,
+                    config.dataset_hash,
+                ):
+                    raise AppError(
+                        code="EVAL_FIXTURE_SOURCE_DATASET_MISMATCH",
+                        message="Fixture source and replay must use the same frozen dataset",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                source_trials = await self._evals.list_trials(
+                    fixture_source_experiment_id
+                )
+                fixture_sources = {
+                    (trial.case_id, trial.trial_index, trial.variant): trial
+                    for trial in source_trials
+                }
             if config.baseline_experiment_id is not None:
                 baseline = await self._evals.get_experiment(config.baseline_experiment_id)
                 if baseline is None:
@@ -157,8 +220,39 @@ class EvalService:
                 status="draft",
             )
             await self._evals.create_experiment(experiment)
-            trials = [
-                EvalTrial(
+            trials: list[EvalTrial] = []
+            provider_calls = ProviderCallRepository(self._session)
+            for case in dataset.cases:
+                for trial_index in range(config.trial_count):
+                    source_trial = fixture_sources.get(
+                        (case.case_id, trial_index, case.variant)
+                    )
+                    if fixture_source_experiment_id is not None:
+                        if (
+                            source_trial is None
+                            or source_trial.status != "completed"
+                            or source_trial.run_type == "fixture_replay"
+                            or source_trial.case_fixture_hash != case.fixture_hash
+                        ):
+                            raise AppError(
+                                code="EVAL_FIXTURE_SOURCE_TRIAL_INVALID",
+                                message=(
+                                    "Fixture source is missing a completed non-replay Trial "
+                                    f"for case={case.case_id}, index={trial_index}, "
+                                    f"variant={case.variant}"
+                                ),
+                                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            )
+                        bundles = await provider_calls.list_bundles_for_trial(
+                            source_trial.id
+                        )
+                        if len(bundles) != 1:
+                            raise AppError(
+                                code="EVAL_FIXTURE_SOURCE_BUNDLE_INVALID",
+                                message="Each fixture source Trial must own exactly one bundle",
+                                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            )
+                    trials.append(EvalTrial(
                     experiment_id=experiment.id,
                     case_id=case.case_id,
                     case_fixture_hash=case.fixture_hash,
@@ -177,11 +271,11 @@ class EvalService:
                     variant=case.variant,
                     counterfactual_group_id=case.counterfactual_group_id,
                     run_type=run_type,
+                    fixture_source_trial_id=(
+                        source_trial.id if source_trial is not None else None
+                    ),
                     status="pending",
-                )
-                for case in dataset.cases
-                for trial_index in range(config.trial_count)
-            ]
+                    ))
             await self._evals.create_trials(trials)
         return experiment, trials
 
@@ -262,17 +356,25 @@ class EvalService:
     ) -> list[EvalEvidenceItem]:
         """Persist a fresh evidence catalog for one Trial.
 
-        Pre-existing rows for this Trial are deleted first so the new set's
-        ids (and therefore the scores' ``evidence_item_ids``) reflect the
-        current projection. If a caller tries to attach evidence to a Trial
-        that hasn't been marked ``completed`` with a run_id, the rows would
-        be unreachable by graders anyway -- but we accept the call here so
-        that ``collect_evidence`` plus ``attach_evidence`` can run before
-        grading, mirroring the TrialRunner's own ``attach_trial_outcome``
-        pattern.
+        This helper exists for pre-run fixture construction. Once a Trial is
+        terminal its evidence catalog is immutable and can only have been
+        written atomically by ``TrialRunner._finalize_trial``.
         """
 
         async with session_transaction(self._session):
+            trial = await self._evals.get_trial(trial_id, for_update=True)
+            if trial is None:
+                raise AppError(
+                    code="EVAL_TRIAL_NOT_FOUND",
+                    message="Eval Trial was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if trial.status not in {"pending", "running"}:
+                raise AppError(
+                    code="EVAL_EVIDENCE_FROZEN",
+                    message="Terminal Trial evidence cannot be replaced",
+                    status_code=HTTPStatus.CONFLICT,
+                )
             await self._evals.delete_evidence_for_trial(trial_id)
             rows = [
                 EvalEvidenceItem(
@@ -293,18 +395,15 @@ class EvalService:
         trial_id: UUID,
         case: EvalCase,
     ) -> list[GradeResult]:
-        """Collect evidence and run every registered Grader for one Trial.
+        """Grade one Trial exclusively from its terminal frozen artifacts.
 
         Steps:
         1. Load the Trial; require ``completed`` + run_id (same gate as
            ``add_grade``: a non-completed Trial cannot be graded).
-        2. Re-read the runtime Run + outcome from PostgreSQL (the Trial's
-           ``outcome_snapshot_json`` is informational; for grading we want
-           the freshest Plan/Tasks/Step/Event rows to construct the
-           projected catalog).
-        3. ``collect_evidence`` -> ``EvidenceItem`` list.
-        4. Persist them via ``attach_evidence`` (replaces any stale rows).
-        5. ``grade_all`` (Registry) -> ``GradeResult`` list, persisted via
+        2. Verify the supplied Case is exactly the fixture frozen on Trial.
+        3. Rebuild ``RunOutcome`` from ``outcome_snapshot_json`` and load the
+           Evidence rows frozen in the same terminal transaction.
+        4. ``grade_all`` (Registry) -> ``GradeResult`` list, persisted via
            ``add_grade`` per row.
 
         Returns the list of ``GradeResult`` objects. DB-level score uniqueness
@@ -327,42 +426,51 @@ class EvalService:
                     message="Only a completed Trial backed by a real Agent Run can be graded",
                     status_code=HTTPStatus.CONFLICT,
                 )
-            run = await AgentRunRepository(self._session).get_by_id(trial.run_id)
-            if run is None:
+            if case.case_id != trial.case_id or case.fixture_hash != trial.case_fixture_hash:
                 raise AppError(
-                    code="EVAL_TRIAL_NOT_GRADEABLE",
-                    message="the Trial's Agent Run was not found",
+                    code="EVAL_CASE_FIXTURE_MISMATCH",
+                    message="The grading Case does not match the Trial's frozen fixture",
                     status_code=HTTPStatus.CONFLICT,
                 )
-            user_id = run.user_id
-            # Outcome snapshot is recomputed in-session so the evidence rows
-            # reflect the freshest Plan/Task/Step state rather than the frozen
-            # json dropped into the Trial row at execute time.
-            outcome = await collect_outcome(self._session, run, user_id=user_id)
-            items = await collect_evidence(
-                self._session,
-                trial_id=trial_id,
-                run=run,
-                outcome=outcome,
-                case=case,
-            )
-            # Persist evidence inline (NOT via attach_evidence, which opens
-            # its own transaction and would conflict with this one). The
-            # delete+create pair is identical to attach_evidence's body.
-            await self._evals.delete_evidence_for_trial(trial_id)
-            rows = [
-                EvalEvidenceItem(
-                    trial_id=trial_id,
-                    kind=item.kind.value,
-                    source_type=item.source_type,
-                    source_id=item.source_id,
-                    content_hash=item.content_hash,
-                    projection_json=item.projection,
-                    sensitivity=item.sensitivity,
+            if trial.outcome_snapshot_json is None or trial.transcript_hash is None:
+                raise AppError(
+                    code="EVAL_TRIAL_SNAPSHOT_INVALID",
+                    message="Completed Trial is missing its frozen outcome snapshot",
+                    status_code=HTTPStatus.CONFLICT,
                 )
-                for item in items
+            try:
+                outcome = outcome_from_snapshot(
+                    trial.outcome_snapshot_json,
+                    transcript_hash=trial.transcript_hash,
+                )
+            except ValueError as exc:
+                raise AppError(
+                    code="EVAL_TRIAL_SNAPSHOT_INVALID",
+                    message="Completed Trial has an invalid frozen outcome snapshot",
+                    status_code=HTTPStatus.CONFLICT,
+                ) from exc
+            rows = await self._evals.list_evidence_items(trial_id)
+            if not rows:
+                raise AppError(
+                    code="EVAL_TRIAL_EVIDENCE_MISSING",
+                    message="Completed Trial is missing its frozen evidence catalog",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            from evals.v2.graders.base import EvidenceKind
+
+            items = [
+                EvidenceItem(
+                    id=row.id,
+                    trial_id=row.trial_id,
+                    kind=EvidenceKind(row.kind),
+                    source_type=row.source_type,
+                    source_id=row.source_id or "",
+                    content_hash=row.content_hash,
+                    projection=row.projection_json,
+                    sensitivity=row.sensitivity,
+                )
+                for row in rows
             ]
-            await self._evals.create_evidence_items(rows)
             results = await grade_all(
                 trial_id=trial_id,
                 outcome=outcome,
@@ -625,6 +733,8 @@ class EvalService:
         idempotent via ``get_or_create_pair``.
         """
 
+        # Phase 1: freeze authorized inputs and idempotently materialize Pair.
+        # This transaction must end before the potentially slow Provider call.
         async with session_transaction(self._session):
             # Idempotency guard: an existing Result for this deterministic
             # judge_run_id means a prior attempt already succeeded (typical
@@ -635,8 +745,8 @@ class EvalService:
             # themselves idempotent (UNIQUE pair_hash on content). Build
             # the domain Pair purely to compute its hash; if the row
             # already exists we re-use it, otherwise we create it below.
-            baseline_view_probe = await self._build_judge_view(baseline_trial_id)
-            candidate_view_probe = await self._build_judge_view(candidate_trial_id)
+            baseline_view_probe = await self.build_judge_view(baseline_trial_id)
+            candidate_view_probe = await self.build_judge_view(candidate_trial_id)
             pair_domain_probe = build_pair(
                 baseline_trial_id=baseline_trial_id,
                 candidate_trial_id=candidate_trial_id,
@@ -664,7 +774,7 @@ class EvalService:
                 candidate_view=candidate_view,
                 position_variant=position_variant,
             )
-            pair_row = await self._evals.get_or_create_pair(
+            await self._evals.get_or_create_pair(
                 EvalTrialPair(
                     baseline_trial_id=baseline_trial_id,
                     candidate_trial_id=candidate_trial_id,
@@ -679,10 +789,21 @@ class EvalService:
                 )
             )
 
-            result = await judge.judge(judge_input)
-            result_row = await self._evals.create_judge_result(
+        # Phase 2: external I/O with no service-owned database transaction.
+        result = await judge.judge(judge_input)
+
+        # Phase 3: short idempotent result write. Re-check judge_run_id because
+        # another retry may have completed while this Provider call was in flight.
+        async with session_transaction(self._session):
+            persisted_pair = await self._evals.get_pair_by_hash(pair_domain.pair_hash())
+            if persisted_pair is None:
+                raise RuntimeError("pair row disappeared before Judge result persist")
+            existing_result = await self._evals.get_judge_result_by_run(judge_run_id)
+            if existing_result is not None:
+                return persisted_pair, existing_result
+            result_row = await self._evals.get_or_create_judge_result(
                 EvalPairwiseJudgeResult(
-                    pair_id=pair_row.id,
+                    pair_id=persisted_pair.id,
                     judge_run_id=result.judge_run_id,
                     judge_run_status=result.judge_run_status,
                     position_variant=position_variant.value,
@@ -704,9 +825,9 @@ class EvalService:
                     calibrated=False,
                 )
             )
-            return pair_row, result_row
+            return persisted_pair, result_row
 
-    async def _build_judge_view(self, trial_id: UUID):  # type: ignore[no-untyped-def]
+    async def build_judge_view(self, trial_id: UUID):  # type: ignore[no-untyped-def]
         """Re-hydrate the authorized evidence view for one Trial.
 
         Loads the persisted ``EvalEvidenceItem`` rows and converts them to

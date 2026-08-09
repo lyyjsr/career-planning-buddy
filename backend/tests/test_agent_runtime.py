@@ -345,6 +345,40 @@ async def test_user_cancel_stops_graph_and_writes_one_terminal(
 
 
 @pytest.mark.asyncio
+async def test_process_shutdown_marks_active_run_interrupted(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(
+        db_session,
+        user_id,
+        message="create a plan",
+        key="shutdown-interrupt",
+    )
+
+    class CancelledGraph:
+        async def execute(self, state: object) -> None:
+            del state
+            raise asyncio.CancelledError
+
+    import asyncio
+
+    monkeypatch.setattr(
+        "app.agent.executor.GraphFactory.build",
+        lambda *args, **kwargs: CancelledGraph(),
+    )
+    executor = AgentRunExecutor(runtime_factory(db_connection))
+    executor._shutdown_run_ids.add(run.id)  # noqa: SLF001
+    await executor.execute(run.id)
+
+    interrupted = await refresh_run(db_session, run.id)
+    assert interrupted.status == "failed"
+    assert interrupted.error_code == "PROCESS_INTERRUPTED"
+
+
+@pytest.mark.asyncio
 async def test_idempotency_active_conflict_sse_resume_and_user_isolation(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
@@ -357,6 +391,15 @@ async def test_idempotency_active_conflict_sse_resume_and_user_isolation(
     first_id = first.id
     repeated = await create_run(db_session, user_a, key="same-key", scheduler=scheduler)
     assert repeated.id == first.id
+    with pytest.raises(AppError) as reused_key:
+        await create_run(
+            db_session,
+            user_a,
+            message="different request",
+            key="same-key",
+            scheduler=scheduler,
+        )
+    assert reused_key.value.code == "STATE_IDEMPOTENCY_KEY_REUSED"
     with pytest.raises(AppError) as conflict:
         await create_run(db_session, user_a, key="other-key", scheduler=scheduler)
     assert conflict.value.code == "STATE_RUN_ALREADY_ACTIVE"
@@ -396,14 +439,17 @@ async def test_idempotency_active_conflict_sse_resume_and_user_isolation(
 
 
 @pytest.mark.asyncio
-async def test_startup_recovery_fails_expired_active_run_once(
+@pytest.mark.parametrize("status", ["pending", "running"])
+async def test_startup_recovery_fails_every_orphaned_active_run_once(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
+    status: str,
 ) -> None:
     user_id = await create_user(db_session)
     run = await create_run(db_session, user_id, key="interrupted")
     run_id = run.id
-    run.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
+    run.status = status
+    run.deadline_at = datetime.now(UTC) + timedelta(minutes=5)
     await db_session.flush()
     executor = AgentRunExecutor(runtime_factory(db_connection))
 
@@ -419,4 +465,33 @@ async def test_startup_recovery_fails_expired_active_run_once(
     )
     assert recovered.status == "failed"
     assert recovered.error_code == "PROCESS_INTERRUPTED"
+    assert terminal_count == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_runtime_config_is_terminalized_once(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="invalid-config")
+    run_id = run.id
+    run.config_snapshot_json = {"broken": True}
+    await db_session.flush()
+
+    await AgentRunExecutor(runtime_factory(db_connection)).execute(run_id)
+
+    recovered = await refresh_run(db_session, run_id)
+    terminal_count = await db_session.scalar(
+        select(func.count())
+        .select_from(AgentEvent)
+        .where(
+            AgentEvent.run_id == run_id,
+            AgentEvent.event_type.in_(
+                ("run.completed", "run.degraded", "run.failed", "run.cancelled")
+            ),
+        )
+    )
+    assert recovered.status == "failed"
+    assert recovered.error_code == "CONFIG_SNAPSHOT_INVALID"
     assert terminal_count == 1

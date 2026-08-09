@@ -74,7 +74,7 @@ describe("RequireAuth", () => {
 
     expect(await screen.findByText("受保护的今日页面")).toBeInTheDocument();
     await waitFor(() => expect(guestRequests).toBe(1));
-    expect(localStorage.getItem("cpb_access_token")).toBe("guest-token");
+    expect(sessionStorage.getItem("cpb_access_token")).toBe("guest-token");
   });
 });
 

@@ -250,20 +250,18 @@ class EvalRepository:
     async def get_or_create_pair(self, pair: EvalTrialPair) -> EvalTrialPair:
         """Idempotently insert a Pair, returning the persisted row.
 
-        On a concurrent insert by another session (UNIQUE pair_hash
-        collision), this rolls back the pending INSERT and re-reads the
-        existing row. Callers that need a transactional savepoint should
-        bracket this with ``session.begin_nested()``.
+        A savepoint contains a concurrent UNIQUE collision so unrelated
+        writes in the caller's outer transaction are never rolled back.
         """
 
         existing = await self.get_pair_by_hash(pair.pair_hash)
         if existing is not None:
             return existing
-        self._session.add(pair)
         try:
-            await self._session.flush()
+            async with self._session.begin_nested():
+                self._session.add(pair)
+                await self._session.flush()
         except IntegrityError:
-            await self._session.rollback()
             existing = await self.get_pair_by_hash(pair.pair_hash)
             if existing is None:
                 raise
@@ -287,6 +285,25 @@ class EvalRepository:
     ) -> EvalPairwiseJudgeResult:
         self._session.add(result)
         await self._session.flush()
+        return result
+
+    async def get_or_create_judge_result(
+        self, result: EvalPairwiseJudgeResult
+    ) -> EvalPairwiseJudgeResult:
+        """Persist a deterministic Judge run once, including concurrent retries."""
+
+        existing = await self.get_judge_result_by_run(result.judge_run_id)
+        if existing is not None:
+            return existing
+        try:
+            async with self._session.begin_nested():
+                self._session.add(result)
+                await self._session.flush()
+        except IntegrityError:
+            existing = await self.get_judge_result_by_run(result.judge_run_id)
+            if existing is None:
+                raise
+            return existing
         return result
 
     async def get_judge_result(

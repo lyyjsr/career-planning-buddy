@@ -54,6 +54,17 @@ class ToolRegistry:
         self._max_calls = max_calls
         self._tools: dict[str, RegisteredTool] = {}
         self._available_tools_override = available_tools_override
+        self._managed_resources: list[object] = []
+
+    def manage_resource(self, resource: object) -> None:
+        self._managed_resources.append(resource)
+
+    async def aclose(self) -> None:
+        for resource in self._managed_resources:
+            close = getattr(resource, "aclose", None)
+            if callable(close):
+                await close()
+        self._managed_resources.clear()
 
     def register(self, tool: RegisteredTool) -> None:
         if tool.spec.name in self._tools:
@@ -413,6 +424,7 @@ def build_tool_registry(
         max_calls=settings.agent_max_tool_calls,
         available_tools_override=available_tools_override,
     )
+    registry.manage_resource(search_provider)
     registrations = [
         RegisteredTool(
             spec=ModelToolSpec(

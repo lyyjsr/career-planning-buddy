@@ -31,7 +31,7 @@ class AgentRunFinalizer:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        budget: BudgetGuard,
+        budget: BudgetGuard | None,
     ) -> None:
         self._session_factory = session_factory
         self._budget = budget
@@ -48,6 +48,8 @@ class AgentRunFinalizer:
         fallback_reason: str | None,
         simulate_failure: bool = False,
     ) -> None:
+        if self._budget is None:
+            raise RuntimeError("plan finalization requires a valid RuntimeConfigSnapshot")
         started = monotonic()
         if not evidence_refs_are_visible(candidate.evidence_refs, evidence_visibility):
             raise PersistTransactionError(

@@ -50,4 +50,6 @@
 - [Agent 节点](./model-design/agent-nodes/README.md)
 - [Agent Tool](./model-design/tools/README.md)
 - [端到端运行链路](./model-design/end-to-end-runtime-flow.md)
+- [Eval Harness 运行与可靠性边界](./implementation/eval-operations-boundary.md)
+- [2026-08-09 项目加固与面试复习](./review/job-search-project-review-2026-08-09.md)
 - [本轮审查报告](./review/revision-report.md)

@@ -474,65 +474,14 @@ async def get_pairwise_review_surface(
     role markers, model/provider identity, automatic scores, suggested
     labels or judge hints, run cost / latency."""
 
-    repo = EvalRepository(session)
-    pair_row = await repo.get_pair(pair_id)
-    if pair_row is None:
-        raise AppError(
-            code="EVAL_PAIR_NOT_FOUND",
-            message="pair not found",
-            status_code=HTTPStatus.NOT_FOUND,
-        )
-    sweep = await repo.get_sweep(sweep_id)
-    if sweep is None:
-        raise AppError(
-            code="EVAL_SWEEP_NOT_FOUND",
-            message="sweep not found",
-            status_code=HTTPStatus.NOT_FOUND,
-        )
-
-    from uuid import UUID as _UUID
-
-    from evals.v2.pairwise import (
-        JUDGE_ALLOWED_KINDS,
-        TrialEvidenceProjection,
-    )
-    from evals.v2.pairwise import Pair as _PairDomain  # noqa: F401
-    from evals.v2.pairwise_review_surface import (
-        build_frozen_review_surface,
-        derive_review_token,
-    )
-
-    pair_domain = _PairDomain(
-        baseline_trial_id=(
-            pair_row.baseline_trial_id
-            if isinstance(pair_row.baseline_trial_id, _UUID)
-            else _UUID(str(pair_row.baseline_trial_id))
-        ),
-        candidate_trial_id=(
-            pair_row.candidate_trial_id
-            if isinstance(pair_row.candidate_trial_id, _UUID)
-            else _UUID(str(pair_row.candidate_trial_id))
-        ),
-        case_id=pair_row.case_id,
-        baseline_projection=TrialEvidenceProjection(
-            request_constraints=None, plan_projection=None
-        ),
-        candidate_projection=TrialEvidenceProjection(
-            request_constraints=None, plan_projection=None
-        ),
-    )
-    surface = build_frozen_review_surface(
-        pair=pair_domain,
+    context = await PairwiseCalibrationService(session).build_review_surface(
+        sweep_id=sweep_id,
+        pair_id=pair_id,
         reviewer_id=str(reviewer.id),
-        rubric=[],
-        rubric_version=sweep.judge_rubric_version,
-        annotation_schema_version=sweep.annotation_schema_version,
     )
-    # Allowed-evidence-kinds is a frozen set of strings; not part of the
-    # response payload but documents the surface's evidence scope.
-    assert surface.allowed_evidence_kinds == frozenset(
-        kind.value for kind in JUDGE_ALLOWED_KINDS
-    )
+    sweep = context.sweep
+    surface = context.surface
+    from evals.v2.pairwise_review_surface import derive_review_token
     review_token = derive_review_token(
         pair_id=pair_id,
         reviewer_id=str(reviewer.id),
@@ -604,38 +553,17 @@ async def submit_annotation(
     display-side verdicts.
     """
 
-    repo = EvalRepository(session)
-    sweep = await repo.get_sweep(body.sweep_id)
-    if sweep is None:
-        raise AppError(
-            code="EVAL_SWEEP_NOT_FOUND",
-            message="sweep not found",
-            status_code=HTTPStatus.NOT_FOUND,
-        )
-    # Look up the pair to derive position variant from the frozen review
-    # surface formula.
-    pair_row = await repo.get_pair(body.pair_id)
-    if pair_row is None:
-        raise AppError(
-            code="EVAL_PAIR_NOT_FOUND",
-            message="pair not found",
-            status_code=HTTPStatus.NOT_FOUND,
-        )
+    service = PairwiseCalibrationService(session)
+    context = await service.build_review_surface(
+        sweep_id=body.sweep_id,
+        pair_id=body.pair_id,
+        reviewer_id=str(reviewer.id),
+    )
+    sweep = context.sweep
+    frozen_surface = context.surface
 
-    # Build the server-authoritative frozen review surface.
     from evals.v2.pairwise import (
         PositionVariant as _PV,
-    )
-    from evals.v2.pairwise_review_surface import (
-        build_frozen_review_surface_for_pair_row,
-    )
-
-    frozen = build_frozen_review_surface_for_pair_row(
-        pair_row=pair_row,
-        reviewer_id=str(reviewer.id),
-        rubric_version=sweep.judge_rubric_version,
-        annotation_schema_version=sweep.annotation_schema_version,
-        rubric=[],
     )
 
     # Issue #1 / Commit 3.2: review_token is now REQUIRED. Pydantic
@@ -650,7 +578,7 @@ async def submit_annotation(
     expected = derive_review_token(
         pair_id=body.pair_id,
         reviewer_id=str(reviewer.id),
-        frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
+        frozen_review_surface_sha256=frozen_surface.frozen_review_surface_sha256,
     )
     if body.review_token != expected:
         raise AppError(
@@ -669,14 +597,14 @@ async def submit_annotation(
     )
 
     normalized_winner = normalize_raw_to_baseline_candidate(
-        body.raw_winner, _PV(frozen.position_variant)
+        body.raw_winner, _PV(frozen_surface.position_variant.value)
     )
     raw_dims: dict[str, str] = {k: v for k, v in body.raw_dimension_verdicts.items()}
     normalized_dims: dict[str, str] = {
         k: v
         for k, v in normalize_raw_dimensions(
             dict(body.raw_dimension_verdicts),  # type: ignore[arg-type]
-            _PV(frozen.position_variant),
+            _PV(frozen_surface.position_variant.value),
         ).items()
     }
 
@@ -692,7 +620,6 @@ async def submit_annotation(
         is_adjudication=body.is_adjudication,
     )
 
-    service = PairwiseCalibrationService(session)
     try:
         if body.is_adjudication:
             result = await service.submit_adjudication(
@@ -703,10 +630,10 @@ async def submit_annotation(
                 rubric_version=sweep.judge_rubric_version,
                 judge_prompt_version=sweep.judge_prompt_version,
                 judge_model_id=sweep.judge_model_id,
-                frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
-                position_variant=_PV(frozen.position_variant),
-                display_a_trial_id=frozen.display_a_trial_id,
-                display_b_trial_id=frozen.display_b_trial_id,
+                frozen_review_surface_sha256=frozen_surface.frozen_review_surface_sha256,
+                position_variant=frozen_surface.position_variant,
+                display_a_trial_id=UUID(frozen_surface.display_a_trial_id),
+                display_b_trial_id=UUID(frozen_surface.display_b_trial_id),
             )
         else:
             result = await service.submit_annotation(
@@ -717,10 +644,10 @@ async def submit_annotation(
                 rubric_version=sweep.judge_rubric_version,
                 judge_prompt_version=sweep.judge_prompt_version,
                 judge_model_id=sweep.judge_model_id,
-                frozen_review_surface_sha256=frozen.frozen_review_surface_sha256,
-                position_variant=_PV(frozen.position_variant),
-                display_a_trial_id=frozen.display_a_trial_id,
-                display_b_trial_id=frozen.display_b_trial_id,
+                frozen_review_surface_sha256=frozen_surface.frozen_review_surface_sha256,
+                position_variant=frozen_surface.position_variant,
+                display_a_trial_id=UUID(frozen_surface.display_a_trial_id),
+                display_b_trial_id=UUID(frozen_surface.display_b_trial_id),
             )
     except PairwiseCalibrationError:
         raise

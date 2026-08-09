@@ -6,7 +6,7 @@ Zero migrations, zero new deps. Deterministic closed-form intervals.
 Public surface::
 
     wilson_ci(successes, n)              # binomial success-rate 95% CI
-    normal_ci(values)                    # normal-approx 95% CI on floats
+    normal_ci(values)                    # normal-approx 95% CI for the mean
     CIInterval / CaseStat / ExperimentStat  # frozen dataclasses
     compute_case_stats(summaries, grade_lookup)
     compute_experiment_stats(case_stats)
@@ -117,10 +117,12 @@ def wilson_ci(successes: int, n: int, z: float = _Z_95) -> tuple[float, float]:
 
 
 def normal_ci(values: list[float], z: float = _Z_95) -> tuple[float, float]:
-    """Normal-approximation 95% CI (population SD) for a list of floats.
+    """Normal-approximation 95% confidence interval for the sample mean.
 
-    Returns ``(mean - z*sd, mean + z*sd)``. ``n == 0`` -> ``(0.0, 0.0)``;
-    ``n == 1`` -> ``(mean, mean)`` (zero width, no variance info).
+    Uses sample variance (``n - 1``) and standard error (``sd / sqrt(n)``).
+    ``n == 0`` returns the existing empty sentinel ``(0.0, 0.0)``. ``n == 1``
+    returns the point value for report compatibility; it is a non-inferential
+    sentinel because variance cannot be estimated from one observation.
     """
 
     n = len(values)
@@ -129,9 +131,9 @@ def normal_ci(values: list[float], z: float = _Z_95) -> tuple[float, float]:
     mean = sum(values) / n
     if n < 2:
         return mean, mean
-    var = sum((v - mean) ** 2 for v in values) / n  # population variance
-    sd = math.sqrt(var)
-    return mean - z * sd, mean + z * sd
+    sample_var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    standard_error = math.sqrt(sample_var / n)
+    return mean - z * standard_error, mean + z * standard_error
 
 
 def _pop_mean(values: list[float]) -> float:

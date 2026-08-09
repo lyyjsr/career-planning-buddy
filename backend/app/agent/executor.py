@@ -1,6 +1,7 @@
 """Single-worker in-process Agent Run scheduling and execution."""
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID
@@ -31,6 +32,8 @@ from app.schemas.enums import GoalType, ReplanMode
 from app.services.experience_atoms import ExperienceAtomService
 from app.tools.registry import ToolRegistry
 
+logger = logging.getLogger(__name__)
+
 
 class AgentRunExecutor:
     """Executes one Run per asyncio Task; no multi-worker reliability is claimed."""
@@ -42,6 +45,7 @@ class AgentRunExecutor:
         tool_registry: ToolRegistry | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         evidence_distillation_provider: EvidenceDistillationProvider | None = None,
+        managed_resources: list[object] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider or MockPlanningProvider()
@@ -51,6 +55,8 @@ class AgentRunExecutor:
             evidence_distillation_provider or MockEvidenceDistillationProvider()
         )
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
+        self._shutdown_run_ids: set[UUID] = set()
+        self._managed_resources = list(managed_resources or [])
 
     def submit(self, run_id: UUID) -> None:
         current = self._tasks.get(run_id)
@@ -86,6 +92,11 @@ class AgentRunExecutor:
         if loaded is None:
             return
         run, config = loaded
+        if config is None:
+            await AgentRunFinalizer(self._session_factory, None).finalize_failed(
+                run_id, error_code="CONFIG_SNAPSHOT_INVALID"
+            )
+            return
         cancellation = CancellationToken()
         budget = BudgetGuard(config, run.deadline_at, cancellation)
         finalizer = AgentRunFinalizer(self._session_factory, budget)
@@ -144,12 +155,18 @@ class AgentRunExecutor:
                 await self._distill_evidence_best_effort(run_id, profile.goal_type.value)
         except asyncio.CancelledError:
             cancellation.cancel()
-            await finalizer.finalize_cancelled(run_id)
+            if run_id in self._shutdown_run_ids:
+                await finalizer.finalize_failed(
+                    run_id, error_code="PROCESS_INTERRUPTED"
+                )
+            else:
+                await finalizer.finalize_cancelled(run_id)
         except AgentDeadlineExceededError:
             await finalizer.finalize_failed(run_id, error_code="AGENT_DEADLINE_EXCEEDED")
         except AgentError as exc:
             await finalizer.finalize_failed(run_id, error_code=exc.code)
         except Exception:
+            logger.exception("agent run %s failed unexpectedly", run_id)
             await finalizer.finalize_failed(run_id, error_code="AGENT_EXECUTION_FAILED")
         finally:
             await self._ensure_terminal(run_id, finalizer)
@@ -167,7 +184,6 @@ class AgentRunExecutor:
                     await session.scalars(
                         select(AgentRun.id).where(
                             AgentRun.status.in_(("pending", "running")),
-                            AgentRun.deadline_at <= now,
                         )
                     )
                 )
@@ -176,20 +192,55 @@ class AgentRunExecutor:
             if loaded is None:
                 continue
             run, config = loaded
-            guard = BudgetGuard(config, now, CancellationToken())
+            guard = (
+                BudgetGuard(config, now, CancellationToken())
+                if config is not None
+                else None
+            )
+            error_code = (
+                "PROCESS_INTERRUPTED" if config is not None else "CONFIG_SNAPSHOT_INVALID"
+            )
             await AgentRunFinalizer(self._session_factory, guard).finalize_failed(
-                run.id, error_code="PROCESS_INTERRUPTED"
+                run.id, error_code=error_code
             )
         return len(run_ids)
 
     async def shutdown(self) -> None:
-        tasks = [task for task in self._tasks.values() if not task.done()]
+        active = [
+            (run_id, task)
+            for run_id, task in self._tasks.items()
+            if not task.done()
+        ]
+        self._shutdown_run_ids.update(run_id for run_id, _ in active)
+        tasks = [task for _, task in active]
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._shutdown_run_ids.difference_update(run_id for run_id, _ in active)
+        await self.close_resources()
 
-    async def _start_and_load(self, run_id: UUID) -> tuple[AgentRun, RuntimeConfigSnapshot] | None:
+    async def close_resources(self) -> None:
+        resources = [
+            self._provider,
+            self._tool_registry,
+            self._embedding_provider,
+            self._evidence_distillation_provider,
+            *self._managed_resources,
+        ]
+        closed: set[int] = set()
+        for resource in resources:
+            if id(resource) in closed:
+                continue
+            closed.add(id(resource))
+            close = getattr(resource, "aclose", None)
+            if callable(close):
+                await close()
+        self._managed_resources.clear()
+
+    async def _start_and_load(
+        self, run_id: UUID
+    ) -> tuple[AgentRun, RuntimeConfigSnapshot | None] | None:
         async with self._session_factory() as session:
             async with session_transaction(session):
                 run = await session.scalar(
@@ -197,22 +248,28 @@ class AgentRunExecutor:
                 )
                 if run is None or run.status != "pending":
                     return None
-                run.status = "running"
-                run.started_at = datetime.now(UTC)
                 try:
                     config = RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
                 except ValidationError:
-                    return None
+                    return run, None
+                run.status = "running"
+                run.started_at = datetime.now(UTC)
                 await session.flush()
                 return run, config
 
-    async def _load(self, run_id: UUID) -> tuple[AgentRun, RuntimeConfigSnapshot] | None:
+    async def _load(
+        self, run_id: UUID
+    ) -> tuple[AgentRun, RuntimeConfigSnapshot | None] | None:
         async with self._session_factory() as session:
             async with session_transaction(session):
                 run = await session.get(AgentRun, run_id)
                 if run is None:
                     return None
-                return run, RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
+                try:
+                    config = RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
+                except ValidationError:
+                    config = None
+                return run, config
 
     async def _ensure_terminal(self, run_id: UUID, finalizer: AgentRunFinalizer) -> None:
         async with self._session_factory() as session:
@@ -230,6 +287,7 @@ class AgentRunExecutor:
                     self._evidence_distillation_provider,
                 ).distill_run(run_id=run_id, goal_type=goal_type)
         except Exception:
+            logger.exception("evidence distillation failed for run %s", run_id)
             # Post-success enrichment must never alter the Run's terminal contract.
             return
 

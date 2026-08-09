@@ -31,6 +31,7 @@ from app.models.eval import (
     EvalTrialPair,
 )
 from app.repositories.evals import EvalRepository
+from app.services.evals import EvalService
 from evals.v2.contracts import canonical_sha256
 from evals.v2.pairwise import JUDGE_ALLOWED_KINDS
 from tests.evals_v2.test_pairwise_repository import _provision_experiment
@@ -251,20 +252,23 @@ async def _seed_pair(db_session: AsyncSession, idx: int) -> EvalTrialPair:
     base = UUID(trials[0]) if isinstance(trials[0], str) else trials[0]
     cand = UUID(trials[1]) if isinstance(trials[1], str) else trials[1]
     case_id = f"{case_id}-{idx}"
-    proj = {"request": {"e": "x"}, "plan": {"summary": f"p-{idx}"}}
-    pair_hash = canonical_sha256({
-        "schema_version": "eval-trial-pair/v1",
-        "case_id": case_id,
-        "baseline_trial_id": str(base),
-        "candidate_trial_id": str(cand),
-        "baseline_output_hash": canonical_sha256(proj),
-        "candidate_output_hash": canonical_sha256(proj),
-    })
+    service = EvalService(db_session)
+    baseline_view = await service.build_judge_view(base)
+    candidate_view = await service.build_judge_view(cand)
+    from evals.v2.pairwise import build_pair
+
+    domain_pair = build_pair(
+        baseline_trial_id=base,
+        candidate_trial_id=cand,
+        case_id=case_id,
+        baseline_view=baseline_view,
+        candidate_view=candidate_view,
+    )
     pair = EvalTrialPair(
         baseline_trial_id=base,
         candidate_trial_id=cand,
         case_id=case_id,
-        pair_hash=pair_hash,
+        pair_hash=domain_pair.pair_hash(),
         input_hash=_VALID_SHA,
         allowed_evidence_kinds=sorted(k.value for k in JUDGE_ALLOWED_KINDS),
         judge_prompt_version="v1",

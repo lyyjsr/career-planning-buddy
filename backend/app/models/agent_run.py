@@ -71,6 +71,12 @@ class AgentRun(Base):
             "(result_kind IS NULL AND final_plan_id IS NULL AND error_code IS NOT NULL)",
             name="ck_agent_runs_unsuccessful_result",
         ),
+        CheckConstraint(
+            "(cancel_idempotency_key IS NULL AND cancel_request_hash IS NULL) OR "
+            "(cancel_idempotency_key IS NOT NULL AND "
+            "cancel_request_hash ~ '^[0-9a-f]{64}$')",
+            name="ck_agent_runs_cancel_idempotency_pair",
+        ),
         Index(
             "uq_agent_runs_one_active_per_user",
             "user_id",
@@ -143,6 +149,8 @@ class AgentRun(Base):
     risk_category: Mapped[str | None] = mapped_column(String(32))
     deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_idempotency_key: Mapped[str | None] = mapped_column(String(64))
+    cancel_request_hash: Mapped[str | None] = mapped_column(String(64))
     next_event_sequence: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     next_step_sequence: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.base import StrictModel
 
@@ -24,6 +24,8 @@ class EvalRunCreateRequest(StrictModel):
     provider_mode: Literal["mock", "fixture", "live"] | None = None
     trial_count: int = Field(default=1, ge=1, le=100)
     grade: bool = True
+    run_type: Literal["evaluation", "fixture_replay"] = "evaluation"
+    fixture_source_experiment_id: UUID | None = None
     baseline_experiment_id: UUID | None = None
     agent_variant: str | None = Field(
         default=None,
@@ -31,6 +33,16 @@ class EvalRunCreateRequest(StrictModel):
         max_length=64,
         description="Stage B-1a-lite experiment-level agent variant.",
     )
+
+    @model_validator(mode="after")
+    def validate_fixture_source(self) -> "EvalRunCreateRequest":
+        if self.run_type == "fixture_replay" and self.fixture_source_experiment_id is None:
+            raise ValueError("fixture_replay requires fixture_source_experiment_id")
+        if self.run_type != "fixture_replay" and self.fixture_source_experiment_id is not None:
+            raise ValueError(
+                "fixture_source_experiment_id is only valid for fixture_replay"
+            )
+        return self
 
 
 class EvalRunCreatedResponse(StrictModel):
@@ -47,6 +59,7 @@ class TrialStatusSummary(StrictModel):
     run_status: str | None
     result_kind: str | None
     error_code: str | None
+    fixture_source_trial_id: UUID | None = None
 
 
 class EvalRunStatusResponse(StrictModel):

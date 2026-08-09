@@ -17,10 +17,11 @@ These require live PostgreSQL via ``db_connection``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import (
@@ -33,12 +34,13 @@ from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
-from evals.v2.contracts import DatasetManifest, ExperimentCreate
+from evals.v2.contracts import DatasetManifest, EvalCase, ExperimentCreate
 from evals.v2.dataset_loader import filter_cases, load_dataset
 from evals.v2.experiment_runner import (
     ExperimentReport,
     ExperimentRunner,
     TrialSummary,
+    _bounded_gather,
 )
 from tests.test_agent_runtime import runtime_factory
 
@@ -119,6 +121,50 @@ async def test_run_experiment_and_grade_smoke_produces_scores(
         )
     assert rebuilt.hard_gate_pass_fraction == report.hard_gate_pass_fraction
     assert rebuilt.case_stats == report.case_stats
+
+
+@pytest.mark.asyncio
+async def test_grading_failure_keeps_experiment_from_false_completed(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grader failure converges the Experiment to ``failed``.
+
+    The injected grader also observes the persisted status before raising,
+    proving the control plane remains ``running`` throughout grading.
+    """
+
+    stage5 = filter_cases(load_dataset(), ["create-01"])
+    factory = runtime_factory(db_connection)
+    experiment, _ = await EvalService(db_session).create_experiment(
+        dataset=stage5, config=_stage5_config(stage5.manifest)
+    )
+
+    async def fail_while_running(
+        service: EvalService,
+        trial_id: UUID,
+        case: EvalCase,
+    ) -> None:
+        del service, trial_id, case
+        async with factory() as status_session:
+            current = await EvalRepository(status_session).get_experiment(
+                experiment.id
+            )
+        assert current is not None
+        assert current.status == "running"
+        raise RuntimeError("injected grader failure")
+
+    monkeypatch.setattr(EvalService, "grade_trial", fail_while_running)
+    runner = ExperimentRunner(session_factory=factory, settings=get_settings())
+
+    with pytest.raises(RuntimeError, match="injected grader failure"):
+        await runner.run_experiment_and_grade(experiment.id, stage5, grade=True)
+
+    async with factory() as session:
+        persisted = await EvalRepository(session).get_experiment(experiment.id)
+    assert persisted is not None
+    assert persisted.status == "failed"
 
 
 @pytest.mark.asyncio
@@ -228,3 +274,46 @@ def test_cli_help_exits_zero() -> None:
         f"CLI --help failed:\nstdout={result.stdout}\nstderr={result.stderr}"
     )
     assert "Eval Harness V2" in result.stdout or "usage:" in result.stdout.lower()
+
+
+def test_cli_hard_gate_contract_requires_complete_scored_pass() -> None:
+    from evals.v2.__main__ import _all_hard_gates_passed
+
+    passing = {
+        "trial_count": 2,
+        "completed_trial_count": 2,
+        "scored_trial_count": 2,
+        "hard_gate_pass_fraction": 1.0,
+    }
+    assert _all_hard_gates_passed(passing) is True
+
+    for field, value in (
+        ("completed_trial_count", 1),
+        ("scored_trial_count", 1),
+        ("hard_gate_pass_fraction", 0.5),
+    ):
+        failing = {**passing, field: value}
+        assert _all_hard_gates_passed(failing) is False
+
+
+@pytest.mark.asyncio
+async def test_bounded_gather_enforces_limit_and_preserves_order() -> None:
+    active = 0
+    max_active = 0
+
+    async def operation(value: int) -> int:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return value * 2
+
+    results = await _bounded_gather(
+        list(range(6)),
+        limit=2,
+        operation=operation,
+    )
+
+    assert max_active == 2
+    assert results == [0, 2, 4, 6, 8, 10]

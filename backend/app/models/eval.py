@@ -70,6 +70,11 @@ class EvalExperiment(Base):
         ),
         Index("ix_eval_experiments_dataset_created", "dataset_id", "dataset_version", "created_at"),
         Index("ix_eval_experiments_status_created", "status", "created_at"),
+        Index(
+            "ix_eval_experiments_cancel_requested",
+            "cancel_requested_at",
+            postgresql_where=text("cancel_requested_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -180,6 +185,11 @@ class EvalTrial(Base):
         Index("ix_eval_trials_experiment_status", "experiment_id", "status"),
         Index("ix_eval_trials_run_id", "run_id"),
         Index(
+            "ix_eval_trials_fixture_source",
+            "fixture_source_trial_id",
+            postgresql_where=text("fixture_source_trial_id IS NOT NULL"),
+        ),
+        Index(
             "ix_eval_trials_group",
             "counterfactual_group_id",
             postgresql_where=text("counterfactual_group_id IS NOT NULL"),
@@ -206,6 +216,10 @@ class EvalTrial(Base):
     variant: Mapped[str | None] = mapped_column(String(64))
     counterfactual_group_id: Mapped[str | None] = mapped_column(String(64))
     run_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="evaluation")
+    fixture_source_trial_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("eval_trials.id", ondelete="RESTRICT"),
+    )
     run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="RESTRICT")
     )
@@ -654,10 +668,9 @@ class EvalPairwiseSweep(Base):
     fixture_mapping: Mapped[dict[str, dict[str, object]] | None] = mapped_column(
         JSONB,
         comment=(
-            "Optional pair_hash → PairwiseJudgeOutput (as dict) mapping "
-            "consumed by FixturePairwiseJudge when "
-            "judge_llm_provider='fixture'. MUST be NULL for production "
-            "sweeps (live LLM path). Commit 3.3."
+            "Optional pair_hash → raw_display_winner mapping consumed "
+            "by FixturePairwiseJudge when judge_llm_provider='fixture'. "
+            "MUST be NULL for production sweeps (live LLM path)."
         ),
     )
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -908,6 +921,13 @@ class EvalPairwiseHumanAnnotation(Base):
         Index("ix_eval_pairwise_ann_sweep", "sweep_id"),
         Index("ix_eval_pairwise_ann_reviewer", "reviewer_id"),
         Index("ix_eval_pairwise_ann_dataset", "dataset_id", "dataset_version"),
+        Index(
+            "uq_eval_pairwise_ann_adjudication",
+            "pair_id",
+            "review_input_hash",
+            unique=True,
+            postgresql_where=text("is_adjudication = TRUE"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(

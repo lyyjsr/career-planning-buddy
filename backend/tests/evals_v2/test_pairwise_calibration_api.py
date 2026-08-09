@@ -24,6 +24,74 @@ async def _dev_login(client: AsyncClient, db_session: AsyncSession) -> str:
     return TokenService(get_settings()).issue(user_id=user.id, role="dev")
 
 
+async def _persist_review_sweep(
+    db_session: AsyncSession,
+    sweep: object,
+    pair: object,
+) -> None:
+    from app.core.database import session_transaction
+    from app.models.eval import EvalPairwiseSweep, EvalTrialPair
+    from app.repositories.evals import EvalRepository
+    from app.services.evals import EvalService
+    from app.services.pairwise_calibration import (
+        PairwiseCalibrationService,
+        SweepItemSeed,
+    )
+    from evals.v2.pairwise import PositionVariant, build_pair
+    from evals.v2.pairwise_review_surface import build_frozen_review_surface
+
+    assert isinstance(sweep, EvalPairwiseSweep)
+    assert isinstance(pair, EvalTrialPair)
+    eval_service = EvalService(db_session)
+    baseline_view = await eval_service.build_judge_view(pair.baseline_trial_id)
+    candidate_view = await eval_service.build_judge_view(pair.candidate_trial_id)
+    domain_pair = build_pair(
+        baseline_trial_id=pair.baseline_trial_id,
+        candidate_trial_id=pair.candidate_trial_id,
+        case_id=pair.case_id,
+        baseline_view=baseline_view,
+        candidate_view=candidate_view,
+    )
+    surface = build_frozen_review_surface(
+        pair=domain_pair,
+        reviewer_id="fixture-reviewer",
+        rubric=[],
+        rubric_version=sweep.judge_rubric_version,
+        annotation_schema_version=sweep.annotation_schema_version,
+    )
+    async with session_transaction(db_session):
+        await EvalRepository(db_session).create_sweep(sweep)
+    seeds = [
+        SweepItemSeed(
+            pair_id=pair.id,
+            pair_hash=pair.pair_hash,
+            case_id=pair.case_id,
+            baseline_trial_id=pair.baseline_trial_id,
+            candidate_trial_id=pair.candidate_trial_id,
+            baseline_output_hash=domain_pair.baseline_output_hash(),
+            candidate_output_hash=domain_pair.candidate_output_hash(),
+            frozen_review_surface_sha256=surface.frozen_review_surface_sha256,
+            display_a_trial_id=(
+                pair.baseline_trial_id
+                if position is PositionVariant.BASELINE
+                else pair.candidate_trial_id
+            ),
+            display_b_trial_id=(
+                pair.candidate_trial_id
+                if position is PositionVariant.BASELINE
+                else pair.baseline_trial_id
+            ),
+            position_variant=position,
+        )
+        for position in (PositionVariant.BASELINE, PositionVariant.SWAPPED)
+    ]
+    await PairwiseCalibrationService(db_session).materialize_sweep_items(
+        sweep=sweep,
+        seeds=seeds,
+        annotation_schema_version=sweep.annotation_schema_version,
+    )
+
+
 @pytest.mark.asyncio
 async def test_calibration_latest_404_when_no_report(
     api_application: FastAPI, db_session: AsyncSession,
@@ -174,8 +242,6 @@ async def test_review_surface_endpoint_excludes_trial_ids_and_pair_hash(
     trial ids, the underlying pair_hash, or any model/score hints — issue #4
     blinding contract."""
 
-    from app.core.database import session_transaction
-    from app.repositories.evals import EvalRepository
     from tests.evals_v2.test_pairwise_calibration_repository import (
         _make_sweep,
         _seed_pair,
@@ -186,8 +252,7 @@ async def test_review_surface_endpoint_excludes_trial_ids_and_pair_hash(
         db_session,
         requested_pair_count=1,
     )
-    async with session_transaction(db_session):
-        await EvalRepository(db_session).create_sweep(sweep_row)
+    await _persist_review_sweep(db_session, sweep_row, pair)
 
     transport = ASGITransport(app=api_application)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -218,6 +283,10 @@ async def test_review_surface_endpoint_excludes_trial_ids_and_pair_hash(
     )
     assert body["position_variant"] in ("baseline", "swapped")
     assert len(body["review_token"]) == 16
+    assert body["display_a"]["request"]
+    assert body["display_a"]["plan"]
+    assert body["display_b"]["request"]
+    assert body["display_b"]["plan"]
 
 
 @pytest.mark.asyncio
@@ -230,8 +299,6 @@ async def test_annotation_submit_with_tampered_review_token_returns_422(
     case where a reviewer fetches surface A and submits against surface B,
     or attempts to forge a token."""
 
-    from app.core.database import session_transaction
-    from app.repositories.evals import EvalRepository
     from tests.evals_v2.test_pairwise_calibration_repository import (
         _make_sweep,
         _seed_pair,
@@ -242,8 +309,7 @@ async def test_annotation_submit_with_tampered_review_token_returns_422(
         db_session,
         requested_pair_count=1,
     )
-    async with session_transaction(db_session):
-        await EvalRepository(db_session).create_sweep(sweep_row)
+    await _persist_review_sweep(db_session, sweep_row, pair)
 
     transport = ASGITransport(app=api_application)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -329,8 +395,6 @@ async def test_annotation_with_token_for_other_pair_is_rejected(
     POSTed against pair B — server-authoritative PositionSurface can't
     be repurposed across pairs."""
 
-    from app.core.database import session_transaction
-    from app.repositories.evals import EvalRepository
     from tests.evals_v2.test_pairwise_calibration_repository import (
         _make_sweep,
         _seed_pair,
@@ -339,8 +403,7 @@ async def test_annotation_with_token_for_other_pair_is_rejected(
     pair_a = await _seed_pair(db_session, 1)
     pair_b = await _seed_pair(db_session, 2)
     sweep_row = await _make_sweep(db_session, requested_pair_count=1)
-    async with session_transaction(db_session):
-        await EvalRepository(db_session).create_sweep(sweep_row)
+    await _persist_review_sweep(db_session, sweep_row, pair_a)
 
     transport = ASGITransport(app=api_application)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -369,8 +432,8 @@ async def test_annotation_with_token_for_other_pair_is_rejected(
                 "review_token": token_for_a,
             },
         )
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "EVAL_REVIEW_TOKEN_INVALID"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "EVAL_PAIR_NOT_IN_SWEEP"
 
 
 @pytest.mark.asyncio
@@ -381,8 +444,6 @@ async def test_annotation_token_for_other_reviewer_is_rejected(
     fetching the same pair get DIFFERENT tokens; submitting one with
     the other's session must 422."""
 
-    from app.core.database import session_transaction
-    from app.repositories.evals import EvalRepository
     from tests.evals_v2.test_pairwise_calibration_repository import (
         _make_sweep,
         _seed_pair,
@@ -390,8 +451,7 @@ async def test_annotation_token_for_other_reviewer_is_rejected(
 
     pair = await _seed_pair(db_session, 1)
     sweep_row = await _make_sweep(db_session, requested_pair_count=1)
-    async with session_transaction(db_session):
-        await EvalRepository(db_session).create_sweep(sweep_row)
+    await _persist_review_sweep(db_session, sweep_row, pair)
 
     transport = ASGITransport(app=api_application)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -478,4 +538,3 @@ async def test_calibration_report_status_is_data_driven(
     assert payload["position_pair_count"] == 0
     assert body["calibration_status"] == "insufficient"
     assert body["usage_mode"] == "diagnostic_only"
-

@@ -5,9 +5,10 @@ These tests drive the full ``EvalService.grade_trial`` path end-to-end:
 1. create an Experiment + Trial (PR-2 layer),
 2. run the real Runtime via ``TrialRunner`` to produce a completed Trial with
    outcome_snapshot + transcript_hash (PR-3 layer),
-3. call ``grade_trial`` to collect evidence, persist ``eval_evidence_items``,
-   run all six Graders, and persist ``eval_scores`` (PR-4 layer),
-4. assert the spec exit gates:
+3. verify the TrialRunner froze ``eval_evidence_items`` with the outcome,
+4. call ``grade_trial`` to read only those frozen artifacts, run all six
+   Graders, and persist ``eval_scores`` (PR-4 layer),
+5. assert the spec exit gates:
    * evidence items carry stable content_hash and survive re-collection,
    * every domain produced rows, every hard-gate row carries actual/expected,
    * re-grading the same (trial, grader_name, grader_version) is rejected,
@@ -24,6 +25,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncSession,
@@ -33,6 +35,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.models.eval import EvalTrial
+from app.models.plan import Plan
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
@@ -123,6 +126,12 @@ async def test_grade_trial_persists_evidence_items_and_scores_per_domain(
     case, trial_id = await _provision_run(
         db_session, db_connection, settings=settings, case_id="create-01"
     )
+
+    async with session_transaction(db_session):
+        frozen_before_grading = await EvalRepository(db_session).list_evidence_items(
+            trial_id
+        )
+    assert frozen_before_grading, "Trial finalization did not freeze Evidence"
 
     # First grading.
     results = await EvalService(db_session).grade_trial(trial_id, case)
@@ -284,7 +293,6 @@ async def test_collect_evidence_stable_hashes_under_recollection(
     case, trial_id = await _provision_run(
         db_session, db_connection, settings=settings, case_id="create-01"
     )
-    await EvalService(db_session).attach_evidence(trial_id, [])
     # Re-read Run from DB for collect_evidence (mirrors grade_trial internals).
 
     async with session_transaction(db_session):
@@ -438,3 +446,52 @@ async def test_pr9c2_step_projections_deduplicate_per_attempt(
         assert "#attempt" in sv.source_id, (
             f"step_projection source_id missing attempt suffix: {sv.source_id!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_grading_uses_frozen_evidence_not_mutated_plan_rows(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    bundle = filter_cases(load_dataset(), ["create-07"])
+    case = bundle.cases[0]
+    _, trials = await EvalService(db_session).create_experiment(
+        dataset=bundle,
+        config=_config(bundle.manifest),
+    )
+    trial = trials[0]
+    await TrialRunner(
+        session_factory=runtime_factory(db_connection),
+        settings=get_settings(),
+    ).run_trial(trial, case)
+
+    forged_id = "00000000-0000-0000-0000-000000000001"
+    async with session_transaction(db_session):
+        refreshed = await db_session.get(EvalTrial, trial.id, populate_existing=True)
+        assert refreshed is not None and refreshed.run_id is not None
+        plan = await db_session.scalar(
+            select(Plan).where(Plan.source_run_id == refreshed.run_id)
+        )
+        assert plan is not None
+        plan.evidence_refs_json = [
+            *list(plan.evidence_refs_json or []),
+            {"kind": "memory", "id": forged_id},
+        ]
+
+    results = await EvalService(db_session).grade_trial(trial.id, case)
+    assert any(
+        result.grader_name == "model.evidence_visibility" for result in results
+    )
+
+    async with session_transaction(db_session):
+        items = await EvalRepository(db_session).list_evidence_items(trial.id)
+    plan_item = next(item for item in items if item.kind == "plan_projection")
+    visible_item = next(
+        item for item in items if item.kind == "evidence_visible_refs"
+    )
+    assert forged_id not in str(plan_item.projection_json["evidence_refs"])
+    assert forged_id not in str(visible_item.projection_json["visible_refs"])
+
+    with pytest.raises(AppError) as error:
+        await EvalService(db_session).attach_evidence(trial.id, [])
+    assert error.value.code == "EVAL_EVIDENCE_FROZEN"

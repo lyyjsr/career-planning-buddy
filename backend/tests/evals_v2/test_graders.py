@@ -355,6 +355,40 @@ async def test_safety_grader_cross_user_signal_fails() -> None:
     assert cu.passed is False
 
 
+@pytest.mark.asyncio
+async def test_safety_grader_rejects_plan_ref_outside_independent_visibility() -> None:
+    visible_ref = {"kind": "search_source", "id": "visible"}
+    forged_ref = {"kind": "search_source", "id": "forged"}
+    case = _case()
+    outcome = _outcome(
+        status="completed",
+        result_kind="plan",
+        final_plan_id=uuid4(),
+        plan={"summary": "x", "evidence_refs": [visible_ref, forged_ref]},
+    )
+    view, _tid = _view_for(
+        "safety",
+        outcome,
+        case,
+        overrides={
+            EvidenceKind.EVIDENCE_VISIBLE_REFS: {"visible_refs": [visible_ref]},
+        },
+    )
+
+    results = await _grader("safety").grade(outcome, view, case)
+
+    no_forged = next(
+        result
+        for result in results
+        if result.evidence.get("subgrader") == "no_forged_evidence"
+    )
+    assert no_forged.passed is False
+    assert no_forged.evidence["actual"] == {
+        "forged_refs": ["search_source:forged"]
+    }
+    assert len(no_forged.evidence_item_ids) == 2
+
+
 # ---------------------------------------------------------------------------
 # Tool grader
 # ---------------------------------------------------------------------------
@@ -448,6 +482,49 @@ async def test_behavioral_grader_fallback_with_completed_status_fails() -> None:
     assert fb.passed is False
 
 
+@pytest.mark.asyncio
+async def test_behavioral_grader_degraded_fallback_plan_passes() -> None:
+    case = _case(allowed_statuses=("degraded",))
+    outcome = _outcome(
+        status="degraded",
+        result_kind="plan",
+        final_plan_id=uuid4(),
+        fallback_reason="business_rule_fallback",
+        plan={"summary": "fallback"},
+        steps=[
+            _step("risk_gate"),
+            _step("career_planning_agent"),
+            _step("rule_validator"),
+            _step("persist"),
+        ],
+    )
+    view, _tid = _view_for(
+        "behavioral",
+        outcome,
+        case,
+        overrides={
+            EvidenceKind.REPAIR_SIGNAL: {
+                "format_repair_attempts": 0,
+                "business_repair_attempts": 1,
+                "total_repair_attempts": 1,
+            }
+        },
+    )
+
+    results = await _grader("behavioral").grade(outcome, view, case)
+
+    branch = next(r for r in results if r.evidence.get("subgrader") == "graph_branch")
+    repair = next(
+        r for r in results if r.evidence.get("subgrader") == "repair_at_most_once"
+    )
+    fallback = next(
+        r for r in results if r.evidence.get("subgrader") == "fallback_correct"
+    )
+    assert branch.passed is True
+    assert repair.passed is True
+    assert fallback.passed is True
+
+
 # ---------------------------------------------------------------------------
 # Task grader
 # ---------------------------------------------------------------------------
@@ -521,6 +598,57 @@ async def test_model_grader_completed_with_plan_passes_visibility() -> None:
     results = await _grader("model").grade(outcome, view, case)
     vis = next(r for r in results if r.evidence.get("subgrader") == "evidence_visibility")
     assert vis.passed is True
+
+
+@pytest.mark.asyncio
+async def test_model_grader_degraded_fallback_plan_is_structured() -> None:
+    case = _case(allowed_statuses=("degraded",))
+    outcome = _outcome(
+        status="degraded",
+        result_kind="plan",
+        final_plan_id=uuid4(),
+        fallback_reason="format_repair_exhausted",
+        plan={"summary": "deterministic fallback", "evidence_refs": []},
+        events=[
+            {
+                "sequence": 1,
+                "event_type": "run.degraded",
+                "result_kind": "plan",
+                "error_code": None,
+                "fallback_reason": "format_repair_exhausted",
+                "tool_name": None,
+                "success": None,
+            }
+        ],
+    )
+    view, _tid = _view_for(
+        "model",
+        outcome,
+        case,
+        overrides={
+            EvidenceKind.EVIDENCE_VISIBLE_REFS: {"visible_refs": []},
+            EvidenceKind.REPAIR_SIGNAL: {
+                "format_repair_attempts": 1,
+                "business_repair_attempts": 0,
+                "total_repair_attempts": 1,
+            },
+        },
+    )
+
+    results = await _grader("model").grade(outcome, view, case)
+
+    structured = next(
+        result
+        for result in results
+        if result.evidence.get("subgrader") == "structured_output"
+    )
+    repair = next(
+        result
+        for result in results
+        if result.evidence.get("subgrader") == "format_repair_count"
+    )
+    assert structured.passed is True
+    assert repair.passed is True
 
 
 @pytest.mark.asyncio

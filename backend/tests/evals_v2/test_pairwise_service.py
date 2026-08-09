@@ -23,8 +23,9 @@ from evals.v2.judge import (
     DIMENSION_NAMES,
     FixturePairwiseJudge,
     PairwiseJudgeOutput,
+    PairwiseJudgeResult,
 )
-from evals.v2.pairwise import PositionVariant
+from evals.v2.pairwise import PairwiseJudgeInput, PositionVariant
 from tests.evals_v2.test_eval_repository import _config
 
 
@@ -102,6 +103,24 @@ def _make_output(winner: str = "a") -> PairwiseJudgeOutput:
         confidence="high",
         rationale="baseline wins",
     )
+
+
+class _TransactionProbeJudge:
+    def __init__(
+        self,
+        session: AsyncSession,
+        delegate: FixturePairwiseJudge,
+    ) -> None:
+        self._session = session
+        self._delegate = delegate
+
+    @property
+    def model_id(self) -> str:
+        return self._delegate.model_id
+
+    async def judge(self, prompt: PairwiseJudgeInput) -> PairwiseJudgeResult:
+        assert self._session.in_transaction() is False
+        return await self._delegate.judge(prompt)
 
 
 def _expected_pair_hash(
@@ -231,6 +250,37 @@ async def test_service_fail_closed_unmapped_pair_persists_invalid(
     assert result_row.judge_run_status == "invalid_structured_output"
     assert result_row.raw_display_winner is None
     assert result_row.normalized_winner is None
+
+
+@pytest.mark.asyncio
+async def test_service_calls_judge_after_read_transaction_closes(
+    db_session: AsyncSession,
+) -> None:
+    baseline_id, candidate_id, case_id = await _provision_trials(db_session)
+    await _attach_min_evidence_for(db_session, baseline_id, "baseline")
+    await _attach_min_evidence_for(db_session, candidate_id, "candidate")
+    pair_hash = _expected_pair_hash(
+        baseline_id=baseline_id,
+        candidate_id=candidate_id,
+        case_id=case_id,
+        baseline_summary="baseline",
+        candidate_summary="candidate",
+    )
+    judge = _TransactionProbeJudge(
+        db_session,
+        FixturePairwiseJudge(mapping={pair_hash: _make_output("a")}),
+    )
+
+    _, result = await EvalService(db_session).run_pairwise_judge(
+        baseline_trial_id=baseline_id,
+        candidate_trial_id=candidate_id,
+        case_id=case_id,
+        comparison_group_id="grp-no-long-tx",
+        judge_run_id=uuid4(),
+        judge=judge,
+    )
+
+    assert result.judge_run_status == "completed"
 
 
 @pytest.mark.asyncio

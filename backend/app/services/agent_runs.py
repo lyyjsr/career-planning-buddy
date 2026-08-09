@@ -61,6 +61,20 @@ class AgentRunService:
             async with session_transaction(self._session):
                 existing = await self._runs.get_by_idempotency(user_id, idempotency_key)
                 if existing is not None:
+                    if (
+                        existing.request_text != message
+                        or existing.hint_intent != hint_intent
+                        or existing.goal_type_override != goal_type_override
+                        or (
+                            source_plan_id is not None
+                            and existing.source_plan_id != source_plan_id
+                        )
+                    ):
+                        raise AppError(
+                            code="STATE_IDEMPOTENCY_KEY_REUSED",
+                            message="Idempotency-Key was already used with another request",
+                            status_code=HTTPStatus.CONFLICT,
+                        )
                     return existing
                 source_plan_id = await self._resolve_source_plan(
                     user_id=user_id,
@@ -125,9 +139,9 @@ class AgentRunService:
         payload: AgentRunCancelRequest,
         idempotency_key: str,
     ) -> AgentRun:
-        del payload, idempotency_key
+        request_hash = self._request_fingerprint(payload.model_dump(mode="json"))
         async with session_transaction(self._session):
-            run = await self._runs.get_for_user(run_id, user_id)
+            run = await self._runs.get_for_user(run_id, user_id, for_update=True)
             if run is None:
                 raise AppError(
                     code="NOT_FOUND_RUN",
@@ -135,6 +149,9 @@ class AgentRunService:
                     status_code=HTTPStatus.NOT_FOUND,
                 )
             if run.status == "cancelled":
+                self._validate_cancel_idempotency(
+                    run, idempotency_key=idempotency_key, request_hash=request_hash
+                )
                 return run
             if run.status in TERMINAL_STATUSES:
                 raise AppError(
@@ -142,16 +159,38 @@ class AgentRunService:
                     message="Agent Run is already finished",
                     status_code=HTTPStatus.CONFLICT,
                 )
-            requested = await self._runs.request_cancel(run_id, user_id)
-            if requested is None:
-                raise AppError(
-                    code="STATE_RUN_ALREADY_FINISHED",
-                    message="Agent Run is already finished",
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            run = requested
+            self._validate_cancel_idempotency(
+                run, idempotency_key=idempotency_key, request_hash=request_hash
+            )
+            if run.cancel_requested_at is None:
+                run.cancel_requested_at = datetime.now(UTC)
+                run.cancel_idempotency_key = idempotency_key
+                run.cancel_request_hash = request_hash
         await self._executor.request_cancel(run_id)
         return run
+
+    @staticmethod
+    def _request_fingerprint(payload: dict[str, object]) -> str:
+        from hashlib import sha256
+
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _validate_cancel_idempotency(
+        run: AgentRun, *, idempotency_key: str, request_hash: str
+    ) -> None:
+        if (
+            run.cancel_idempotency_key == idempotency_key
+            and run.cancel_request_hash != request_hash
+        ):
+            raise AppError(
+                code="STATE_IDEMPOTENCY_KEY_REUSED",
+                message="Idempotency-Key was already used with another request",
+                status_code=HTTPStatus.CONFLICT,
+            )
 
     async def stream_events(
         self,

@@ -1191,6 +1191,18 @@
             "title": "Grade",
             "type": "boolean"
           },
+          "fixture_source_experiment_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixture Source Experiment Id"
+          },
           "provider_mode": {
             "anyOf": [
               {
@@ -1206,6 +1218,15 @@
               }
             ],
             "title": "Provider Mode"
+          },
+          "run_type": {
+            "default": "evaluation",
+            "enum": [
+              "evaluation",
+              "fixture_replay"
+            ],
+            "title": "Run Type",
+            "type": "string"
           },
           "trial_count": {
             "default": 1,
@@ -4176,6 +4197,18 @@
               }
             ],
             "title": "Error Code"
+          },
+          "fixture_source_trial_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixture Source Trial Id"
           },
           "result_kind": {
             "anyOf": [

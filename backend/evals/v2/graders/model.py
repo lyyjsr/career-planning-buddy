@@ -95,23 +95,32 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
     repair_id = repair.id if repair is not None else None
     visible = view.first(EvidenceKind.EVIDENCE_VISIBLE_REFS)
     visible_id = visible.id if visible is not None else None
+    plan_item = view.first(EvidenceKind.PLAN_PROJECTION)
+    plan_id = plan_item.id if plan_item is not None else None
 
     results: list[GradeResult] = []
 
-    # 1. structured_output -- completed ⇒ has plan; degraded ⇒ one of the
-    #    known degraded result_kinds with appropriate event emitted.
+    # 1. structured_output -- completed plans and degraded fallback plans both
+    #    carry a persisted plan. Other degraded terminals carry a structured
+    #    clarification or safe response.
     if outcome.status == "completed":
         structured_ok = outcome.final_plan_id is not None and outcome.plan is not None
         structured_expected = "final_plan_id present + plan projection present"
     elif outcome.status == "degraded":
-        seen = {e.get("event_type") for e in outcome.events}
-        structured_ok = outcome.result_kind in {"clarification", "safe_response"} and (
-            "clarification.requested" in seen or "run.degraded" in seen
-        )
-        structured_expected = (
-            "result_kind in {clarification,safe_response} "
-            "+ clarification.requested or run.degraded event"
-        )
+        if outcome.result_kind == "plan":
+            structured_ok = outcome.final_plan_id is not None and outcome.plan is not None
+            structured_expected = (
+                "fallback plan has final_plan_id + plan projection present"
+            )
+        else:
+            seen = {e.get("event_type") for e in outcome.events}
+            structured_ok = outcome.result_kind in {"clarification", "safe_response"} and (
+                "clarification.requested" in seen or "run.degraded" in seen
+            )
+            structured_expected = (
+                "result_kind in {clarification,safe_response} "
+                "+ clarification.requested or run.degraded event"
+            )
     elif outcome.status in {"failed", "cancelled"}:
         structured_ok = True
         structured_expected = "no structured-output expectation on failed/cancelled runs"
@@ -131,7 +140,7 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
     # 2. format_repair_count -- ≤1 format repair.
     repair_raw = repair.projection.get("format_repair_attempts", 0) if repair else 0
     repair_count = int(repair_raw) if isinstance(repair_raw, (int, float)) else 0
-    if outcome.status == "completed":
+    if outcome.result_kind == "plan" and outcome.status in {"completed", "degraded"}:
         results.append(_boolean_grade(
             name="format_repair_count",
             passed=repair_count <= 1,
@@ -143,17 +152,17 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
         results.append(_not_applicable(
             "format_repair_count",
             [repair_id] if repair_id else [],
-            "non-completed runs do not exercise the format-repair path",
+            "non-plan runs do not exercise the plan format-repair contract",
         ))
 
     # 3. evidence_visibility -- plan evidence_refs must be a subset of the
     #    visible_refs evidence captured by the collector. This is the PR-1
     #    invariant that the Model grader pins at the evaluation layer.
-    plan_projection = outcome.plan or {}
+    plan_projection = plan_item.projection if plan_item is not None else {}
     plan_refs_raw: list[dict[str, object]] = as_dict_list(
         plan_projection.get("evidence_refs", []) or []
     )
-    if plan_refs_raw or outcome.status == "completed":
+    if plan_refs_raw or outcome.result_kind == "plan":
         if visible is None:
             evidence_ok = False
             actual_refs: list[object] = list(plan_refs_raw)
@@ -178,7 +187,7 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
             passed=evidence_ok,
             actual={"plan_refs_outside_visibility": actual_refs if not evidence_ok else []},
             expected=f"refs in visible {visible_refs_str}",
-            evidence_ids=[visible_id] if visible_id else [],
+            evidence_ids=[item_id for item_id in (plan_id, visible_id) if item_id],
             rationale="every Plan evidence_ref must be present in the call's visible_refs window",
         ))
     else:

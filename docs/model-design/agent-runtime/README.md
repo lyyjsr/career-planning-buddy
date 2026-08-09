@@ -355,7 +355,7 @@ run.completed
 - 每个节点、模型调用和 Tool 调用前后都检查取消；
 - 如果正在执行不可立即取消的 Provider 请求，等待其超时后收敛，但不得继续下一节点；
 - Executor 在 finally 中只允许通过 `AgentRunFinalizer` 写一次终态；
-- 启动恢复器把超过 `deadline_at` 的 pending/running Run 标记为 failed，error_code=`PROCESS_INTERRUPTED`；
+- 单 Worker 启动时，恢复器把数据库中遗留的全部 pending/running Run 标记为 failed：配置快照合法时 error_code=`PROCESS_INTERRUPTED`，快照损坏时 error_code=`CONFIG_SNAPSHOT_INVALID`；因为进程内任务不会跨重启保留，不能等待未来 deadline 后再恢复；
 - MVP 不承诺进程重启后从中间节点续跑。
 
 ## 14. 必测场景

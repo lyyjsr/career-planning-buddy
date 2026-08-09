@@ -13,8 +13,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.harness.provider_calls.fixture_store import (
+    MAX_FIXTURE_PAYLOAD_BYTES,
     FixtureDesyncError,
     FixtureEntry,
+    FixturePayloadPolicyError,
     FixtureStore,
 )
 
@@ -38,6 +40,7 @@ def _entry(
         retry_attempt=retry_attempt,
         request_projection=request,
         response_projection=response,
+        response_payload=response,
     )
     freeze_entries = list(store.entries_by_sequence.values())
     return recorded, freeze_entries
@@ -59,6 +62,44 @@ def test_record_then_replay_returns_same_entry() -> None:
     )
     assert consumed.response_projection == {"key": "resp-0"}
     assert consumed.fixture_hash == recorded.fixture_hash
+    store.assert_fully_consumed()
+
+
+def test_replay_rejects_duplicate_consume() -> None:
+    _, entries = _entry(sequence=0)
+    store = FixtureStore(trial_id=uuid4())
+    store.freeze_for_replay(entries)
+    store.consume(
+        sequence=0,
+        provider_kind="llm",
+        provider_method="generate_agent_turn",
+        retry_attempt=0,
+        request_projection={"key": "req-0"},
+    )
+    with pytest.raises(FixtureDesyncError, match="already consumed"):
+        store.consume(
+            sequence=0,
+            provider_kind="llm",
+            provider_method="generate_agent_turn",
+            retry_attempt=0,
+            request_projection={"key": "req-0"},
+        )
+
+
+def test_replay_rejects_unconsumed_trailing_fixture() -> None:
+    _, first = _entry(sequence=0)
+    _, second = _entry(sequence=1)
+    store = FixtureStore(trial_id=uuid4())
+    store.freeze_for_replay([*first, *second])
+    store.consume(
+        sequence=0,
+        provider_kind="llm",
+        provider_method="generate_agent_turn",
+        retry_attempt=0,
+        request_projection={"key": "req-0"},
+    )
+    with pytest.raises(FixtureDesyncError, match="unconsumed fixture"):
+        store.assert_fully_consumed()
 
 
 def test_replay_missing_sequence_raises_desync() -> None:
@@ -155,11 +196,63 @@ def test_finalize_bundle_hash_stable_for_same_entries() -> None:
                 retry_attempt=0,
                 request_projection={"seq": seq},
                 response_projection={"ok": True, "seq": seq},
+                response_payload={"ok": True, "seq": seq},
             )
     hash1, count1 = s1.finalize_bundle_hash()
     hash2, count2 = s2.finalize_bundle_hash()
     assert hash1 == hash2
     assert count1 == count2 == 5
+
+
+def test_freeze_recomputes_response_and_fixture_hashes() -> None:
+    recorded, _ = _entry(sequence=0)
+    tampered = FixtureEntry(
+        sequence=recorded.sequence,
+        provider_kind=recorded.provider_kind,
+        provider_method=recorded.provider_method,
+        retry_attempt=recorded.retry_attempt,
+        request_projection_hash=recorded.request_projection_hash,
+        response_projection={"tampered": True},
+        response_payload=recorded.response_payload,
+        response_projection_hash=recorded.response_projection_hash,
+        fixture_hash=recorded.fixture_hash,
+    )
+    with pytest.raises(FixtureDesyncError, match="response_projection_hash"):
+        FixtureStore(trial_id=uuid4()).freeze_for_replay([tampered])
+
+
+def test_record_redacts_secret_keys_without_redacting_usage_counters() -> None:
+    store = FixtureStore(trial_id=uuid4())
+    entry = store.record(
+        sequence=0,
+        provider_kind="llm",
+        provider_method="generate_agent_turn",
+        retry_attempt=0,
+        request_projection={"key": "request"},
+        response_projection={"ok": True},
+        response_payload={
+            "authorization": "Bearer secret",
+            "usage": {"tokens_in": 4, "tokens_out": 8},
+        },
+    )
+    assert entry.response_payload == {
+        "authorization": "[REDACTED]",
+        "usage": {"tokens_in": 4, "tokens_out": 8},
+    }
+
+
+def test_record_rejects_oversized_payload() -> None:
+    store = FixtureStore(trial_id=uuid4())
+    with pytest.raises(FixturePayloadPolicyError, match="exceeds"):
+        store.record(
+            sequence=0,
+            provider_kind="llm",
+            provider_method="generate_agent_turn",
+            retry_attempt=0,
+            request_projection={"key": "request"},
+            response_projection={"ok": True},
+            response_payload={"output": "x" * MAX_FIXTURE_PAYLOAD_BYTES},
+        )
 
 
 def test_record_after_freeze_raises() -> None:
@@ -176,6 +269,7 @@ def test_record_after_freeze_raises() -> None:
             retry_attempt=0,
             request_projection={"key": "x"},
             response_projection={"ok": True},
+            response_payload={"ok": True},
         )
 
 

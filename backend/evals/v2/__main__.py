@@ -5,9 +5,10 @@ Experiment, drives its Trials through the real Runtime via
 ``ExperimentRunner.run_experiment_and_grade``, and prints a single JSON
 report line on stdout. Exit codes::
 
-    0   report emitted
+    0   report emitted and requested quality gates passed
     1   execution failed (error envelope printed)
     2   configuration / argument error
+    3   report emitted but the requested quality gate failed
 
 The HTTP ``/api/v1/eval/runs`` endpoint is intentionally out of scope --
 this entrypoint exists for batch driver runs and local development.
@@ -18,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -74,6 +76,23 @@ def _build_config(
     )
 
 
+def _all_hard_gates_passed(report: Mapping[str, object]) -> bool:
+    """Return whether every requested Trial completed, was scored, and passed."""
+
+    trial_count = report.get("trial_count")
+    completed_count = report.get("completed_trial_count")
+    scored_count = report.get("scored_trial_count")
+    pass_fraction = report.get("hard_gate_pass_fraction")
+    return (
+        isinstance(trial_count, int)
+        and trial_count > 0
+        and completed_count == trial_count
+        and scored_count == trial_count
+        and isinstance(pass_fraction, (int, float))
+        and float(pass_fraction) >= 1.0
+    )
+
+
 async def _run_experiment(args: argparse.Namespace, settings: Settings) -> dict[str, object]:
     dataset = _build_dataset(args)
     engine = create_async_engine(settings.database_url)
@@ -85,7 +104,14 @@ async def _run_experiment(args: argparse.Namespace, settings: Settings) -> dict[
             else:
                 config = _build_config(settings, dataset, trial_count=args.trial_count)
                 experiment, _ = await EvalService(session).create_experiment(
-                    dataset=dataset, config=config
+                    dataset=dataset,
+                    config=config,
+                    run_type=args.run_type,
+                    fixture_source_experiment_id=(
+                        UUID(args.fixture_source_experiment_id)
+                        if args.fixture_source_experiment_id
+                        else None
+                    ),
                 )
                 experiment_id = experiment.id
                 await session.commit()
@@ -131,6 +157,18 @@ def main() -> int:
         help="Number of Trials per case (>=1).",
     )
     run_p.add_argument(
+        "--run-type",
+        choices=["evaluation", "fixture_replay"],
+        default="evaluation",
+        help="Execution kind (fixture_replay requires a frozen source Experiment).",
+    )
+    run_p.add_argument(
+        "--fixture-source-experiment-id",
+        type=str,
+        default=None,
+        help="Completed fixture-provider Experiment used by fixture_replay.",
+    )
+    run_p.add_argument(
         "--no-grade",
         action="store_true",
         help="Skip the grading phase after executing Trials.",
@@ -140,6 +178,14 @@ def main() -> int:
         type=str,
         default=None,
         help="Resume an existing Experiment instead of creating a new one.",
+    )
+    run_p.add_argument(
+        "--require-all-hard-gates",
+        action="store_true",
+        help=(
+            "Exit 3 unless every requested Trial completes, is scored, and passes "
+            "all hard gates."
+        ),
     )
     args = parser.parse_args()
 
@@ -179,6 +225,8 @@ def main() -> int:
 
     result["checked_at"] = datetime.now(UTC).isoformat()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+    if args.require_all_hard_gates and not _all_hard_gates_passed(result):
+        return 3
     return 0
 
 

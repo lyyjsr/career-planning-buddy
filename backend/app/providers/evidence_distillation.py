@@ -44,6 +44,7 @@ class OpenAICompatibleEvidenceDistillationProvider:
         self._key = settings.llm_api_key.get_secret_value()
         self._url = str(settings.llm_base_url).rstrip("/") + "/chat/completions"
         self._model = settings.llm_model
+        self._client = httpx.AsyncClient(timeout=60)
 
     async def distill(self, *, goal_type: str, sources: list[SearchSource]) -> object:
         source_payload = [
@@ -66,17 +67,16 @@ class OpenAICompatibleEvidenceDistillationProvider:
 
     async def _complete(self, prompt: str) -> object:
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    self._url,
-                    headers={"Authorization": f"Bearer {self._key}"},
-                    json={
-                        "model": self._model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0,
-                    },
-                )
+            response = await self._client.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}"},
+                json={
+                    "model": self._model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                },
+            )
             response.raise_for_status()
             body: Mapping[str, object] = response.json()
             choices = body.get("choices")
@@ -89,6 +89,9 @@ class OpenAICompatibleEvidenceDistillationProvider:
             return json.loads(content)
         except (httpx.HTTPError, ValueError, json.JSONDecodeError) as exc:
             raise ProviderUnavailableError("Evidence distillation Provider failed") from exc
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
 
 def build_evidence_distillation_provider(settings: Settings) -> EvidenceDistillationProvider:

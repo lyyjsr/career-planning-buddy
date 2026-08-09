@@ -44,10 +44,15 @@ from app.models.eval import (
     EvalPairwiseHumanAnnotation,
     EvalPairwiseSweep,
     EvalPairwiseSweepItem,
+    EvalTrialPair,
 )
 from app.repositories.evals import EvalRepository
 from evals.v2.contracts import canonical_sha256
-from evals.v2.pairwise import PositionVariant
+from evals.v2.pairwise import PositionVariant, build_pair
+from evals.v2.pairwise_review_surface import (
+    FrozenReviewSurface,
+    build_frozen_review_surface,
+)
 
 # uuid5 namespace for deterministic judge_run_id derivation. Fixed value
 # (not the public DNS namespace) so a future change to the seed format is
@@ -216,6 +221,13 @@ class SweepItemSeed:
     position_variant: PositionVariant
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewSurfaceContext:
+    sweep: EvalPairwiseSweep
+    pair: EvalTrialPair
+    surface: FrozenReviewSurface
+
+
 class PairwiseCalibrationService:
     """Pairwise calibration workflow service.
 
@@ -226,6 +238,73 @@ class PairwiseCalibrationService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repo = EvalRepository(session)
+
+    async def build_review_surface(
+        self,
+        *,
+        sweep_id: UUID,
+        pair_id: UUID,
+        reviewer_id: str,
+    ) -> ReviewSurfaceContext:
+        """Build one blinded surface from authorized, persisted Trial evidence."""
+
+        pair_row = await self._repo.get_pair(pair_id)
+        if pair_row is None:
+            raise _not_found("EVAL_PAIR_NOT_FOUND", "pair not found")
+        sweep = await self._repo.get_sweep(sweep_id)
+        if sweep is None:
+            raise _not_found("EVAL_SWEEP_NOT_FOUND", "sweep not found")
+
+        from app.services.evals import EvalService
+
+        eval_service = EvalService(self._session)
+        baseline_view = await eval_service.build_judge_view(
+            pair_row.baseline_trial_id
+        )
+        candidate_view = await eval_service.build_judge_view(
+            pair_row.candidate_trial_id
+        )
+        pair = build_pair(
+            baseline_trial_id=pair_row.baseline_trial_id,
+            candidate_trial_id=pair_row.candidate_trial_id,
+            case_id=pair_row.case_id,
+            baseline_view=baseline_view,
+            candidate_view=candidate_view,
+        )
+        if pair.pair_hash() != pair_row.pair_hash:
+            raise _integrity(
+                "EVAL_REVIEW_EVIDENCE_HASH_MISMATCH",
+                "Persisted Pair identity no longer matches its authorized evidence",
+            )
+        surface = build_frozen_review_surface(
+            pair=pair,
+            reviewer_id=reviewer_id,
+            rubric=[],
+            rubric_version=sweep.judge_rubric_version,
+            annotation_schema_version=sweep.annotation_schema_version,
+        )
+        item = await self._repo.get_sweep_item(
+            sweep_id,
+            pair_id,
+            surface.position_variant.value,
+        )
+        if item is None:
+            raise _not_found(
+                "EVAL_PAIR_NOT_IN_SWEEP",
+                "pair is not part of the requested sweep",
+            )
+        if (
+            item.pair_hash != pair_row.pair_hash
+            or item.frozen_review_surface_sha256
+            != surface.frozen_review_surface_sha256
+            or item.display_a_trial_id != UUID(surface.display_a_trial_id)
+            or item.display_b_trial_id != UUID(surface.display_b_trial_id)
+        ):
+            raise _integrity(
+                "EVAL_REVIEW_SURFACE_INTEGRITY_FAILED",
+                "SweepItem does not match the reconstructed review surface",
+            )
+        return ReviewSurfaceContext(sweep=sweep, pair=pair_row, surface=surface)
 
     # ---------------------------- materialize ---------------------------
 

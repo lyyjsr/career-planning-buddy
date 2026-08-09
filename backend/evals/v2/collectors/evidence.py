@@ -101,6 +101,32 @@ def _find_companion_for(events: list[AgentEvent]) -> dict[str, object] | None:
     return None
 
 
+def _visible_refs_from_steps(steps: list[AgentStep]) -> dict[str, object]:
+    """Read the final candidate-producing call's frozen visibility window."""
+
+    candidate_nodes = {"career_planning_agent", "revise_or_fallback"}
+    for step in reversed(steps):
+        if step.node_name not in candidate_nodes or step.status != "completed":
+            continue
+        trace = step.trace_data or {}
+        raw_refs = trace.get("visible_evidence_refs")
+        if not isinstance(raw_refs, list):
+            continue
+        refs = [dict(ref) for ref in raw_refs if isinstance(ref, dict)]
+        return {
+            "visible_refs": refs,
+            "call_id": trace.get("evidence_call_id"),
+            "catalog_hash": trace.get("evidence_catalog_hash"),
+            "source_step_id": str(step.id),
+        }
+    return {
+        "visible_refs": [],
+        "call_id": None,
+        "catalog_hash": None,
+        "source_step_id": None,
+    }
+
+
 async def collect_evidence(
     session: AsyncSession,
     *,
@@ -182,17 +208,12 @@ async def collect_evidence(
         plan = await session.get(Plan, outcome.final_plan_id)
         if plan is not None and plan.user_id == outcome.user_id:
             # Evidence refs recorded by the Finalizer are stored on Plan.
-            # The collector also reconstructs the "visible_refs" window: the
-            # Finalizer's persisted set is by construction a subset of the
-            # call's visible catalog (verified at write time by PR-1). For
-            # replay / hash purposes, treat persisted refs as visible.
             persisted_refs = list(plan.evidence_refs_json or [])
             items.append(_item(
                 trial_id=trial_id, kind=EvidenceKind.PLAN_PROJECTION,
                 source_type="plan", source_id=str(plan.id),
                 projection={**_plan_projection(plan),
-                            "evidence_refs": persisted_refs,
-                            "visible_evidence_refs": persisted_refs},
+                            "evidence_refs": persisted_refs},
             ))
             plan_tasks = await session.scalars(
                 select(Task).where(Task.plan_id == plan.id).order_by(Task.order_index)
@@ -289,27 +310,19 @@ async def collect_evidence(
         .where(AgentStep.run_id == outcome.run_id)
         .order_by(AgentStep.sequence)
     )
+    step_rows_list = list(step_rows)
     items.append(_item(
         trial_id=trial_id, kind=EvidenceKind.REPAIR_SIGNAL,
         source_type="runtime", source_id=f"repair:{outcome.run_id}",
-        projection=_repair_signal(event_rows_list, list(step_rows)),
+        projection=_repair_signal(event_rows_list, step_rows_list),
     ))
 
-    # visible evidence refs: when a plan exists reuse its persisted refs
-    # (already pushed into PLAN_PROJECTION). Emit a standalone item that the
-    # Model grader's ``evidence_visibility`` sub-grader consults.
-    if outcome.final_plan_id is not None:
-        plan = await session.get(Plan, outcome.final_plan_id)
-        if plan is not None:
-            refs = list(plan.evidence_refs_json or [])
-        else:
-            refs = []
-    else:
-        refs = []
+    # Independent source: the exact provider-call visibility window frozen in
+    # the candidate-producing AgentStep trace, never the persisted Plan refs.
     items.append(_item(
         trial_id=trial_id, kind=EvidenceKind.EVIDENCE_VISIBLE_REFS,
         source_type="runtime", source_id=f"visible_refs:{outcome.run_id}",
-        projection={"visible_refs": refs},
+        projection=_visible_refs_from_steps(step_rows_list),
     ))
 
     # cross_user_signal: scan plan/tasks for any user_id != outcome.user_id.
@@ -401,4 +414,3 @@ async def collect_evidence(
         ))
 
     return items
-

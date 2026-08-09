@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { streamRunEvents, type RunStreamEvent } from "./sse";
+import {
+  reconnectDelayMs,
+  SseHttpError,
+  streamRunEvents,
+  type RunStreamEvent,
+} from "./sse";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -48,5 +53,18 @@ describe("streamRunEvents", () => {
       Authorization: "Bearer long-lived-token",
       "Last-Event-ID": "7",
     });
+  });
+
+  it("surfaces HTTP status and computes bounded jittered backoff", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
+    await expect(
+      streamRunEvents("run-1", {
+        token: "expired",
+        signal: new AbortController().signal,
+        onEvent: () => undefined,
+      }),
+    ).rejects.toEqual(new SseHttpError(401));
+    expect(reconnectDelayMs(1, () => 0.5)).toBe(1000);
+    expect(reconnectDelayMs(20, () => 0.5)).toBe(30_000);
   });
 });

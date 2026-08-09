@@ -343,3 +343,21 @@ async def test_create_eval_run_rejects_live_provider_with_mock_llm(
         )
     assert err.value.code == "EVAL_PROVIDER_MODE_INVALID"
     assert err.value.status_code == HTTPStatus.CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_fixture_replay_api_requires_explicit_source_experiment(
+    api_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    dev_token = await _dev_login(api_client, db_session)
+    response = await api_client.post(
+        "/api/v1/eval/runs",
+        json={
+            "dataset": "runtime-smoke",
+            "provider_mode": "fixture",
+            "run_type": "fixture_replay",
+        },
+        headers=bearer(dev_token),
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

@@ -24,7 +24,12 @@ async def test_create_get_cancel_and_idempotency_contract(api_client: AsyncClien
     )
     repeated = await api_client.post(
         "/api/v1/agent-runs",
-        json={"message": "不同内容仍返回同一幂等 Run"},
+        json={"message": "帮我制定未来五周计划", "hint_intent": "create_plan"},
+        headers=headers,
+    )
+    reused_with_other_payload = await api_client.post(
+        "/api/v1/agent-runs",
+        json={"message": "不同内容不应复用原 Run"},
         headers=headers,
     )
     run_id = first.json()["run_id"]
@@ -43,9 +48,18 @@ async def test_create_get_cancel_and_idempotency_contract(api_client: AsyncClien
         json={"reason": "user_abort"},
         headers={**bearer(token), "Idempotency-Key": "stage2-cancel"},
     )
+    cancel_key_reused = await api_client.post(
+        f"/api/v1/agent-runs/{run_id}/cancel",
+        json={"reason": "different_reason"},
+        headers={**bearer(token), "Idempotency-Key": "stage2-cancel"},
+    )
 
     assert first.status_code == HTTPStatus.ACCEPTED
     assert repeated.json()["run_id"] == run_id
+    assert reused_with_other_payload.status_code == HTTPStatus.CONFLICT
+    assert reused_with_other_payload.json()["error"]["code"] == (
+        "STATE_IDEMPOTENCY_KEY_REUSED"
+    )
     assert fetched.status_code == HTTPStatus.OK
     assert fetched.json()["status"] == "pending"
     assert query_token_attempt.status_code == HTTPStatus.UNAUTHORIZED
@@ -53,6 +67,8 @@ async def test_create_get_cancel_and_idempotency_contract(api_client: AsyncClien
     assert conflict.json()["error"]["code"] == "STATE_RUN_ALREADY_ACTIVE"
     assert cancelled.status_code == HTTPStatus.ACCEPTED
     assert cancelled.json()["cancel_requested"] is True
+    assert cancel_key_reused.status_code == HTTPStatus.CONFLICT
+    assert cancel_key_reused.json()["error"]["code"] == "STATE_IDEMPOTENCY_KEY_REUSED"
 
 
 @pytest.mark.asyncio

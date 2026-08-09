@@ -9,6 +9,8 @@ token / tool / latency / state contents all come from real Runtime traces.
 No Scores are produced -- grading is PR-4.
 """
 
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from uuid import UUID
 
@@ -34,6 +36,32 @@ from evals.v2.stats import (
     gate_requirement_passed,
 )
 from evals.v2.trial_runner import TrialRunner
+
+
+async def _bounded_gather[ItemT, ResultT](
+    items: Sequence[ItemT],
+    *,
+    limit: int,
+    operation: Callable[[ItemT], Awaitable[ResultT | None]],
+) -> list[ResultT]:
+    """Run async work with a hard process-local limit and stable result order."""
+
+    semaphore = asyncio.Semaphore(limit)
+
+    async def run_one(item: ItemT) -> ResultT | None:
+        async with semaphore:
+            return await operation(item)
+
+    tasks = [asyncio.create_task(run_one(item)) for item in items]
+    try:
+        results = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return [result for result in results if result is not None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +187,8 @@ class ExperimentRunner:
         self,
         experiment_id: UUID,
         dataset: DatasetBundle,
+        *,
+        complete_after_trials: bool = True,
     ) -> ExperimentReport:
         cases_by_id = {case.case_id: case for case in dataset.cases}
         summaries: list[TrialSummary] = []
@@ -196,18 +226,30 @@ class ExperimentRunner:
         )
         async with self._session_factory() as session:
             trials = await EvalRepository(session).list_trials(experiment_id)
-        for trial in trials:
+        async def execute_trial(trial: EvalTrial) -> TrialSummary | None:
             if await self._cancel_requested(experiment_id):
-                break
+                return None
             case = cases_by_id.get(trial.case_id)
             if case is None:
                 raise RuntimeError(
                     f"trial {trial.id} references unknown case {trial.case_id}"
                 )
-            outcome = await trial_runner.run_trial(trial, case)
-            summaries.append(_summarize(trial, outcome))
+            outcome = await trial_runner.run_trial(
+                trial,
+                case,
+                fixture_source_trial_id=trial.fixture_source_trial_id,
+            )
+            return _summarize(trial, outcome)
+
+        summaries = await _bounded_gather(
+            trials,
+            limit=self._settings.eval_trial_concurrency,
+            operation=execute_trial,
+        )
 
         # Mark the Experiment terminal once no more Trial work should run.
+        # Graded runs deliberately remain ``running`` here so callers never
+        # observe ``completed`` before every enabled Score is persisted.
         async with self._session_factory() as session:
             service = EvalService(session)
             if await self._cancel_requested(experiment_id):
@@ -215,10 +257,17 @@ class ExperimentRunner:
                     experiment_id
                 )
                 status = experiment.status
-            else:
+            elif complete_after_trials:
                 await EvalService(session).transition_experiment(
                     experiment_id, "completed"
                 )
+                experiment = await EvalRepository(session).get_experiment(
+                    experiment_id
+                )
+                if experiment is None:
+                    raise RuntimeError(f"experiment {experiment_id} disappeared")
+                status = experiment.status
+            else:
                 experiment = await EvalRepository(session).get_experiment(
                     experiment_id
                 )
@@ -250,17 +299,112 @@ class ExperimentRunner:
         """Run an Experiment and (optionally) grade every completed Trial.
 
         Stage 1 (``run_experiment``) drives the real Runtime execute per
-        Trial and flips the Experiment ``running`` -> ``completed``.
+        Trial and leaves a graded Experiment ``running``.
         Stage 2 (only when ``grade=True``) opens a fresh session, calls
         ``EvalService.grade_trial`` per completed Trial, and recomputes the
-        report's score aggregates. Re-grade attempts surface as
+        report's score aggregates. Only after that succeeds is the Experiment
+        transitioned to ``completed``. Re-grade attempts surface as
         ``AppError(code="EVAL_SCORE_ALREADY_GRADED")`` inside ``grade_trial``;
         we swallow that specific code (treating the Trial as already scored)
         but let any other exception abort the grading pass.
         """
 
         try:
-            report = await self.run_experiment(experiment_id, dataset)
+            report = await self.run_experiment(
+                experiment_id,
+                dataset,
+                complete_after_trials=not grade,
+            )
+
+            if not grade or report.experiment_status != "running":
+                return report
+
+            cases_by_id = {case.case_id: case for case in dataset.cases}
+            scored = 0
+            passed = 0
+        # PR-8: map trial_id -> list of
+        # (grader_name, score, gate_requirement_passed).
+        # Used to assemble the counterfactual paired diffs below.
+            grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
+
+            for trial_summary in report.trials:
+                case = cases_by_id.get(trial_summary.case_id)
+                if case is None or trial_summary.status != "completed":
+                    continue
+            # Keep each Trial in its own Session. Reading scores starts an
+            # implicit transaction; reusing that Session would make the next
+            # grade_trial commit only a nested savepoint and then roll it back
+            # when the shared Session closes.
+                async with self._session_factory() as session:
+                    repo = EvalRepository(session)
+                    service = EvalService(session)
+                    try:
+                        await service.grade_trial(trial_summary.trial_id, case)
+                    except AppError as exc:
+                        if exc.code != "EVAL_SCORE_ALREADY_GRADED":
+                            raise
+                        # Already graded: still count it as scored below.
+                    scored += 1
+                    rows = await repo.list_scores(trial_summary.trial_id)
+                    if rows:
+                        grade_lookup[trial_summary.trial_id] = [
+                            (
+                                row.grader_name,
+                                float(row.score) if row.score is not None else 0.0,
+                                gate_requirement_passed(
+                                    hard_gate=row.hard_gate,
+                                    passed=row.passed,
+                                ),
+                            )
+                            for row in rows
+                        ]
+                    if rows and all(
+                        gate_passed
+                        for _, _, gate_passed in grade_lookup[trial_summary.trial_id]
+                    ):
+                        passed += 1
+
+        # PR-8: assemble counterfactual paired diffs for any Trials sharing a
+        # non-NULL counterfactual_group_id. Group by group_id alone (paired
+        # variants each carry their own case_id in the dataset).
+            pairs: list[CounterfactualPairDiff] = []
+            grouped: dict[str, list[TrialSummary]] = {}
+            for summary in report.trials:
+                if not summary.counterfactual_group_id:
+                    continue
+                grouped.setdefault(summary.counterfactual_group_id, []).append(summary)
+            for group_id, group_summaries in grouped.items():
+                pairs.append(
+                    _build_counterfactual_pair(group_summaries, grade_lookup, group_id)
+                )
+
+        # PR-9a: per-case + per-experiment statistics. Variant-tagged trials
+        # are excluded from the rollup (see stats.compute_case_stats).
+            case_stats = compute_case_stats(list(report.trials), grade_lookup)
+            experiment_stats = compute_experiment_stats(case_stats)
+
+            async with self._session_factory() as session:
+                await EvalService(session).transition_experiment(
+                    experiment_id, "completed"
+                )
+
+            return ExperimentReport(
+                experiment_id=report.experiment_id,
+                experiment_status="completed",
+                trial_count=report.trial_count,
+                trials=list(report.trials),
+                scored_trial_count=scored,
+                hard_gate_pass_fraction=compute_hard_gate_pass_fraction(
+                    passed_count=passed,
+                    summaries=list(report.trials),
+                ),
+                counterfactual_pairs=pairs,
+                case_stats=case_stats,
+                experiment_stats=experiment_stats,
+                failure_counts=summarize_failure_kinds(
+                    [summary.error_code for summary in report.trials]
+                ),
+            )
         except Exception:
             async with self._session_factory() as session:
                 async with session_transaction(session):
@@ -274,91 +418,6 @@ class ExperimentRunner:
                         # the original failure.
                         pass
             raise
-
-        if not grade:
-            return report
-
-        cases_by_id = {case.case_id: case for case in dataset.cases}
-        scored = 0
-        passed = 0
-        # PR-8: map trial_id -> list of
-        # (grader_name, score, gate_requirement_passed).
-        # Used to assemble the counterfactual paired diffs below.
-        grade_lookup: dict[UUID, list[tuple[str, float, bool]]] = {}
-
-        for trial_summary in report.trials:
-            case = cases_by_id.get(trial_summary.case_id)
-            if case is None or trial_summary.status != "completed":
-                continue
-            # Keep each Trial in its own Session. Reading scores starts an
-            # implicit transaction; reusing that Session would make the next
-            # grade_trial commit only a nested savepoint and then roll it back
-            # when the shared Session closes.
-            async with self._session_factory() as session:
-                repo = EvalRepository(session)
-                service = EvalService(session)
-                try:
-                    await service.grade_trial(trial_summary.trial_id, case)
-                except AppError as exc:
-                    if exc.code != "EVAL_SCORE_ALREADY_GRADED":
-                        raise
-                    # Already graded: still count it as scored below.
-                scored += 1
-                rows = await repo.list_scores(trial_summary.trial_id)
-                if rows:
-                    grade_lookup[trial_summary.trial_id] = [
-                        (
-                            row.grader_name,
-                            float(row.score) if row.score is not None else 0.0,
-                            gate_requirement_passed(
-                                hard_gate=row.hard_gate,
-                                passed=row.passed,
-                            ),
-                        )
-                        for row in rows
-                    ]
-                if rows and all(
-                    gate_passed
-                    for _, _, gate_passed in grade_lookup[trial_summary.trial_id]
-                ):
-                    passed += 1
-
-        # PR-8: assemble counterfactual paired diffs for any Trials sharing a
-        # non-NULL counterfactual_group_id. Group by group_id alone (paired
-        # variants each carry their own case_id in the dataset).
-        pairs: list[CounterfactualPairDiff] = []
-        grouped: dict[str, list[TrialSummary]] = {}
-        for summary in report.trials:
-            if not summary.counterfactual_group_id:
-                continue
-            grouped.setdefault(summary.counterfactual_group_id, []).append(summary)
-        for group_id, group_summaries in grouped.items():
-            pairs.append(
-                _build_counterfactual_pair(group_summaries, grade_lookup, group_id)
-            )
-
-        # PR-9a: per-case + per-experiment statistics. Variant-tagged trials
-        # are excluded from the rollup (see stats.compute_case_stats).
-        case_stats = compute_case_stats(list(report.trials), grade_lookup)
-        experiment_stats = compute_experiment_stats(case_stats)
-
-        return ExperimentReport(
-            experiment_id=report.experiment_id,
-            experiment_status=report.experiment_status,
-            trial_count=report.trial_count,
-            trials=list(report.trials),
-            scored_trial_count=scored,
-            hard_gate_pass_fraction=compute_hard_gate_pass_fraction(
-                passed_count=passed,
-                summaries=list(report.trials),
-            ),
-            counterfactual_pairs=pairs,
-            case_stats=case_stats,
-            experiment_stats=experiment_stats,
-            failure_counts=summarize_failure_kinds(
-                [summary.error_code for summary in report.trials]
-            ),
-        )
 
 
 def _summarize(trial: EvalTrial, outcome: RunOutcome) -> TrialSummary:

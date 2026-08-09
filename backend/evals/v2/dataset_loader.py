@@ -97,7 +97,14 @@ def _adapt_stage5(case: LegacyStage5Case, manifest: DatasetManifest) -> EvalCase
         difficulty = "capability"
     if "safety" in case.category or "risk" in case.category:
         difficulty = "adversarial"
-    allowed_statuses = ["completed"] if case.expected_result_kind == "plan" else ["degraded"]
+    is_fallback_plan = (
+        case.expected_result_kind == "plan" and case.category.endswith("_fallback")
+    )
+    allowed_statuses = (
+        ["completed"]
+        if case.expected_result_kind == "plan" and not is_fallback_plan
+        else ["degraded"]
+    )
     payload: dict[str, object] = {
         "case_id": case.case_id,
         "schema_version": "2",

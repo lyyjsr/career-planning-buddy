@@ -36,6 +36,7 @@ from app.harness.provider_calls import (
     AuditEmbeddingProvider,
     AuditPlanningProvider,
     AuditSearchProvider,
+    FixtureDesyncError,
     FixtureEmbeddingProvider,
     FixtureEntry,
     FixturePlanningProvider,
@@ -51,7 +52,7 @@ from app.harness.provider_calls import (
     RetryingSearchProvider,
 )
 from app.models.agent_run import AgentRun
-from app.models.eval import EvalTrial
+from app.models.eval import EvalEvidenceItem, EvalTrial
 from app.models.provider_call import EvalProviderFixtureItem
 from app.prompts.career_planning import DIRECT_BASELINE_PROMPT_VERSION
 from app.providers.embedding import MockEmbeddingProvider, build_embedding_provider
@@ -67,6 +68,7 @@ from app.schemas.agent_runs import AgentRunCancelRequest
 from app.services.agent_runs import AgentRunService
 from app.services.reviews import ReviewService
 from app.tools.registry import build_tool_registry
+from evals.v2.collectors.evidence import collect_evidence
 from evals.v2.collectors.outcome import RunOutcome, collect_outcome
 from evals.v2.contracts import EvalCase, EvalScenario
 from evals.v2.experiment_runtime_context import ExperimentRuntimeContext
@@ -146,9 +148,19 @@ class TrialRunner:
             max_seconds=self._settings.eval_live_retry_max_seconds,
         )
 
-    async def run_trial(self, trial: EvalTrial, case: EvalCase) -> RunOutcome:
+    async def run_trial(
+        self,
+        trial: EvalTrial,
+        case: EvalCase,
+        *,
+        fixture_source_trial_id: UUID | None = None,
+    ) -> RunOutcome:
         """Execute one Trial end to end and freeze its terminal outcome."""
 
+        replay_store, replay_bundle_hash = await self._load_fixture_replay_store(
+            trial,
+            fixture_source_trial_id=fixture_source_trial_id,
+        )
         await self._mark_running(trial)
         scenario = case.scenario
         # PR-8: capture provider_fixtures so the launched Run + ToolRegistry
@@ -169,15 +181,14 @@ class TrialRunner:
         run_id = await self._launch_run(
             user_id, launch, provider_fixtures=dict(provider_fixtures)
         )
-        # Replay path: if a prior bundle exists for this Trial, preload the
-        # store so the executor replays the recorded responses rather than
-        # re-invoking the Mock.
-        replay_store = await self._load_existing_fixture_store(trial.id)
         record_store: FixtureStore | None = None
         active_store: FixtureStore | None
-        if replay_store is None and self._settings.eval_provider_mode == "fixture":
-            # Record mode: a fresh store attached to the executor; persist it
-            # at finalize time.
+        if (
+            replay_store is None
+            and self._settings.eval_provider_mode == "fixture"
+            and trial.run_type != "fixture_replay"
+        ):
+            # Recording mode: every normal Trial owns a new immutable bundle.
             record_store = FixtureStore(trial_id=trial.id)
             active_store = record_store
         else:
@@ -186,33 +197,78 @@ class TrialRunner:
             trial_id=trial.id, run_id=run_id, fixture_store=active_store,
             provider_fixtures=dict(provider_fixtures),
         )
-        wait = await self._drive_to_terminal(
-            run_id=run_id, user_id=user_id, executor=executor, scenario=scenario
-        )
+        try:
+            wait = await self._drive_to_terminal(
+                run_id=run_id, user_id=user_id, executor=executor, scenario=scenario
+            )
+        finally:
+            await executor.close_resources()
+        if replay_store is not None:
+            try:
+                replay_store.assert_fully_consumed()
+            except FixtureDesyncError as exc:
+                await self._fail_fixture_desync(
+                    trial_id=trial.id,
+                    run_id=run_id,
+                    user_id=user_id,
+                    error=exc,
+                )
+                raise
         if record_store is not None and record_store.entries_by_sequence:
             await self._persist_bundle(record_store)
-        return await self._finalize_trial(trial.id, run_id, user_id, wait)
+        return await self._finalize_trial(
+            trial.id,
+            run_id,
+            user_id,
+            wait,
+            case=case,
+            fixture_source_trial_id=fixture_source_trial_id,
+            fixture_bundle_hash=replay_bundle_hash,
+        )
 
-    async def _load_existing_fixture_store(
-        self, trial_id: UUID
-    ) -> FixtureStore | None:
-        """If a fixture bundle for this Trial already exists, load it as a
-        frozen store for replay. Returns None when no bundle is found or when
-        the eval mode does not request fixture playback.
-        """
+    async def _load_fixture_replay_store(
+        self,
+        trial: EvalTrial,
+        *,
+        fixture_source_trial_id: UUID | None,
+    ) -> tuple[FixtureStore | None, str | None]:
+        """Load the unique frozen recording selected by a fixture-replay Trial."""
 
+        if trial.run_type != "fixture_replay":
+            if fixture_source_trial_id is not None:
+                raise RuntimeError(
+                    "fixture_source_trial_id is only valid for fixture_replay Trials"
+                )
+            return None, None
         if self._settings.eval_provider_mode != "fixture":
-            return None
+            raise RuntimeError("fixture_replay Trial requires eval_provider_mode=fixture")
+        if fixture_source_trial_id is None:
+            raise RuntimeError("fixture_replay Trial requires fixture_source_trial_id")
         async with self._session_factory() as session:
             async with session_transaction(session):
                 repo = ProviderCallRepository(session)
-                bundles = await repo.list_bundles_for_trial(trial_id)
-                if not bundles:
-                    return None
-                # Latest bundle wins; future runs can pin a specific one if
-                # reproducibility requires it.
-                items = await repo.list_fixture_items(bundles[-1].id)
-        store = FixtureStore(trial_id=trial_id)
+                source_trial = await session.get(EvalTrial, fixture_source_trial_id)
+                if (
+                    source_trial is None
+                    or source_trial.status != "completed"
+                    or source_trial.run_type == "fixture_replay"
+                    or source_trial.case_fixture_hash != trial.case_fixture_hash
+                ):
+                    raise RuntimeError(
+                        "fixture replay source must be a completed recording of the same fixture"
+                    )
+                bundles = await repo.list_bundles_for_trial(fixture_source_trial_id)
+                if len(bundles) != 1:
+                    raise RuntimeError("fixture replay source must own exactly one bundle")
+                source_bundle = bundles[0]
+                items = await repo.list_fixture_items(source_bundle.id)
+                if len(items) != source_bundle.fixture_count:
+                    raise RuntimeError("fixture replay bundle item count does not match metadata")
+        store = FixtureStore(trial_id=trial.id)
+        if any(item.response_payload_json is None for item in items):
+            raise RuntimeError(
+                "fixture replay source predates lossless response payloads; re-record it"
+            )
         entries = [
             FixtureEntry(
                 sequence=item.sequence,
@@ -221,13 +277,61 @@ class TrialRunner:
                 retry_attempt=item.retry_attempt,
                 request_projection_hash=item.request_projection_hash,
                 response_projection=item.response_projection,
+                response_payload=item.response_payload_json,
                 response_projection_hash=item.response_projection_hash,
                 fixture_hash=item.fixture_hash,
             )
             for item in items
         ]
         store.freeze_for_replay(entries)
-        return store
+        computed_bundle_hash, computed_count = store.finalize_bundle_hash()
+        if (
+            computed_bundle_hash != source_bundle.bundle_hash
+            or computed_count != source_bundle.fixture_count
+        ):
+            raise FixtureDesyncError(
+                sequence=0,
+                expected={
+                    "bundle_hash": source_bundle.bundle_hash,
+                    "fixture_count": source_bundle.fixture_count,
+                },
+                actual={
+                    "bundle_hash": computed_bundle_hash,
+                    "fixture_count": computed_count,
+                },
+                reason="fixture bundle metadata mismatch",
+            )
+        return store, source_bundle.bundle_hash
+
+    async def _fail_fixture_desync(
+        self,
+        *,
+        trial_id: UUID,
+        run_id: UUID,
+        user_id: UUID,
+        error: FixtureDesyncError,
+    ) -> None:
+        """Persist an attributable Trial failure after a terminal Run drifts."""
+
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                run = await AgentRunRepository(session).get_by_id(run_id)
+                if run is None:
+                    raise RuntimeError(f"run {run_id} disappeared")
+                outcome = await collect_outcome(session, run, user_id=user_id)
+                await EvalRepository(session).attach_trial_outcome(
+                    trial_id,
+                    status="failed",
+                    run_id=run_id,
+                    outcome_snapshot=None,
+                    transcript_hash=None,
+                    tokens_in=outcome.total_tokens_in,
+                    tokens_out=outcome.total_tokens_out,
+                    latency_ms=outcome.total_latency_ms,
+                    finished_at=datetime.now(UTC),
+                    error_code="FIXTURE_DESYNC",
+                    error_message=str(error)[:1000],
+                )
 
     async def _persist_bundle(self, store: FixtureStore) -> None:
         """Persist the record-mode bundle to DB so the next run for this Trial
@@ -238,32 +342,26 @@ class TrialRunner:
         async with self._session_factory() as session:
             async with session_transaction(session):
                 repo = ProviderCallRepository(session)
-                await repo.create_bundle(
+                bundle = await repo.create_bundle(
                     trial_id=store.trial_id,
                     bundle_hash=bundle_hash,
                     fixture_count=fixture_count,
                 )
-                # Flush to materialise the bundle id, then insert items.
                 items = []
-                # NOTE: create_bundle returns the row with id populated.
-                # We re-read via repo (the items reference this new bundle).
-                bundles = await repo.list_bundles_for_trial(store.trial_id)
-                if not bundles:
-                    raise RuntimeError("fixture bundle went missing after insert")
-                bundle_id = bundles[-1].id
                 for entry in [
                     store.entries_by_sequence[s]
                     for s in sorted(store.entries_by_sequence)
                 ]:
                     items.append(
                         EvalProviderFixtureItem(
-                            bundle_id=bundle_id,
+                            bundle_id=bundle.id,
                             sequence=entry.sequence,
                             provider_kind=entry.provider_kind,
                             provider_method=entry.provider_method,
                             retry_attempt=entry.retry_attempt,
                             request_projection_hash=entry.request_projection_hash,
                             response_projection=entry.response_projection,
+                            response_payload_json=entry.response_payload,
                             response_projection_hash=entry.response_projection_hash,
                             fixture_hash=entry.fixture_hash,
                         )
@@ -471,6 +569,7 @@ class TrialRunner:
             provider=planning_provider,
             tool_registry=tool_registry,
             embedding_provider=embedding_provider,
+            managed_resources=[base_planning, base_search],
         )
 
     async def _launch_run(
@@ -711,6 +810,10 @@ class TrialRunner:
         run_id: UUID,
         user_id: UUID,
         wait: WaitResult,
+        *,
+        case: EvalCase,
+        fixture_source_trial_id: UUID | None,
+        fixture_bundle_hash: str | None,
     ) -> RunOutcome:
         async with self._session_factory() as session:
             async with session_transaction(session):
@@ -720,7 +823,38 @@ class TrialRunner:
                     raise RuntimeError(f"run {run_id} disappeared")
                 outcome = await collect_outcome(session, run, user_id=user_id)
                 repo = EvalRepository(session)
-                await self._attach_outcome(repo, trial_id, outcome, wait)
+                await self._attach_outcome(
+                    repo,
+                    trial_id,
+                    outcome,
+                    wait,
+                    fixture_source_trial_id=fixture_source_trial_id,
+                    fixture_bundle_hash=fixture_bundle_hash,
+                )
+                if outcome.status in {"completed", "degraded"}:
+                    items = await collect_evidence(
+                        session,
+                        trial_id=trial_id,
+                        run=run,
+                        outcome=outcome,
+                        case=case,
+                    )
+                    await repo.delete_evidence_for_trial(trial_id)
+                    await repo.create_evidence_items(
+                        [
+                            EvalEvidenceItem(
+                                id=item.id,
+                                trial_id=trial_id,
+                                kind=item.kind.value,
+                                source_type=item.source_type,
+                                source_id=item.source_id,
+                                content_hash=item.content_hash,
+                                projection_json=item.projection,
+                                sensitivity=item.sensitivity,
+                            )
+                            for item in items
+                        ]
+                    )
             return outcome
 
     async def _attach_outcome(
@@ -729,6 +863,9 @@ class TrialRunner:
         trial_id: UUID,
         outcome: RunOutcome,
         wait: WaitResult,
+        *,
+        fixture_source_trial_id: UUID | None,
+        fixture_bundle_hash: str | None,
     ) -> None:
         now = datetime.now(UTC)
         if outcome.status in {"completed", "degraded"}:
@@ -754,7 +891,13 @@ class TrialRunner:
                 "steps": outcome.steps,
                 "events": outcome.events,
                 "tool_calls": outcome.tool_calls,
+                "provider_calls": outcome.provider_calls,
             }
+            if fixture_source_trial_id is not None:
+                snapshot["fixture_replay"] = {
+                    "source_trial_id": str(fixture_source_trial_id),
+                    "bundle_hash": fixture_bundle_hash,
+                }
             await repo.attach_trial_outcome(
                 trial_id,
                 status="completed",

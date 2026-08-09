@@ -21,6 +21,16 @@ def test_stage5_adapter_loads_thirty_hash_verified_v2_cases() -> None:
     assert all(len(case.fixture_hash) == 64 for case in bundle.cases)
 
 
+def test_stage5_adapter_preserves_fallback_plan_terminal_contract() -> None:
+    cases = {case.case_id: case for case in load_dataset().cases}
+
+    assert cases["repair-02"].expected_outcome.result_kind == "plan"
+    assert cases["repair-02"].expected_outcome.allowed_run_statuses == ["degraded"]
+    assert cases["repair-04"].expected_outcome.result_kind == "plan"
+    assert cases["repair-04"].expected_outcome.allowed_run_statuses == ["degraded"]
+    assert cases["create-01"].expected_outcome.allowed_run_statuses == ["completed"]
+
+
 def test_eval_case_rejects_unknown_fields_and_fixture_tampering() -> None:
     case_payload = load_dataset().cases[0].model_dump(mode="json")
     case_payload["unknown"] = True

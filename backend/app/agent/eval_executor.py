@@ -70,10 +70,10 @@ class EvalRunnerExecutor:
     ) -> None:
         """Drive ``ExperimentRunner`` from a fresh session scope.
 
-        ``run_experiment_and_grade`` already transitions the experiment to
-        ``failed`` on stage-1 exceptions, so any exception reaching here has
-        already been recorded in DB state. We still log the traceback so the
-        asyncio default exception handler does not silently swallow it.
+        ``run_experiment_and_grade`` transitions the experiment to ``failed``
+        on execution or grading exceptions, so any exception reaching here
+        has already been recorded in DB state. We still log the traceback so
+        the asyncio default exception handler does not silently swallow it.
         """
 
         runner = ExperimentRunner(

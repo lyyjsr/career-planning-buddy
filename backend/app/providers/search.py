@@ -128,6 +128,9 @@ class BaiduSearchProvider:
         self._max_results = max_results
         self._timeout = timeout_seconds
         self._transport = transport
+        self._client = (
+            httpx.AsyncClient(timeout=self._timeout) if transport is None else None
+        )
         self.last_trace: dict[str, object] = {}
 
     async def search(
@@ -145,10 +148,8 @@ class BaiduSearchProvider:
             payload["freshness_days"] = freshness_days
         started = monotonic()
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
-            ) as client:
-                response = await client.post(
+            if self._client is not None:
+                response = await self._client.post(
                     self._base_url,
                     headers={
                         "X-Appbuilder-Authorization": f"Bearer {self._api_key}",
@@ -156,6 +157,18 @@ class BaiduSearchProvider:
                     },
                     json=payload,
                 )
+            else:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, transport=self._transport
+                ) as client:
+                    response = await client.post(
+                        self._base_url,
+                        headers={
+                            "X-Appbuilder-Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
         except httpx.TimeoutException as exc:
             raise ProviderTimeoutError(
                 "Baidu search timed out", retryable=True
@@ -210,6 +223,10 @@ class BaiduSearchProvider:
             ]
         except (TypeError, ValueError, ValidationError) as exc:
             raise StructuredOutputError("Baidu search returned an invalid response") from exc
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
 
     @classmethod
     def _map_reference(cls, raw: object, request_id: str | None) -> SearchResultItem | None:

@@ -34,6 +34,7 @@ EXPECTED_ALLOWED_KINDS = {
         EvidenceKind.CROSS_USER_SIGNAL,
         EvidenceKind.TOOL_ALLOWLIST,
         EvidenceKind.PLAN_PROJECTION,
+        EvidenceKind.EVIDENCE_VISIBLE_REFS,
     }),
     "tool": frozenset({
         EvidenceKind.TOOL_CALL_PROJECTION,

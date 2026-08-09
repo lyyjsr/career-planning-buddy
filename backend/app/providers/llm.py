@@ -110,6 +110,17 @@ class OpenAICompatiblePlanningProvider:
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._transport = transport
+        self._client = (
+            httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            if transport is None
+            else None
+        )
 
     async def generate_plan(
         self,
@@ -295,15 +306,18 @@ class OpenAICompatiblePlanningProvider:
     async def _post(self, request_body: dict[str, object]) -> tuple[httpx.Response, int, str]:
         started = monotonic()
         try:
-            async with httpx.AsyncClient(
-                transport=self._transport,
-                timeout=self._timeout_seconds,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-            ) as client:
-                response = await client.post(self._endpoint, json=request_body)
+            if self._client is not None:
+                response = await self._client.post(self._endpoint, json=request_body)
+            else:
+                async with httpx.AsyncClient(
+                    transport=self._transport,
+                    timeout=self._timeout_seconds,
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                ) as client:
+                    response = await client.post(self._endpoint, json=request_body)
         except httpx.TimeoutException as exc:
             raise ProviderTimeoutError(
                 "LLM provider request timed out", retryable=True
@@ -338,6 +352,10 @@ class OpenAICompatiblePlanningProvider:
             )
 
         return response, int((monotonic() - started) * 1000), response.text
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
 
     def _apply_thinking_disabled(self, request_body: dict[str, object]) -> None:
         """Disable reasoning only for the explicitly supported DeepSeek API."""

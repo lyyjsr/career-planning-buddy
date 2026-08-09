@@ -31,6 +31,7 @@ from app.models.eval import (
 from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
 from evals.v2.contracts import canonical_sha256
+from evals.v2.graders.base import EvidenceItem, EvidenceKind
 from evals.v2.pairwise import JUDGE_ALLOWED_KINDS
 from tests.evals_v2.test_eval_repository import _config
 
@@ -46,9 +47,40 @@ async def _provision_experiment(db_session: AsyncSession) -> tuple[str, list[str
 
     from evals.v2.dataset_loader import load_dataset
 
-    _, trials = await EvalService(db_session).create_experiment(
+    service = EvalService(db_session)
+    _, trials = await service.create_experiment(
         dataset=load_dataset(), config=_config()
     )
+    for index, trial in enumerate(trials[:2]):
+        request_projection: dict[str, object] = {
+            "expect_constraint": "test request"
+        }
+        plan_projection: dict[str, object] = {"summary": f"test plan {index}"}
+        await service.attach_evidence(
+            trial.id,
+            [
+                EvidenceItem(
+                    id=uuid4(),
+                    trial_id=trial.id,
+                    kind=EvidenceKind.REQUEST_CONSTRAINTS,
+                    source_type="eval_case",
+                    source_id=trial.case_id,
+                    content_hash=canonical_sha256(request_projection),
+                    projection=request_projection,
+                    sensitivity="normal",
+                ),
+                EvidenceItem(
+                    id=uuid4(),
+                    trial_id=trial.id,
+                    kind=EvidenceKind.PLAN_PROJECTION,
+                    source_type="agent_run",
+                    source_id=str(trial.id),
+                    content_hash=canonical_sha256(plan_projection),
+                    projection=plan_projection,
+                    sensitivity="normal",
+                ),
+            ],
+        )
     case_id = trials[0].case_id
     return case_id, [str(t.id) for t in trials[:2]]
 

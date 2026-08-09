@@ -60,17 +60,35 @@ async def _run_case(
     db_connection: AsyncConnection,
     *,
     case_id: str,
+    run_type: str = "evaluation",
+    fixture_source_trial_id: UUID | None = None,
 ) -> tuple[UUID, list[ProviderCall]]:
     bundle = filter_cases(load_dataset(), [case_id])
-    _, trials = await EvalService(db_session).create_experiment(
-        dataset=bundle, config=_config(bundle.manifest)
+    source_experiment_id = None
+    if fixture_source_trial_id is not None:
+        source_trial = await db_session.get(EvalTrial, fixture_source_trial_id)
+        assert source_trial is not None
+        source_experiment_id = source_trial.experiment_id
+    service = EvalService(db_session)
+    experiment, trials = await service.create_experiment(
+        dataset=bundle,
+        config=_config(bundle.manifest),
+        run_type=run_type,
+        fixture_source_experiment_id=source_experiment_id,
     )
     trial = trials[0]
+    await service.transition_experiment(experiment.id, "running")
+    settings = get_settings().model_copy(update={"eval_provider_mode": "fixture"})
     runner = TrialRunner(
         session_factory=runtime_factory(db_connection),
-        settings=get_settings(),
+        settings=settings,
     )
-    await runner.run_trial(trial, bundle.cases[0])
+    await runner.run_trial(
+        trial,
+        bundle.cases[0],
+        fixture_source_trial_id=trial.fixture_source_trial_id,
+    )
+    await service.transition_experiment(experiment.id, "completed")
     async with session_transaction(db_session):
         # TrialRunner attaches outcome on a different session; reload with
         # populate_existing to bypass identity-map cache.
@@ -84,30 +102,65 @@ async def _run_case(
 
 
 @pytest.mark.asyncio
-async def test_two_runs_of_same_case_produce_matchable_provider_calls(
+async def test_fixture_replay_uses_immutable_recording_and_stable_transcript(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
 ) -> None:
-    """Two identical Trials for the same case yield the same set of request
-    projection hashes (in the same order)."""
+    """A new fixture_replay Trial consumes, but never rewrites, its recording."""
 
-    _trial_id_a, rows_a = await _run_case(
-        db_session, db_connection, case_id="create-01"
+    trial_id_a, rows_a = await _run_case(
+        db_session, db_connection, case_id="create-07"
     )
-    _trial_id_b, rows_b = await _run_case(
-        db_session, db_connection, case_id="create-01"
+    trial_id_b, rows_b = await _run_case(
+        db_session,
+        db_connection,
+        case_id="create-07",
+        run_type="fixture_replay",
+        fixture_source_trial_id=trial_id_a,
     )
 
     hashes_a = [r.request_projection_hash for r in rows_a]
     hashes_b = [r.request_projection_hash for r in rows_b]
+    source_calls = [
+        (r.sequence, r.provider_kind, r.provider_method, r.status, r.error_code)
+        for r in rows_a
+    ]
+    replay_calls = [
+        (r.sequence, r.provider_kind, r.provider_method, r.status, r.error_code)
+        for r in rows_b
+    ]
     assert hashes_a == hashes_b, (
-        "request_projection_hashes drifted across identical reruns"
+        "request_projection_hashes drifted across identical reruns: "
+        f"source={source_calls} replay={replay_calls}"
     )
     # response_projection_hashes only exist for non-error rows; compare those
     # that do exist as an additional determinism gate.
     resp_a = [r.response_projection_hash for r in rows_a if r.response_projection_hash]
     resp_b = [r.response_projection_hash for r in rows_b if r.response_projection_hash]
     assert resp_a == resp_b
+
+    async with session_transaction(db_session):
+        repo = ProviderCallRepository(db_session)
+        source_bundles = await repo.list_bundles_for_trial(trial_id_a)
+        replay_bundles = await repo.list_bundles_for_trial(trial_id_b)
+        source_trial = await db_session.get(
+            EvalTrial, trial_id_a, populate_existing=True
+        )
+        replay_trial = await db_session.get(
+            EvalTrial, trial_id_b, populate_existing=True
+        )
+
+    assert len(source_bundles) == 1
+    assert replay_bundles == []
+    assert source_trial is not None and replay_trial is not None
+    assert source_trial.transcript_hash == replay_trial.transcript_hash
+    assert replay_trial.run_type == "fixture_replay"
+    assert replay_trial.fixture_source_trial_id == trial_id_a
+    assert replay_trial.outcome_snapshot_json is not None
+    assert replay_trial.outcome_snapshot_json["fixture_replay"] == {
+        "source_trial_id": str(trial_id_a),
+        "bundle_hash": source_bundles[0].bundle_hash,
+    }
 
 
 @pytest.mark.asyncio
@@ -175,9 +228,10 @@ async def test_capture_provider_call_projection_in_grade_trial(
         dataset=bundle, config=_config(bundle.manifest)
     )
     trial = trials[0]
+    settings = get_settings().model_copy(update={"eval_provider_mode": "fixture"})
     runner = TrialRunner(
         session_factory=runtime_factory(db_connection),
-        settings=get_settings(),
+        settings=settings,
     )
     await runner.run_trial(trial, case)
     await EvalService(db_session).grade_trial(trial.id, case)

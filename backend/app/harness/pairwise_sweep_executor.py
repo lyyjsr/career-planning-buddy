@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import func, select, text, update
@@ -61,6 +62,18 @@ logger = logging.getLogger(__name__)
 # Stable Postgres advisory-lock namespace for Pairwise Sweeps. Two int32
 # keys: namespace tag + low-32 bits of the sweep id.
 _SWEEP_LOCK_NAMESPACE = 0x9C20
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimedWork:
+    sweep_id: UUID
+    item_id: UUID
+    baseline_trial_id: UUID
+    candidate_trial_id: UUID
+    case_id: str
+    comparison_group_id: str
+    judge_run_id: UUID
+    position_variant: str
 
 
 def _advisory_key_parts(sweep_id: UUID) -> tuple[int, int]:
@@ -264,6 +277,7 @@ class PairwiseSweepExecutor:
         transaction. Returns True if the Sweep has reached a terminal
         state (no further work this call); False to keep pumping."""
 
+        work: _ClaimedWork | None = None
         async with self._session_factory() as session:
             async with session_transaction(session):
                 sweep = await EvalRepository(session).get_sweep(sweep_id)
@@ -278,9 +292,21 @@ class PairwiseSweepExecutor:
                 if item is None:
                     await self._maybe_finalize_sweep(session, sweep_id)
                     return True
+                work = _ClaimedWork(
+                    sweep_id=sweep.id,
+                    item_id=item.id,
+                    baseline_trial_id=item.baseline_trial_id,
+                    candidate_trial_id=item.candidate_trial_id,
+                    case_id=item.case_id,
+                    comparison_group_id=sweep.comparison_group_id,
+                    judge_run_id=item.judge_run_id,
+                    position_variant=item.position_variant,
+                )
 
-                await self._process_item(session, sweep, item, judge)
-                return False
+        if work is None:
+            return True
+        await self._process_item(work, judge)
+        return False
 
     async def _recover_running_items(self, sweep_id: UUID) -> None:
         """Requeue / reconcile Items left ``running`` by a crash.
@@ -392,9 +418,7 @@ class PairwiseSweepExecutor:
 
     async def _process_item(
         self,
-        session: AsyncSession,
-        sweep: EvalPairwiseSweep,
-        item: EvalPairwiseSweepItem,
+        work: _ClaimedWork,
         judge: PairwiseJudge,
     ) -> None:
         """Run one Judge execution for an Item and persist the result.
@@ -407,44 +431,53 @@ class PairwiseSweepExecutor:
         double-spend Provider cost.
         """
 
-        service = EvalService(session)
         try:
-            _pair, result = await service.run_pairwise_judge(
-                baseline_trial_id=item.baseline_trial_id,
-                candidate_trial_id=item.candidate_trial_id,
-                case_id=item.case_id,
-                comparison_group_id=sweep.comparison_group_id,
-                judge_run_id=item.judge_run_id,
-                judge=judge,
-                position_variant=PositionVariant(item.position_variant),
-            )
+            async with self._session_factory() as judge_session:
+                _pair, result = await EvalService(
+                    judge_session
+                ).run_pairwise_judge(
+                    baseline_trial_id=work.baseline_trial_id,
+                    candidate_trial_id=work.candidate_trial_id,
+                    case_id=work.case_id,
+                    comparison_group_id=work.comparison_group_id,
+                    judge_run_id=work.judge_run_id,
+                    judge=judge,
+                    position_variant=PositionVariant(work.position_variant),
+                )
         except Exception as exc:
-            # Provider-level hard error: retry budget exhausted by the
-            # adapter. Mark Item as failed (control-plane failure).
-            transitioned = await EvalRepository(session).mark_sweep_item_failed(
-                item.id, error_code=_provider_error_code(exc)
-            )
-            if not transitioned:
-                return
-            await EvalRepository(session).increment_sweep_failed_run(sweep.id)
-            # THIS terminal transition may also complete the Pair (if the
-            # sibling was already terminal). The completed_pair counter
-            # must advance; position_pair never advances on a failed Item
-            # because failed Items never have judge_result_id set.
-            await self._apply_pair_deltas(session, sweep, item)
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    sweep = await EvalRepository(session).get_sweep(work.sweep_id)
+                    item = await session.get(EvalPairwiseSweepItem, work.item_id)
+                    if sweep is None or item is None:
+                        return
+                    transitioned = await EvalRepository(
+                        session
+                    ).mark_sweep_item_failed(
+                        item.id, error_code=_provider_error_code(exc)
+                    )
+                    if not transitioned:
+                        return
+                    await EvalRepository(session).increment_sweep_failed_run(sweep.id)
+                    await session.refresh(item)
+                    await self._apply_pair_deltas(session, sweep, item)
             return
 
-        transitioned = await EvalRepository(session).mark_sweep_item_completed(
-            item.id, judge_result_id=result.id
-        )
-        if not transitioned:
-            return  # already terminal (idempotent replay)
-
-        # Refresh the local Item so _pair_completion_flags sees the just-
-        # committed status + judge_result_id rather than the in-memory
-        # pre-transition snapshot.
-        await session.refresh(item)
-        await self._apply_pair_deltas(session, sweep, item)
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                sweep = await EvalRepository(session).get_sweep(work.sweep_id)
+                item = await session.get(EvalPairwiseSweepItem, work.item_id)
+                if sweep is None or item is None:
+                    return
+                transitioned = await EvalRepository(
+                    session
+                ).mark_sweep_item_completed(
+                    item.id, judge_result_id=result.id
+                )
+                if not transitioned:
+                    return
+                await session.refresh(item)
+                await self._apply_pair_deltas(session, sweep, item)
 
     async def _apply_pair_deltas(
         self,

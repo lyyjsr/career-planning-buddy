@@ -61,7 +61,14 @@ jobs:
           LLM_PROVIDER: mock
           SEARCH_PROVIDER: mock
           EMBEDDING_PROVIDER: mock
-        run: python -m alembic upgrade head
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade -1
+          python -m alembic upgrade head
+          python -m alembic check
+
+      - name: Validate Compose configuration
+        run: docker compose --file ../compose.yaml config --quiet
 
       - name: Pytest
         env:
@@ -93,8 +100,9 @@ jobs:
           EMBEDDING_PROVIDER: mock
           EVAL_PROVIDER_MODE: mock
         run: >-
-          python -m evals.v2 run --dataset runtime-smoke
-          --cases runtime-tool-error-01 --provider-mode mock --trial-count 1
+          python -m evals.v2 run --dataset stage5
+          --provider-mode mock --trial-count 1
+          --require-all-hard-gates
 
   frontend:
     name: Frontend

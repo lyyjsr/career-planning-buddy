@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionFactory
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
+from app.harness.pairwise_sweep_executor import pairwise_sweep_executor
 from app.providers.embedding import build_embedding_provider
 from app.providers.evidence_distillation import build_evidence_distillation_provider
 from app.providers.llm import build_planning_provider
@@ -25,9 +26,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Recover expired single-worker Runs and cancel local tasks on shutdown."""
     await agent_run_executor.recover_interrupted()
     await eval_runner_executor.recover_interrupted()
+    await pairwise_sweep_executor.recover_interrupted()
     try:
         yield
     finally:
+        await pairwise_sweep_executor.shutdown()
         await eval_runner_executor.shutdown()
         await agent_run_executor.shutdown()
 

@@ -1,17 +1,39 @@
+import { lazy } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppLayout } from "@/components/AppLayout";
 import { LoginRoute, RequireAuth, RequireDev, RequireProfile } from "@/pages/LoginRoute";
-import { OnboardingPage } from "@/pages/OnboardingPage";
-import { TodayPage } from "@/pages/TodayPage";
-import { PlansPage } from "@/pages/PlansPage";
-import { PlanDetailPage } from "@/pages/PlanDetailPage";
-import { ReviewsPage } from "@/pages/ReviewsPage";
-import { MemoriesPage } from "@/pages/MemoriesPage";
-import { DeveloperRunsPage } from "@/pages/DeveloperRunsPage";
-import { DeveloperEvalsPage } from "@/pages/DeveloperEvalsPage";
-import { MyPage } from "@/pages/MyPage";
-import { ProfileSettingsPage } from "@/pages/ProfileSettingsPage";
+
+const OnboardingPage = lazy(async () => ({
+  default: (await import("@/pages/OnboardingPage")).OnboardingPage,
+}));
+const TodayPage = lazy(async () => ({
+  default: (await import("@/pages/TodayPage")).TodayPage,
+}));
+const PlansPage = lazy(async () => ({
+  default: (await import("@/pages/PlansPage")).PlansPage,
+}));
+const PlanDetailPage = lazy(async () => ({
+  default: (await import("@/pages/PlanDetailPage")).PlanDetailPage,
+}));
+const ReviewsPage = lazy(async () => ({
+  default: (await import("@/pages/ReviewsPage")).ReviewsPage,
+}));
+const MemoriesPage = lazy(async () => ({
+  default: (await import("@/pages/MemoriesPage")).MemoriesPage,
+}));
+const DeveloperRunsPage = lazy(async () => ({
+  default: (await import("@/pages/DeveloperRunsPage")).DeveloperRunsPage,
+}));
+const DeveloperEvalsPage = lazy(async () => ({
+  default: (await import("@/pages/DeveloperEvalsPage")).DeveloperEvalsPage,
+}));
+const MyPage = lazy(async () => ({
+  default: (await import("@/pages/MyPage")).MyPage,
+}));
+const ProfileSettingsPage = lazy(async () => ({
+  default: (await import("@/pages/ProfileSettingsPage")).ProfileSettingsPage,
+}));
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },

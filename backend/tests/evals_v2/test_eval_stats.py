@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from evals.v2.experiment_runner import (
     ExperimentReport,
     TrialSummary,
@@ -49,7 +51,7 @@ def test_wilson_ci_mixed_successes_widens_interval() -> None:
     assert (high_big - low_big) < (high - low)
 
 
-def test_normal_ci_n_lt2_zero_width() -> None:
+def test_normal_ci_n_lt2_uses_non_inferential_point_sentinel() -> None:
     assert normal_ci([]) == (0.0, 0.0)
     assert normal_ci([42.0]) == (42.0, 42.0)
 
@@ -59,6 +61,26 @@ def test_normal_ci_two_values_symmetric() -> None:
     mean = (low + high) / 2
     assert mean == 15.0
     assert low < 15.0 < high
+
+
+def test_normal_ci_uses_standard_error_not_population_spread() -> None:
+    values = [10.0, 20.0, 30.0, 40.0]
+    low, high = normal_ci(values)
+    mean = 25.0
+    sample_variance = 500.0 / 3.0
+    expected_half_width = 1.959963984540054 * (sample_variance / 4) ** 0.5
+
+    assert low == pytest.approx(mean - expected_half_width)
+    assert high == pytest.approx(mean + expected_half_width)
+
+
+def test_normal_ci_shrinks_when_same_distribution_is_repeated() -> None:
+    small = [10.0, 20.0, 30.0, 40.0]
+    large = small * 10
+    small_low, small_high = normal_ci(small)
+    large_low, large_high = normal_ci(large)
+
+    assert (large_high - large_low) < (small_high - small_low)
 
 
 # ---------------------------------------------------------------------------
