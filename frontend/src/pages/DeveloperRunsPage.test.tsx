@@ -21,15 +21,30 @@ afterEach(() => {
 });
 
 describe("DeveloperRunsPage", () => {
-  it("requires a developer token before loading", () => {
-    const fetchMock = vi.fn();
+  it("uses the normal authenticated session instead of a second token", async () => {
+    localStorage.setItem("cpb_access_token", "dev-session-token");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Response(JSON.stringify({ items: [], next_cursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
-    expect(screen.getByText("Enter a developer token to load Runs.")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Runs")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Developer JWT")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/dev/runs",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer dev-session-token",
+        }),
+      }),
+    );
   });
 
   it("renders a persisted trace and terminal invariant", async () => {
+    localStorage.setItem("cpb_access_token", "dev-session-token");
     const run = {
       run_id: "11111111-1111-1111-1111-111111111111",
       replay_of_run_id: null,
@@ -67,7 +82,6 @@ describe("DeveloperRunsPage", () => {
     }));
 
     renderPage();
-    fireEvent.change(screen.getByLabelText("Developer JWT"), { target: { value: "dev-token" } });
     fireEvent.click(await screen.findByRole("button", { name: /completed/ }));
 
     expect(await screen.findByText("valid")).toBeInTheDocument();

@@ -19,6 +19,7 @@ from app.agent.errors import (
     ProviderTimeoutError,
     ProviderUnavailableError,
     StructuredOutputError,
+    parse_retry_after,
 )
 from app.core.config import Settings
 from app.schemas.base import StrictModel
@@ -72,19 +73,38 @@ def compact_baidu_search_query(value: str, *, max_weight: int = 72) -> str:
     return result
 
 
+def _normalized_hostname(url: str) -> str:
+    try:
+        raw = urlsplit(url).hostname
+        if not raw:
+            return ""
+        return raw.rstrip(".").encode("idna").decode("ascii").lower()
+    except (UnicodeError, ValueError):
+        return ""
+
+
+def host_matches(host: str, domain: str) -> bool:
+    normalized_domain = domain.rstrip(".").lower()
+    return bool(
+        host
+        and normalized_domain
+        and (host == normalized_domain or host.endswith(f".{normalized_domain}"))
+    )
+
+
 def classify_source(url: str) -> tuple[SourceType, float]:
-    host = (urlsplit(url).hostname or "").lower()
-    official = (".gov.cn", ".edu.cn", ".org.cn", "open.baidu.com", "cloud.baidu.com")
-    job = ("zhipin.com", "liepin.com", "51job.com", "zhaopin.com", "jobs.")
+    host = _normalized_hostname(url)
+    official = ("gov.cn", "edu.cn", "org.cn", "open.baidu.com", "cloud.baidu.com")
+    job = ("zhipin.com", "liepin.com", "51job.com", "zhaopin.com")
     community = ("zhihu.com", "reddit.com", "stackoverflow.com", "v2ex.com")
-    blog = ("blog.", "medium.com", "csdn.net", "cnblogs.com", "juejin.cn")
-    if any(item in host for item in official):
+    blog = ("medium.com", "csdn.net", "cnblogs.com", "juejin.cn")
+    if any(host_matches(host, domain) for domain in official):
         return "official", 0.9
-    if any(item in host for item in job):
+    if any(host_matches(host, domain) for domain in job):
         return "job_board", 0.75
-    if any(item in host for item in community):
+    if any(host_matches(host, domain) for domain in community):
         return "community", 0.45
-    if any(item in host for item in blog):
+    if any(host_matches(host, domain) for domain in blog):
         return "blog", 0.6
     return "other", 0.5
 
@@ -137,9 +157,13 @@ class BaiduSearchProvider:
                     json=payload,
                 )
         except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError("Baidu search timed out") from exc
+            raise ProviderTimeoutError(
+                "Baidu search timed out", retryable=True
+            ) from exc
         except httpx.NetworkError as exc:
-            raise ProviderUnavailableError("Baidu search network failure") from exc
+            raise ProviderUnavailableError(
+                "Baidu search network failure", retryable=True
+            ) from exc
         self.last_trace = {
             "query_hash": sha256(compact.encode()).hexdigest(),
             "query_length": len(compact),
@@ -148,11 +172,25 @@ class BaiduSearchProvider:
         if response.status_code in {401, 403}:
             raise ProviderAuthenticationError("Baidu search authentication failed")
         if response.status_code == 429:
-            raise ProviderRateLimitError("Baidu search rate limited")
+            raise ProviderRateLimitError(
+                "Baidu search rate limited",
+                retryable=True,
+                retry_after_seconds=parse_retry_after(
+                    response.headers.get("retry-after")
+                ),
+            )
         if response.status_code >= 500:
-            raise ProviderUnavailableError("Baidu search service unavailable")
+            raise ProviderUnavailableError(
+                "Baidu search service unavailable",
+                retryable=True,
+                retry_after_seconds=parse_retry_after(
+                    response.headers.get("retry-after")
+                ),
+            )
         if response.status_code >= 400:
-            raise ProviderUnavailableError("Baidu search request rejected")
+            raise ProviderUnavailableError(
+                "Baidu search request rejected", retryable=False
+            )
         try:
             body = response.json()
             if not isinstance(body, Mapping):

@@ -56,8 +56,13 @@ class EvalExperiment(Base):
         CheckConstraint(
             "dataset_id <> '' AND dataset_version <> '' AND graph_version <> '' "
             "AND prompt_version <> '' AND model_version <> '' AND tool_version <> '' "
-            "AND context_version <> '' AND memory_version <> ''",
+            "AND context_version <> '' AND memory_version <> '' "
+            "AND search_version <> '' AND eval_harness_version <> ''",
             name="ck_eval_experiments_versions_present",
+        ),
+        CheckConstraint(
+            "feature_stage > 0",
+            name="ck_eval_experiments_feature_stage",
         ),
         CheckConstraint(
             "dataset_hash ~ '^[0-9a-f]{64}$' AND frozen_config_hash ~ '^[0-9a-f]{64}$'",
@@ -75,11 +80,20 @@ class EvalExperiment(Base):
     dataset_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     git_commit: Mapped[str] = mapped_column(String(64), nullable=False)
     graph_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    feature_stage: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="5"
+    )
     prompt_version: Mapped[str] = mapped_column(String(128), nullable=False)
     model_version: Mapped[str] = mapped_column(String(128), nullable=False)
     tool_version: Mapped[str] = mapped_column(String(128), nullable=False)
     context_version: Mapped[str] = mapped_column(String(128), nullable=False)
     memory_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    search_version: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default="legacy-unversioned"
+    )
+    eval_harness_version: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default="eval-harness-v2"
+    )
     frozen_config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     execution_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     variant_role: Mapped[str] = mapped_column(String(16), nullable=False)

@@ -9,6 +9,7 @@ tests in this file and tests/evals_v2/.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from http import HTTPStatus
 from uuid import UUID
@@ -107,6 +108,11 @@ async def test_create_eval_run_returns_202_and_submits_to_executor(
     persisted = await db_session.get(EvalExperiment, experiment_id)
     assert persisted is not None
     assert persisted.status == "draft"
+    assert persisted.git_commit != ""
+    assert persisted.graph_version == "stage6b-v1"
+    assert persisted.feature_stage == 6
+    assert persisted.search_version == "mock-search-v1"
+    assert persisted.eval_harness_version == "eval-harness-v2"
     trials = await EvalRepository(db_session).list_trials(experiment_id)
     assert len(trials) == 2
     assert all(t.status == "pending" for t in trials)
@@ -157,6 +163,53 @@ async def test_get_eval_run_status_returns_trials(
     assert body["trial_count"] == 2
     assert len(body["trials"]) == 2
     assert {t["status"] for t in body["trials"]} == {"pending"}
+    assert body["graph_version"] == "stage6b-v1"
+    assert body["feature_stage"] == 6
+    assert body["search_version"] == "mock-search-v1"
+    assert body["eval_harness_version"] == "eval-harness-v2"
+
+
+@pytest.mark.asyncio
+async def test_create_candidate_preserves_baseline_and_agent_variant(
+    api_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    dev_token = await _dev_login(api_client, db_session)
+    baseline_response = await api_client.post(
+        "/api/v1/eval/runs",
+        json={
+            "dataset": "runtime-smoke",
+            "cases": ["runtime-tool-error-01"],
+            "trial_count": 1,
+            "grade": False,
+        },
+        headers=bearer(dev_token),
+    )
+    baseline_id = baseline_response.json()["experiment_id"]
+
+    candidate_response = await api_client.post(
+        "/api/v1/eval/runs",
+        json={
+            "dataset": "runtime-smoke",
+            "cases": ["runtime-tool-error-01"],
+            "trial_count": 1,
+            "grade": False,
+            "baseline_experiment_id": baseline_id,
+            "agent_variant": "compact_execution_v1",
+        },
+        headers=bearer(dev_token),
+    )
+
+    assert candidate_response.status_code == HTTPStatus.ACCEPTED
+    candidate_id = candidate_response.json()["experiment_id"]
+    status_response = await api_client.get(
+        f"/api/v1/eval/runs/{candidate_id}", headers=bearer(dev_token)
+    )
+    assert status_response.status_code == HTTPStatus.OK
+    body = status_response.json()
+    assert body["variant_role"] == "candidate"
+    assert body["baseline_experiment_id"] == baseline_id
+    assert body["agent_variant"] == "compact_execution_v1"
 
 
 @pytest.mark.asyncio
@@ -301,6 +354,66 @@ async def test_eval_executor_recovers_pending_and_running_trials(
     assert {trial.error_code for trial in recovered_trials} == {
         "PROCESS_INTERRUPTED"
     }
+
+
+@pytest.mark.asyncio
+async def test_eval_executor_cancellation_converges_experiment_and_trials(
+    db_connection: AsyncConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory = async_sessionmaker(
+        bind=db_connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    bundle = filter_cases(load_dataset(), ["create-01", "create-02"])
+
+    async with session_factory() as session:
+        experiment, trials = await EvalService(session).create_experiment(
+            dataset=bundle,
+            config=_stage5_config(bundle.manifest),
+        )
+        await EvalService(session).transition_experiment(experiment.id, "running")
+        await EvalRepository(session).mark_trial_running(
+            trials[0].id,
+            started_at=datetime.now(UTC),
+        )
+        await session.commit()
+
+    async def cancelled_run(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        "evals.v2.experiment_runner.ExperimentRunner.run_experiment_and_grade",
+        cancelled_run,
+    )
+    executor = EvalRunnerExecutor(
+        session_factory=session_factory,
+        settings=get_settings(),
+    )
+    await executor._execute(experiment.id, bundle, grade=True)  # noqa: SLF001
+
+    async with session_factory() as session:
+        cancelled_experiment = await EvalRepository(session).get_experiment(
+            experiment.id
+        )
+        cancelled_trials = await EvalRepository(session).list_trials(experiment.id)
+        assert cancelled_experiment is not None
+        assert cancelled_experiment.status == "cancelled"
+        assert [trial.status for trial in cancelled_trials] == [
+            "cancelled",
+            "cancelled",
+        ]
+        assert {trial.error_code for trial in cancelled_trials} == {
+            "USER_REQUESTED_CANCEL"
+        }
+
+        # The convergence operation is idempotent and keeps terminal evidence.
+        await EvalService(session).finalize_cancelled_experiment(experiment.id)
+        repeated = await EvalRepository(session).list_trials(experiment.id)
+        assert [trial.status for trial in repeated] == ["cancelled", "cancelled"]
 
 
 

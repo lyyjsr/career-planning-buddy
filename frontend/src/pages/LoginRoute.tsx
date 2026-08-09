@@ -116,3 +116,19 @@ export function RequireProfile(): JSX.Element {
   }
   return <Outlet />;
 }
+
+export function RequireDev(): JSX.Element {
+  const me = useMe();
+
+  if (me.isLoading || me.data === undefined || me.data === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        正在验证开发者权限…
+      </div>
+    );
+  }
+  if (me.data.user.role !== "dev") {
+    return <Navigate to="/me" replace />;
+  }
+  return <Outlet />;
+}

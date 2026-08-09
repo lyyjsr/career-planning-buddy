@@ -81,13 +81,26 @@ def test_compact_query_is_bounded_deterministic_and_strips_tags() -> None:
     [
         ("https://www.gov.cn/a", ("official", 0.9)),
         ("https://www.zhipin.com/job", ("job_board", 0.75)),
-        ("https://blog.example.com/a", ("blog", 0.6)),
+        ("https://blog.example.com/a", ("other", 0.5)),
         ("https://www.zhihu.com/q", ("community", 0.45)),
         ("https://example.com/a", ("other", 0.5)),
     ],
 )
 def test_source_classification(url: str, expected: tuple[str, float]) -> None:
     assert classify_source(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.gov.cn.attacker.example/path",
+        "https://fake-zhipin.com/path",
+        "https://zhipin.com.attacker.example/path",
+        "not a url",
+    ],
+)
+def test_source_classification_rejects_similar_or_malformed_hosts(url: str) -> None:
+    assert classify_source(url) == ("other", 0.5)
 
 
 def test_url_normalization_is_stable() -> None:

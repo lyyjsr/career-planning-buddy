@@ -4,38 +4,26 @@ import { Link } from "react-router-dom";
 
 import { fetchDevRun, fetchDevRuns, replayDevRun } from "../api/dev";
 
-function initialToken(): string {
-  return window.localStorage.getItem("career_buddy_dev_token") ?? "";
-}
-
 export function DeveloperRunsPage(): JSX.Element {
-  const [token, setToken] = useState(initialToken);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const runs = useQuery({
-    queryKey: ["dev-runs", token],
-    queryFn: () => fetchDevRuns(token),
-    enabled: token.length > 0,
+    queryKey: ["dev-runs"],
+    queryFn: fetchDevRuns,
     retry: false,
   });
   const detail = useQuery({
-    queryKey: ["dev-run", token, selectedRunId],
-    queryFn: () => fetchDevRun(token, selectedRunId ?? ""),
-    enabled: token.length > 0 && selectedRunId !== null,
+    queryKey: ["dev-run", selectedRunId],
+    queryFn: () => fetchDevRun(selectedRunId ?? ""),
+    enabled: selectedRunId !== null,
     retry: false,
   });
   const replay = useMutation({
-    mutationFn: (runId: string) => replayDevRun(token, runId),
+    mutationFn: replayDevRun,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["dev-runs", token] });
+      await queryClient.invalidateQueries({ queryKey: ["dev-runs"] });
     },
   });
-
-  function updateToken(value: string): void {
-    setToken(value);
-    setSelectedRunId(null);
-    window.localStorage.setItem("career_buddy_dev_token", value);
-  }
 
   return (
     <main className="trace-shell">
@@ -45,22 +33,10 @@ export function DeveloperRunsPage(): JSX.Element {
           <h1>Agent Run Trace</h1>
           <p>Inspect persisted steps, Tool calls, events, snapshots, and Replay invariants.</p>
         </div>
-        <Link to="/">Back to health</Link>
+        <Link to="/me">返回我的</Link>
       </header>
 
-      <label className="token-field">
-        Developer JWT
-        <input
-          aria-label="Developer JWT"
-          type="password"
-          value={token}
-          onChange={(event) => updateToken(event.target.value)}
-          placeholder="Stored only in this browser"
-        />
-      </label>
-
-      {token.length === 0 ? <p>Enter a developer token to load Runs.</p> : null}
-      {runs.isPending && token.length > 0 ? <p>Loading Runs…</p> : null}
+      {runs.isPending ? <p>Loading Runs…</p> : null}
       {runs.isError ? <p role="alert">Unable to load developer Runs.</p> : null}
 
       <div className="trace-grid">

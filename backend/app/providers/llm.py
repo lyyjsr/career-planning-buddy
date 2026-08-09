@@ -17,6 +17,7 @@ from app.agent.errors import (
     ProviderRateLimitError,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    parse_retry_after,
 )
 from app.core.config import Settings
 from app.prompts.career_planning import (
@@ -304,16 +305,37 @@ class OpenAICompatiblePlanningProvider:
             ) as client:
                 response = await client.post(self._endpoint, json=request_body)
         except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError("LLM provider request timed out") from exc
+            raise ProviderTimeoutError(
+                "LLM provider request timed out", retryable=True
+            ) from exc
         except httpx.RequestError as exc:
-            raise ProviderUnavailableError("LLM provider could not be reached") from exc
+            raise ProviderUnavailableError(
+                "LLM provider could not be reached", retryable=True
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise ProviderAuthenticationError("LLM provider rejected authentication")
         if response.status_code == 429:
-            raise ProviderRateLimitError("LLM provider rate limit was reached")
+            raise ProviderRateLimitError(
+                "LLM provider rate limit was reached",
+                retryable=True,
+                retry_after_seconds=parse_retry_after(
+                    response.headers.get("retry-after")
+                ),
+            )
+        if response.status_code >= 500:
+            raise ProviderUnavailableError(
+                f"LLM provider returned HTTP {response.status_code}",
+                retryable=True,
+                retry_after_seconds=parse_retry_after(
+                    response.headers.get("retry-after")
+                ),
+            )
         if response.status_code >= 400:
-            raise ProviderUnavailableError(f"LLM provider returned HTTP {response.status_code}")
+            raise ProviderUnavailableError(
+                f"LLM provider returned HTTP {response.status_code}",
+                retryable=False,
+            )
 
         return response, int((monotonic() - started) * 1000), response.text
 

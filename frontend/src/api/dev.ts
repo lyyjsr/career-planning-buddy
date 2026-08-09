@@ -51,38 +51,18 @@ export interface DevRunDetail {
   };
 }
 
-function apiUrl(path: string): string {
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
-  return `${baseUrl}${path}`;
+export async function fetchDevRuns(): Promise<DevRunListResponse> {
+  return apiRequest<DevRunListResponse>("/api/v1/dev/runs");
 }
 
-async function requestJson(path: string, token: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(apiUrl(path), {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Developer API failed with status ${response.status}`);
-  }
-  return response.json();
+export async function fetchDevRun(runId: string): Promise<DevRunDetail> {
+  return apiRequest<DevRunDetail>(`/api/v1/dev/runs/${runId}`);
 }
 
-export async function fetchDevRuns(token: string): Promise<DevRunListResponse> {
-  return (await requestJson("/api/v1/dev/runs", token)) as DevRunListResponse;
-}
-
-export async function fetchDevRun(token: string, runId: string): Promise<DevRunDetail> {
-  return (await requestJson(`/api/v1/dev/runs/${runId}`, token)) as DevRunDetail;
-}
-
-export async function replayDevRun(token: string, runId: string): Promise<void> {
-  await requestJson(`/api/v1/dev/runs/${runId}/replay`, token, {
+export async function replayDevRun(runId: string): Promise<void> {
+  await apiRequest(`/api/v1/dev/runs/${runId}/replay`, {
     method: "POST",
-    body: JSON.stringify({ tool_mode: "fixture" }),
+    body: { tool_mode: "fixture" },
   });
 }
+import { apiRequest } from "./client";

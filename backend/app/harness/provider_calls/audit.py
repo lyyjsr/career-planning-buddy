@@ -21,6 +21,7 @@ expensive or non-idempotent) inner call.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 from app.harness.provider_calls.projections import (
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from app.providers.embedding import EmbeddingProvider
-    from app.providers.search import SearchProvider
+    from app.providers.search import SearchProvider, SearchResultItem
 
 
 class AuditPlanningProvider:
@@ -61,12 +62,16 @@ class AuditPlanningProvider:
         recorder: ProviderCallRecorder,
         *,
         attempt_counters: dict[str, int] | None = None,
+        retry_attempt_getter: Callable[[], int] | None = None,
     ) -> None:
         self._inner = inner
         self._recorder = recorder
         self._attempt_counters = attempt_counters or {}
+        self._retry_attempt_getter = retry_attempt_getter
 
     def _retry_attempt(self, method: str) -> int:
+        if self._retry_attempt_getter is not None:
+            return self._retry_attempt_getter()
         if method in {"repair_format", "repair_business_rules"}:
             self._attempt_counters[method] = (
                 self._attempt_counters.get(method, 0) + 1
@@ -158,12 +163,13 @@ class AuditPlanningProvider:
         replan_mode: ReplanMode,
         evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
+        retry_attempt = self._retry_attempt("repair_format")
         request = request_repair(
             method="repair_format",
             raw_output=None,
             candidate=None,
             repair_instructions="",
-            attempt=self._retry_attempt("repair_format"),
+            attempt=retry_attempt,
             raw_output_proj=dict(raw_output),
         )
         raw_holder: dict[str, object] = {}
@@ -181,7 +187,7 @@ class AuditPlanningProvider:
         await self._recorder.invoke(
             provider_kind="llm",
             provider_method="repair_format",
-            retry_attempt=self._attempt_counters.get("repair_format", 0),
+            retry_attempt=retry_attempt,
             request_projection=request,
             coro_factory=_call,
             respond_projection=response_llm_turn,
@@ -198,12 +204,13 @@ class AuditPlanningProvider:
         replan_mode: ReplanMode,
         evidence_catalog: list[EvidenceCatalogItem],
     ) -> Mapping[str, object]:
+        retry_attempt = self._retry_attempt("repair_business_rules")
         request = request_repair(
             method="repair_business_rules",
             raw_output=None,
             candidate=candidate,
             repair_instructions=repr(repair_instructions),
-            attempt=self._retry_attempt("repair_business_rules"),
+            attempt=retry_attempt,
         )
         raw_holder: dict[str, object] = {}
 
@@ -222,7 +229,7 @@ class AuditPlanningProvider:
         await self._recorder.invoke(
             provider_kind="llm",
             provider_method="repair_business_rules",
-            retry_attempt=self._attempt_counters.get("repair_business_rules", 0),
+            retry_attempt=retry_attempt,
             request_projection=request,
             coro_factory=_call,
             respond_projection=response_llm_turn,
@@ -239,9 +246,12 @@ class AuditSearchProvider:
         self,
         inner: SearchProvider,
         recorder: ProviderCallRecorder,
+        *,
+        retry_attempt_getter: Callable[[], int] | None = None,
     ) -> None:
         self._inner = inner
         self._recorder = recorder
+        self._retry_attempt_getter = retry_attempt_getter
 
     async def search(
         self,
@@ -249,28 +259,32 @@ class AuditSearchProvider:
         query: str,
         limit: int,
         freshness_days: int | None,
-    ) -> list[object]:
+    ) -> list[SearchResultItem]:
         request = request_search(
             query=query, limit=limit, freshness_days=freshness_days,
         )
-        raw_holder: dict[str, object] = {}
+        raw_holder: dict[str, list[SearchResultItem]] = {}
 
-        async def _call() -> list[object]:
+        async def _call() -> list[SearchResultItem]:
             raw = await self._inner.search(
                 query=query, limit=limit, freshness_days=freshness_days,
             )
             raw_holder["raw"] = raw
-            return cast("list[object]", raw)
+            return raw
 
         await self._recorder.invoke(
             provider_kind="search",
             provider_method="search",
-            retry_attempt=0,
+            retry_attempt=(
+                self._retry_attempt_getter()
+                if self._retry_attempt_getter is not None
+                else 0
+            ),
             request_projection=request,
             coro_factory=_call,
             respond_projection=response_search,
         )
-        return cast("list[object]", raw_holder.get("raw", []))
+        return raw_holder.get("raw", [])
 
 
 class AuditEmbeddingProvider:
@@ -282,9 +296,12 @@ class AuditEmbeddingProvider:
         self,
         inner: EmbeddingProvider,
         recorder: ProviderCallRecorder,
+        *,
+        retry_attempt_getter: Callable[[], int] | None = None,
     ) -> None:
         self._inner = inner
         self._recorder = recorder
+        self._retry_attempt_getter = retry_attempt_getter
 
     @property
     def dimension(self) -> int:
@@ -302,7 +319,11 @@ class AuditEmbeddingProvider:
         await self._recorder.invoke(
             provider_kind="embedding",
             provider_method="embed",
-            retry_attempt=0,
+            retry_attempt=(
+                self._retry_attempt_getter()
+                if self._retry_attempt_getter is not None
+                else 0
+            ),
             request_projection=request,
             coro_factory=_call,
             respond_projection=lambda r: response_embedding(

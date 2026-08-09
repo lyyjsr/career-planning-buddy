@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.harness.errors import summarize_failure_kinds
 from app.models.eval import EvalExperiment, EvalTrial
 from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
@@ -108,6 +109,7 @@ class ExperimentReport:
     case_stats: dict[str, CaseStat] = field(default_factory=dict)
     # PR-9a: experiment-level aggregate. None when no variant=None trials.
     experiment_stats: ExperimentStat | None = None
+    failure_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def completed_trial_count(self) -> int:
@@ -137,6 +139,7 @@ class ExperimentReport:
                 if self.experiment_stats is not None
                 else None
             ),
+            "failure_counts": dict(self.failure_counts),
         }
 
 
@@ -194,6 +197,8 @@ class ExperimentRunner:
         async with self._session_factory() as session:
             trials = await EvalRepository(session).list_trials(experiment_id)
         for trial in trials:
+            if await self._cancel_requested(experiment_id):
+                break
             case = cases_by_id.get(trial.case_id)
             if case is None:
                 raise RuntimeError(
@@ -202,9 +207,15 @@ class ExperimentRunner:
             outcome = await trial_runner.run_trial(trial, case)
             summaries.append(_summarize(trial, outcome))
 
-        # Mark the Experiment ``completed`` once no Trial is pending/running.
+        # Mark the Experiment terminal once no more Trial work should run.
         async with self._session_factory() as session:
-            async with session_transaction(session):
+            service = EvalService(session)
+            if await self._cancel_requested(experiment_id):
+                experiment = await service.finalize_cancelled_experiment(
+                    experiment_id
+                )
+                status = experiment.status
+            else:
                 await EvalService(session).transition_experiment(
                     experiment_id, "completed"
                 )
@@ -219,7 +230,15 @@ class ExperimentRunner:
             experiment_status=status,
             trial_count=len(trials),
             trials=summaries,
+            failure_counts=summarize_failure_kinds(
+                [summary.error_code for summary in summaries]
+            ),
         )
+
+    async def _cancel_requested(self, experiment_id: UUID) -> bool:
+        async with self._session_factory() as session:
+            experiment = await EvalRepository(session).get_experiment(experiment_id)
+            return bool(experiment and experiment.cancel_requested_at is not None)
 
     async def run_experiment_and_grade(
         self,
@@ -336,6 +355,9 @@ class ExperimentRunner:
             counterfactual_pairs=pairs,
             case_stats=case_stats,
             experiment_stats=experiment_stats,
+            failure_counts=summarize_failure_kinds(
+                [summary.error_code for summary in report.trials]
+            ),
         )
 
 

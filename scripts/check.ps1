@@ -21,10 +21,11 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $venvPython = Join-Path $repositoryRoot "backend\.venv\Scripts\python.exe"
 $backendPython = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
 $npmCommand = (Get-Command "npm.cmd" -ErrorAction Stop).Source
-$env:APP_ENV = if ($env:APP_ENV) { $env:APP_ENV } else { "test" }
-$env:LLM_PROVIDER = if ($env:LLM_PROVIDER) { $env:LLM_PROVIDER } else { "mock" }
+$env:APP_ENV = "test"
+$env:LLM_PROVIDER = "mock"
 $env:SEARCH_PROVIDER = "mock"
 $env:EMBEDDING_PROVIDER = "mock"
+$env:EVAL_PROVIDER_MODE = "mock"
 $env:DATABASE_URL = if ($env:DATABASE_URL) {
     $env:DATABASE_URL
 }
@@ -50,6 +51,11 @@ try {
     Invoke-Checked -Executable $backendPython -CommandArguments @("-m", "pytest")
     Invoke-Checked -Executable $backendPython -CommandArguments @(
         "-m", "scripts.run_eval", "--no-persist"
+    )
+    Invoke-Checked -Executable $backendPython -CommandArguments @(
+        "-m", "evals.v2", "run", "--dataset", "runtime-smoke",
+        "--cases", "runtime-tool-error-01", "--provider-mode", "mock",
+        "--trial-count", "1"
     )
 }
 finally {

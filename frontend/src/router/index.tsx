@@ -1,7 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppLayout } from "@/components/AppLayout";
-import { LoginRoute, RequireAuth, RequireProfile } from "@/pages/LoginRoute";
+import { LoginRoute, RequireAuth, RequireDev, RequireProfile } from "@/pages/LoginRoute";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { TodayPage } from "@/pages/TodayPage";
 import { PlansPage } from "@/pages/PlansPage";
@@ -9,6 +9,7 @@ import { PlanDetailPage } from "@/pages/PlanDetailPage";
 import { ReviewsPage } from "@/pages/ReviewsPage";
 import { MemoriesPage } from "@/pages/MemoriesPage";
 import { DeveloperRunsPage } from "@/pages/DeveloperRunsPage";
+import { DeveloperEvalsPage } from "@/pages/DeveloperEvalsPage";
 import { MyPage } from "@/pages/MyPage";
 import { ProfileSettingsPage } from "@/pages/ProfileSettingsPage";
 
@@ -33,7 +34,13 @@ export const router = createBrowserRouter([
               { path: "/me", element: <MyPage /> },
               { path: "/settings/profile", element: <ProfileSettingsPage /> },
               { path: "/memories", element: <MemoriesPage /> },
-              { path: "/dev/runs", element: <DeveloperRunsPage /> },
+              {
+                element: <RequireDev />,
+                children: [
+                  { path: "/dev/runs", element: <DeveloperRunsPage /> },
+                  { path: "/dev/evals", element: <DeveloperEvalsPage /> },
+                ],
+              },
             ],
           },
         ],

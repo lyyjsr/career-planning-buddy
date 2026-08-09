@@ -26,7 +26,6 @@ from app.core.database import AsyncSessionFactory, session_transaction
 from app.core.exceptions import AppError
 from app.harness.errors import EvalFailureCode
 from app.models.eval import EvalExperiment
-from app.repositories.evals import EvalRepository
 from app.services.evals import EvalService
 from evals.v2.dataset_loader import DatasetBundle
 from evals.v2.experiment_runner import ExperimentRunner
@@ -82,6 +81,9 @@ class EvalRunnerExecutor:
         )
         try:
             await runner.run_experiment_and_grade(experiment_id, dataset, grade=grade)
+        except asyncio.CancelledError:
+            async with self._session_factory() as session:
+                await EvalService(session).finalize_cancelled_experiment(experiment_id)
         except Exception:
             logger.exception("eval experiment %s failed", experiment_id)
 
@@ -139,21 +141,6 @@ class EvalRunnerExecutor:
                                 _PROCESS_INTERRUPTED_CODE
                             )
         return len(rows)
-
-    async def _cancel_was_requested(self, experiment_id: UUID) -> bool:
-        """Read-only check whether an operator staged cancel.
-
-        EvalRunnerExecutor polls this between Trials inside
-        ``run_experiment_and_grade`` so an active cancel skips remaining
-        Trials. The transition to experiment ``cancelled`` is still done
-        by ``ExperimentRunner`` itself once every Trial reaches a terminal
-        state.
-        """
-
-        async with self._session_factory() as session:
-            async with session_transaction(session):
-                row = await EvalRepository(session).get_experiment(experiment_id)
-                return bool(row and row.cancel_requested_at is not None)
 
     async def shutdown(self) -> None:
         """Cancel and await every outstanding task on application shutdown."""

@@ -1,4 +1,4 @@
-import { Brain, ChevronRight, Clock3, Code2, Settings2, ShieldCheck, Target } from "lucide-react";
+import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, Settings2, ShieldCheck, Target } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useMe } from "@/api/auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -95,12 +95,20 @@ export function MyPage(): JSX.Element {
           description="敏感信息只有确认后才会保留"
         />
         {me.data?.user.role === "dev" && (
-          <MenuLink
-            to="/dev/runs"
-            icon={Code2}
-            title="开发者工具"
-            description="查看 Run、Trace、成本与回放"
-          />
+          <>
+            <MenuLink
+              to="/dev/runs"
+              icon={Code2}
+              title="Run Trace"
+              description="查看 Run、Trace、成本与兼容回放"
+            />
+            <MenuLink
+              to="/dev/evals"
+              icon={ChartNoAxesCombined}
+              title="Eval Harness V2"
+              description="运行确定性评测并查看报告与校准状态"
+            />
+          </>
         )}
       </Card>
     </div>

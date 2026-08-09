@@ -34,6 +34,7 @@ from app.core.database import get_db_session
 from app.core.exceptions import AppError
 from app.core.security import AuthenticatedUser
 from app.repositories.evals import EvalRepository
+from app.runtime.versioning import build_runtime_identity
 from app.schemas.errors import ErrorResponse
 from app.schemas.evals import (
     EvalRunCancelResponse,
@@ -79,24 +80,30 @@ def _build_config(
     trial_count: int,
     provider_mode: str | None,
     baseline_experiment_id: UUID | None,
+    agent_variant: str | None = None,
 ) -> ExperimentCreate:
+    identity = build_runtime_identity(settings)
     return ExperimentCreate(
         dataset_id=manifest.dataset_id,
         dataset_version=manifest.dataset_version,
         dataset_hash=manifest.source_sha256,
-        git_commit="0000000",
-        graph_version=settings.agent_graph_version,
-        prompt_version="career-plan-v1",
+        git_commit=identity.git_commit,
+        graph_version=identity.graph_version,
+        feature_stage=identity.feature_stage,
+        prompt_version=identity.primary_prompt_version,
         model_version=settings.llm_model or "mock-v1",
-        tool_version="tool-contract-v1",
-        context_version="context-v1",
-        memory_version="memory-v1",
+        tool_version=identity.tool_contract_version,
+        context_version=identity.context_version,
+        memory_version=identity.memory_version,
+        search_version=identity.search_version,
+        eval_harness_version=identity.eval_harness_version,
         execution_mode=_PROVIDER_MODE_TO_EXECUTION[
             provider_mode or settings.eval_provider_mode
         ],
-        variant_role="baseline",
+        variant_role=("candidate" if baseline_experiment_id else "baseline"),
         baseline_experiment_id=baseline_experiment_id,
         trial_count=trial_count,
+        agent_variant=agent_variant,
     )
 
 
@@ -104,6 +111,17 @@ def _load_dataset(dataset_name: str) -> DatasetBundle:
     bundle = (load_runtime_smoke_dataset() if dataset_name == "runtime-smoke"
               else load_dataset())
     return bundle
+
+
+def _failure_counts(payload: dict[str, object]) -> dict[str, int]:
+    raw = payload.get("failure_counts")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key): int(value)
+        for key, value in raw.items()
+        if isinstance(value, int | float)
+    }
 
 
 @router.get(
@@ -134,6 +152,20 @@ async def list_eval_runs(
             started_at=row.started_at,
             finished_at=row.finished_at,
             cancel_requested_at=row.cancel_requested_at,
+            dataset_version=row.dataset_version,
+            variant_role=row.variant_role,
+            baseline_experiment_id=row.baseline_experiment_id,
+            agent_variant=row.agent_variant,
+            git_commit=row.git_commit,
+            graph_version=row.graph_version,
+            feature_stage=row.feature_stage,
+            prompt_version=row.prompt_version,
+            model_version=row.model_version,
+            tool_version=row.tool_version,
+            context_version=row.context_version,
+            memory_version=row.memory_version,
+            search_version=row.search_version,
+            eval_harness_version=row.eval_harness_version,
         )
         for row in rows
     ]
@@ -163,6 +195,7 @@ async def create_eval_run(
         trial_count=payload.trial_count,
         provider_mode=payload.provider_mode,
         baseline_experiment_id=payload.baseline_experiment_id,
+        agent_variant=payload.agent_variant,
     )
     experiment, _ = await service.create_experiment(dataset=bundle, config=config)
     # create_experiment's session_transaction commits before we submit, so
@@ -214,7 +247,23 @@ async def get_eval_run_status(
         trial_count=len(trials),
         started_at=experiment.started_at,
         finished_at=experiment.finished_at,
+        cancel_requested_at=experiment.cancel_requested_at,
         trials=trial_summaries,
+        execution_mode=experiment.execution_mode,
+        dataset_version=experiment.dataset_version,
+        variant_role=experiment.variant_role,
+        baseline_experiment_id=experiment.baseline_experiment_id,
+        agent_variant=experiment.agent_variant,
+        git_commit=experiment.git_commit,
+        graph_version=experiment.graph_version,
+        feature_stage=experiment.feature_stage,
+        prompt_version=experiment.prompt_version,
+        model_version=experiment.model_version,
+        tool_version=experiment.tool_version,
+        context_version=experiment.context_version,
+        memory_version=experiment.memory_version,
+        search_version=experiment.search_version,
+        eval_harness_version=experiment.eval_harness_version,
     )
 
 
@@ -341,6 +390,7 @@ async def get_eval_run_report(
         trials=trials_list,
         case_stats=case_stats_dict,
         experiment_stats=experiment_stats_dict,
+        failure_counts=_failure_counts(payload),
         revision=int(experiment.report_revision),
         cancel_requested_at=experiment.cancel_requested_at,
     )
@@ -413,6 +463,7 @@ async def regenerate_eval_run_report(
         trials=trials_list,
         case_stats=case_stats_dict,
         experiment_stats=experiment_stats_dict,
+        failure_counts=_failure_counts(payload),
         revision=int(experiment.report_revision),
         cancel_requested_at=experiment.cancel_requested_at,
     )

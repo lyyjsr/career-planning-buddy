@@ -11,6 +11,8 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    env:
+      APP_GIT_COMMIT: ${{ github.sha }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -80,6 +82,19 @@ jobs:
           SEARCH_PROVIDER: mock
           EMBEDDING_PROVIDER: mock
         run: python -m scripts.run_eval --no-persist
+
+      - name: Deterministic Eval Harness V2 smoke
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+asyncpg://career_buddy:career_buddy_test@localhost:5432/career_buddy_test
+          JWT_SECRET: ci-only-secret-with-at-least-32-characters
+          LLM_PROVIDER: mock
+          SEARCH_PROVIDER: mock
+          EMBEDDING_PROVIDER: mock
+          EVAL_PROVIDER_MODE: mock
+        run: >-
+          python -m evals.v2 run --dataset runtime-smoke
+          --cases runtime-tool-error-01 --provider-mode mock --trial-count 1
 
   frontend:
     name: Frontend

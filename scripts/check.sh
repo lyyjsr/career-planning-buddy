@@ -12,14 +12,15 @@ else
 fi
 
 pushd "$repository_root/backend" >/dev/null
-export APP_ENV="${APP_ENV:-test}"
-export LLM_PROVIDER="${LLM_PROVIDER:-mock}"
+export APP_ENV="test"
+export LLM_PROVIDER="mock"
 export SEARCH_PROVIDER="mock"
 export EMBEDDING_PROVIDER="mock"
+export EVAL_PROVIDER_MODE="mock"
 export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://career_buddy:career_buddy_local@localhost:5432/career_buddy}"
 export JWT_SECRET="${JWT_SECRET:-local-test-secret-with-at-least-32-characters}"
 if [[ "$backend_python" == *.exe ]]; then
-  stage5_wsl_vars="APP_ENV:LLM_PROVIDER:SEARCH_PROVIDER:EMBEDDING_PROVIDER:DATABASE_URL:JWT_SECRET"
+  stage5_wsl_vars="APP_ENV:LLM_PROVIDER:SEARCH_PROVIDER:EMBEDDING_PROVIDER:EVAL_PROVIDER_MODE:DATABASE_URL:JWT_SECRET"
   export WSLENV="${WSLENV:+$WSLENV:}$stage5_wsl_vars"
 fi
 "$backend_python" -m ruff check .
@@ -27,6 +28,8 @@ fi
 "$backend_python" -m alembic upgrade head
 "$backend_python" -m pytest
 "$backend_python" -m scripts.run_eval --no-persist
+"$backend_python" -m evals.v2 run --dataset runtime-smoke \
+  --cases runtime-tool-error-01 --provider-mode mock --trial-count 1
 popd >/dev/null
 
 pushd "$repository_root/frontend" >/dev/null

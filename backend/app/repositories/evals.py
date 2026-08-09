@@ -172,6 +172,30 @@ class EvalRepository:
         )
         return int(result.scalar_one())
 
+    async def cancel_nonterminal_trials(
+        self,
+        experiment_id: UUID,
+        *,
+        finished_at: datetime,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        """Cancel pending/running Trials without overwriting terminal evidence."""
+
+        await self._session.execute(
+            update(EvalTrial)
+            .where(
+                EvalTrial.experiment_id == experiment_id,
+                EvalTrial.status.in_(("pending", "running")),
+            )
+            .values(
+                status="cancelled",
+                finished_at=finished_at,
+                error_code=error_code,
+                error_message=error_message,
+            )
+        )
+
     async def create_score(self, score: EvalScore) -> EvalScore:
         self._session.add(score)
         await self._session.flush()

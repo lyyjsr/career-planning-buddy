@@ -1,5 +1,10 @@
 # PR-9c Handoff — Pairwise Judge + Calibration
 
+> **Historical / superseded handoff.** This file records the state at a PR boundary and
+> must not be used as the current gap list. Current behavior is documented in
+> [`README.md`](README.md) and
+> [`docs/architecture/current-system-overview.md`](docs/architecture/current-system-overview.md).
+
 > 状态：交接文档。PR-9c.1 已实现但未 push（local `feat/eval`）；PR-9a / PR-9b 已合入 `origin/feat/eval`；PR-9c.2 尚未开工。
 > 作者意图：下一会话以此文档作为入口，**不要靠聊天历史翻找上下文**。
 

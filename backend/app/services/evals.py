@@ -140,11 +140,14 @@ class EvalService:
                 dataset_hash=config.dataset_hash,
                 git_commit=config.git_commit,
                 graph_version=config.graph_version,
+                feature_stage=config.feature_stage,
                 prompt_version=config.prompt_version,
                 model_version=config.model_version,
                 tool_version=config.tool_version,
                 context_version=config.context_version,
                 memory_version=config.memory_version,
+                search_version=config.search_version,
+                eval_harness_version=config.eval_harness_version,
                 frozen_config_hash=frozen_hash,
                 execution_mode=config.execution_mode,
                 variant_role=config.variant_role,
@@ -406,6 +409,36 @@ class EvalService:
                 experiment.cancel_requested_at = _dt.now(UTC)
             return True, experiment.cancel_requested_at
 
+    async def finalize_cancelled_experiment(
+        self, experiment_id: UUID
+    ) -> EvalExperiment:
+        """Idempotently converge an operator-cancelled Eval to terminal state."""
+
+        async with session_transaction(self._session):
+            experiment = await self._evals.get_experiment(
+                experiment_id, for_update=True
+            )
+            if experiment is None:
+                raise AppError(
+                    code="EVAL_EXPERIMENT_NOT_FOUND",
+                    message="Eval Experiment was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if experiment.status in {"completed", "failed", "cancelled"}:
+                return experiment
+
+            now = datetime.now(UTC)
+            await self._evals.cancel_nonterminal_trials(
+                experiment.id,
+                finished_at=now,
+                error_code="USER_REQUESTED_CANCEL",
+                error_message="Eval experiment was cancelled by a developer",
+            )
+            experiment.status = "cancelled"
+            experiment.finished_at = now
+            await self._session.flush()
+            return experiment
+
     async def regenerate_report(
         self, experiment_id: UUID, dataset: DatasetBundle
     ) -> "ExperimentReport":
@@ -525,13 +558,13 @@ class EvalService:
             # PR-9a: compute per-case + per-experiment stats. Re-uses the
             # grade_lookup already built for counterfactual pairs so the
             # hard-gate verdicts stay consistent across the report shape.
+            from app.harness.errors import summarize_failure_kinds
             from evals.v2.stats import (
                 compute_case_stats as _cf_stats,
             )
             from evals.v2.stats import (
                 compute_experiment_stats as _cf_exp_stats,
             )
-
             case_stats = _cf_stats(summaries, grade_lookup)
             experiment_stats = _cf_exp_stats(case_stats)
             return ExperimentReport(
@@ -547,6 +580,9 @@ class EvalService:
                 counterfactual_pairs=pairs,
                 case_stats=case_stats,
                 experiment_stats=experiment_stats,
+                failure_counts=summarize_failure_kinds(
+                    [summary.error_code for summary in summaries]
+                ),
             )
 
     async def run_pairwise_judge(
@@ -709,11 +745,14 @@ class EvalService:
                 "dataset_hash": experiment.dataset_hash,
                 "git_commit": experiment.git_commit,
                 "graph_version": experiment.graph_version,
+                "feature_stage": experiment.feature_stage,
                 "prompt_version": experiment.prompt_version,
                 "model_version": experiment.model_version,
                 "tool_version": experiment.tool_version,
                 "context_version": experiment.context_version,
                 "memory_version": experiment.memory_version,
+                "search_version": experiment.search_version,
+                "eval_harness_version": experiment.eval_harness_version,
                 "execution_mode": experiment.execution_mode,
                 "variant_role": experiment.variant_role,
                 "agent_variant": experiment.agent_variant,

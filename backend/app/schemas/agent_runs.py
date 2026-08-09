@@ -91,8 +91,8 @@ class AgentRunResponse(StrictModel):
 
 class RuntimeConfigSnapshot(StrictModel):
     graph_version: str
-    # Keep prior snapshots readable while new runs are pinned to Stage 5.
-    feature_stage: Literal[3, 4, 5] = 5
+    # Keep prior snapshots readable while new runs are pinned to Stage 6B.
+    feature_stage: Literal[3, 4, 5, 6] = 6
     available_tools: list[str] = Field(default_factory=list, max_length=3)
     provider: Literal["mock", "openai_compatible"] = "mock"
     model_alias: str

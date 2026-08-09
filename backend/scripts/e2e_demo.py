@@ -135,7 +135,8 @@ async def run_demo(base_url: str) -> dict[str, object]:
         memory_text = "Prefers small evening tasks with one reviewable deliverable."
         atom_text = (
             "For Agent application interviews, build a minimal traced workflow with "
-            "schema validation, replay fixtures, and an evaluation report."
+            "schema validation, replay fixtures, and an evaluation report. "
+            f"Deterministic demo marker: {suffix}."
         )
         memory_vector, atom_vector = await embedding.embed([memory_text, atom_text])
         async with AsyncSessionFactory() as session:

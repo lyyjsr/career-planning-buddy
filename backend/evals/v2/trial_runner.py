@@ -41,8 +41,14 @@ from app.harness.provider_calls import (
     FixturePlanningProvider,
     FixtureSearchProvider,
     FixtureStore,
+    LiveEvalCallController,
+    LiveEvalRetryPolicy,
     ProviderCallRecorder,
     ProviderCallRepository,
+    RetryAttemptState,
+    RetryingEmbeddingProvider,
+    RetryingPlanningProvider,
+    RetryingSearchProvider,
 )
 from app.models.agent_run import AgentRun
 from app.models.eval import EvalTrial
@@ -130,6 +136,15 @@ class TrialRunner:
         # selection. ``None`` = legacy path (all existing callers that
         # don't pass this param keep their current behavior).
         self._runtime_context = runtime_context
+        self._live_call_controller = LiveEvalCallController(
+            concurrency=self._settings.eval_live_concurrency,
+            pacing_seconds=self._settings.eval_live_pacing_seconds,
+        )
+        self._live_retry_policy = LiveEvalRetryPolicy(
+            max_attempts=self._settings.eval_live_max_attempts,
+            base_seconds=self._settings.eval_live_retry_base_seconds,
+            max_seconds=self._settings.eval_live_retry_max_seconds,
+        )
 
     async def run_trial(self, trial: EvalTrial, case: EvalCase) -> RunOutcome:
         """Execute one Trial end to end and freeze its terminal outcome."""
@@ -300,9 +315,9 @@ class TrialRunner:
           • ``fixture`` -- Mock providers + Fixture wrapper (lazy record + replay
                            on a 2nd Run with the same Trial, audit rows still
                            persisted via the recorder inside the Fixture wrapper).
-          • ``live``    -- real providers without Audit (prod path; ``trial_id``
-                            is NULL on every persisted row so providers stay
-                            untouched -- the recorder is simply not installed).
+          • ``live``    -- real providers with Eval-only bounded retry/pacing;
+                           Audit remains enabled by default and records every
+                           physical attempt with its ``retry_attempt`` index.
 
         ``self._settings`` already has the Tool budget forced open in ``__init__``.
         ``trial_id`` / ``run_id`` are needed so each ProviderCall row can be
@@ -393,19 +408,53 @@ class TrialRunner:
                 search_provider = AuditSearchProvider(
                     base_search, recorder,
                 )
-        elif getattr(self._settings, "eval_audit_live_calls", True):
-            # PR-9b: live mode auditor path. We use the same Audit*
-            # wrappers as the mock branch so the recorder sees the same
-            # call shape. ``retry_attempt`` defaults to 0 here; a future
-            # RetryingProvider wrapper would sit above this layer.
-            recorder = ProviderCallRecorder(
-                session_factory=self._session_factory,
-                run_id=run_id,
-                trial_id=trial_id,
+        else:
+            planning_attempt = RetryAttemptState()
+            embedding_attempt = RetryAttemptState()
+            search_attempt = RetryAttemptState()
+            if getattr(self._settings, "eval_audit_live_calls", True):
+                recorder = ProviderCallRecorder(
+                    session_factory=self._session_factory,
+                    run_id=run_id,
+                    trial_id=trial_id,
+                    model_id=self._settings.llm_model,
+                )
+                planning_provider = AuditPlanningProvider(
+                    base_planning,
+                    recorder,
+                    retry_attempt_getter=planning_attempt.get,
+                )
+                embedding_provider = AuditEmbeddingProvider(
+                    base_embedding,
+                    recorder,
+                    retry_attempt_getter=embedding_attempt.get,
+                )
+                search_provider = AuditSearchProvider(
+                    base_search,
+                    recorder,
+                    retry_attempt_getter=search_attempt.get,
+                )
+            planning_provider = RetryingPlanningProvider(
+                planning_provider,
+                controller=self._live_call_controller,
+                policy=self._live_retry_policy,
+                deadline_seconds=self._config.deadline_seconds,
+                attempt_state=planning_attempt,
             )
-            planning_provider = AuditPlanningProvider(base_planning, recorder)
-            embedding_provider = AuditEmbeddingProvider(base_embedding, recorder)
-            search_provider = AuditSearchProvider(base_search, recorder)
+            embedding_provider = RetryingEmbeddingProvider(
+                embedding_provider,
+                controller=self._live_call_controller,
+                policy=self._live_retry_policy,
+                deadline_seconds=self._config.deadline_seconds,
+                attempt_state=embedding_attempt,
+            )
+            search_provider = RetryingSearchProvider(
+                search_provider,
+                controller=self._live_call_controller,
+                policy=self._live_retry_policy,
+                deadline_seconds=self._config.deadline_seconds,
+                attempt_state=search_attempt,
+            )
 
         tool_override = self._derive_tool_override(provider_fixtures)
         if self._is_direct_llm_variant():

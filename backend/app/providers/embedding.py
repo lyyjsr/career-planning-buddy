@@ -76,7 +76,9 @@ class LocalEmbeddingProvider:
         )
         raw = encoded.tolist()
         if not isinstance(raw, list):
-            raise ProviderUnavailableError("local embedding returned an invalid array")
+            raise ProviderUnavailableError(
+                "local embedding returned an invalid array", retryable=False
+            )
         vectors: list[list[float]] = []
         for row in raw:
             if not isinstance(row, list) or len(row) != self.dimension:

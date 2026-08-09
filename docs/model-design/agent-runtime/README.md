@@ -81,7 +81,7 @@ flowchart TD
 
 - 修复时**不重新进入 Tool Calling Agent**；`revise_or_fallback` 使用专用修复 Prompt、关闭 Tool，只修正当前候选，再回到 `rule_validator`；
 - `quality_reviewer` 默认属于离线 Eval/Replay shadow，不写原 Run 的 step/event，也不改变线上结果。只有显式开启 `QUALITY_REVIEW_ENFORCE` 后，才在持久化前同步执行一次；
-- `distill_evidence` 不是计划生成主链必经节点，由 `EvidenceService` 在成功 Run 后以独立记录 best-effort 执行，不向已终态 Run 追加事件；
+- `distill_evidence` 不是计划生成主链必经节点，由 `ExperienceAtomService` 在成功 Run 后以独立事务 best-effort 执行，不向已终态 Run 追加事件；
 - `safe_response` 和 `clarification` 都只返回 TerminalBranchResult，由 Finalizer 单事务写 degraded 结果；节点本身不直接操作 ORM，也不会创建 Plan。
 
 ## 4. Graph State

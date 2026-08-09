@@ -1,5 +1,6 @@
 """Environment-backed application configuration."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -42,8 +43,9 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256"] = "HS256"
     jwt_expire_minutes: int = Field(default=1440, ge=1, le=10080)
     jwt_issuer: str = "career-planning-buddy"
-    agent_graph_version: str = Field(default="stage5-v1", min_length=1, max_length=64)
-    agent_feature_stage: int = Field(default=5, ge=4, le=5)
+    app_git_commit: str | None = Field(default=None, min_length=1, max_length=64)
+    agent_graph_version: str = Field(default="stage6b-v1", min_length=1, max_length=64)
+    agent_feature_stage: int = Field(default=6, ge=4, le=6)
     llm_provider: Literal["mock", "openai_compatible"] = "mock"
     llm_api_key: SecretStr | None = Field(default=None, min_length=1)
     llm_base_url: AnyHttpUrl | None = None
@@ -70,6 +72,11 @@ class Settings(BaseSettings):
     eval_provider_seed_mode: Literal["none", "provider_seed", "local_seed"] = (
         "provider_seed"
     )
+    eval_live_max_attempts: int = Field(default=3, ge=1, le=5)
+    eval_live_retry_base_seconds: float = Field(default=1, ge=0, le=30)
+    eval_live_retry_max_seconds: float = Field(default=8, ge=0, le=60)
+    eval_live_concurrency: int = Field(default=2, ge=1, le=8)
+    eval_live_pacing_seconds: float = Field(default=0.5, ge=0, le=10)
     # PR-9c.2 Commit 3.4 (Stage A, Option E′): when set, TrialRunner
     # substitutes MockPlanningProvider with PairSmokePlanningProvider
     # bound to this profile, producing two fixture profiles
@@ -148,6 +155,7 @@ class Settings(BaseSettings):
         "embedding_model_path",
         "embedding_model_name",
         "baidu_search_api_key",
+        "app_git_commit",
         mode="before",
     )
     @classmethod
@@ -179,10 +187,19 @@ class Settings(BaseSettings):
                 raise ValueError("EMBEDDING_MODEL_PATH must be an existing local directory")
         if self.search_provider == "baidu" and self.baidu_search_api_key is None:
             raise ValueError("baidu search requires BAIDU_SEARCH_API_KEY")
+        if self.eval_live_retry_max_seconds < self.eval_live_retry_base_seconds:
+            raise ValueError(
+                "EVAL_LIVE_RETRY_MAX_SECONDS must be >= "
+                "EVAL_LIVE_RETRY_BASE_SECONDS"
+            )
         return self
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide validated settings instance."""
+    # Tests and CI must be reproducible from their explicit environment and
+    # must never inherit developer-local provider credentials from .env.
+    if os.getenv("APP_ENV", "").lower() == "test":
+        return Settings(_env_file=None)
     return Settings()

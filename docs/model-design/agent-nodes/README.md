@@ -24,12 +24,13 @@
 | 能力 | 类型 | 是否在主 Graph 阻塞 | Stage |
 |---|---|---:|---:|
 | [quality_reviewer](./quality_reviewer.spec.md) | LLM Judge；默认离线 shadow | 否，独立 Eval 记录 | 5 |
-| [distill_evidence](./distill_evidence.spec.md) | 成功 Run 后的证据整理 | 否 | 4 |
-| [memory_candidate_distiller](./memory_candidate_distiller.spec.md) | Review 的确定性候选提炼 | 否；Review Service 同事务调用 | 6A |
+| [distill_evidence](./distill_evidence.spec.md) | `SearchSource → ExperienceAtomCandidate`，成功 Run 后 best-effort 执行 | 否；Agent Executor 终态后调用 | 6B |
+| [memory_candidate_distiller](./memory_candidate_distiller.spec.md) | `Review → MemoryCandidate` 的确定性个人记忆候选提炼 | 否；Review Service 同事务调用 | 6A |
 
-`memory_candidate_distiller` 与尚未实现的 `distill_evidence` 不同：前者只处理
-`Review → MemoryCandidate`，后者仍保留为未来的
-`SearchSource → ExperienceAtomCandidate` 设计，不得混用。
+两者均已实现，但边界不可混用：`memory_candidate_distiller` 只产生用户私有、必须经
+用户确认才可进入模型的 L2 候选；`distill_evidence` 只从当前 Run 的真实
+`SearchSource` 产生 L3 候选，随后仍须开发者审核才成为可检索的全局
+`ExperienceAtom`。L2 内容不得写入 L3。
 
 ## 每个节点 spec 必须回答
 

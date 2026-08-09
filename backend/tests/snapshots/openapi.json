@@ -1253,6 +1253,29 @@
         "additionalProperties": false,
         "description": "One row in the paginated Experiment listing.",
         "properties": {
+          "agent_variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Variant"
+          },
+          "baseline_experiment_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Experiment Id"
+          },
           "cancel_requested_at": {
             "anyOf": [
               {
@@ -1265,8 +1288,20 @@
             ],
             "title": "Cancel Requested At"
           },
+          "context_version": {
+            "title": "Context Version",
+            "type": "string"
+          },
           "dataset_id": {
             "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "eval_harness_version": {
+            "title": "Eval Harness Version",
             "type": "string"
           },
           "execution_mode": {
@@ -1277,6 +1312,10 @@
             "format": "uuid",
             "title": "Experiment Id",
             "type": "string"
+          },
+          "feature_stage": {
+            "title": "Feature Stage",
+            "type": "integer"
           },
           "finished_at": {
             "anyOf": [
@@ -1289,6 +1328,30 @@
               }
             ],
             "title": "Finished At"
+          },
+          "git_commit": {
+            "title": "Git Commit",
+            "type": "string"
+          },
+          "graph_version": {
+            "title": "Graph Version",
+            "type": "string"
+          },
+          "memory_version": {
+            "title": "Memory Version",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "search_version": {
+            "title": "Search Version",
+            "type": "string"
           },
           "started_at": {
             "anyOf": [
@@ -1306,9 +1369,21 @@
             "title": "Status",
             "type": "string"
           },
+          "tool_version": {
+            "title": "Tool Version",
+            "type": "string"
+          },
           "trial_count": {
             "title": "Trial Count",
             "type": "integer"
+          },
+          "variant_role": {
+            "enum": [
+              "baseline",
+              "candidate"
+            ],
+            "title": "Variant Role",
+            "type": "string"
           }
         },
         "required": [
@@ -1316,10 +1391,24 @@
           "status",
           "execution_mode",
           "dataset_id",
+          "dataset_version",
           "trial_count",
           "started_at",
           "finished_at",
-          "cancel_requested_at"
+          "cancel_requested_at",
+          "variant_role",
+          "baseline_experiment_id",
+          "agent_variant",
+          "git_commit",
+          "graph_version",
+          "feature_stage",
+          "prompt_version",
+          "model_version",
+          "tool_version",
+          "context_version",
+          "memory_version",
+          "search_version",
+          "eval_harness_version"
         ],
         "title": "EvalRunListItem",
         "type": "object"
@@ -1512,6 +1601,13 @@
             "title": "Experiment Status",
             "type": "string"
           },
+          "failure_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Failure Counts",
+            "type": "object"
+          },
           "hard_gate_pass_fraction": {
             "title": "Hard Gate Pass Fraction",
             "type": "number"
@@ -1554,14 +1650,69 @@
       "EvalRunStatusResponse": {
         "additionalProperties": false,
         "properties": {
+          "agent_variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Variant"
+          },
+          "baseline_experiment_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Experiment Id"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "context_version": {
+            "title": "Context Version",
+            "type": "string"
+          },
           "dataset_id": {
             "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "eval_harness_version": {
+            "title": "Eval Harness Version",
+            "type": "string"
+          },
+          "execution_mode": {
+            "title": "Execution Mode",
             "type": "string"
           },
           "experiment_id": {
             "format": "uuid",
             "title": "Experiment Id",
             "type": "string"
+          },
+          "feature_stage": {
+            "title": "Feature Stage",
+            "type": "integer"
           },
           "finished_at": {
             "anyOf": [
@@ -1574,6 +1725,30 @@
               }
             ],
             "title": "Finished At"
+          },
+          "git_commit": {
+            "title": "Git Commit",
+            "type": "string"
+          },
+          "graph_version": {
+            "title": "Graph Version",
+            "type": "string"
+          },
+          "memory_version": {
+            "title": "Memory Version",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "search_version": {
+            "title": "Search Version",
+            "type": "string"
           },
           "started_at": {
             "anyOf": [
@@ -1598,6 +1773,10 @@
             "title": "Status",
             "type": "string"
           },
+          "tool_version": {
+            "title": "Tool Version",
+            "type": "string"
+          },
           "trial_count": {
             "title": "Trial Count",
             "type": "integer"
@@ -1608,6 +1787,14 @@
             },
             "title": "Trials",
             "type": "array"
+          },
+          "variant_role": {
+            "enum": [
+              "baseline",
+              "candidate"
+            ],
+            "title": "Variant Role",
+            "type": "string"
           }
         },
         "required": [
@@ -1617,7 +1804,23 @@
           "trial_count",
           "started_at",
           "finished_at",
-          "trials"
+          "cancel_requested_at",
+          "trials",
+          "execution_mode",
+          "dataset_version",
+          "variant_role",
+          "baseline_experiment_id",
+          "agent_variant",
+          "git_commit",
+          "graph_version",
+          "feature_stage",
+          "prompt_version",
+          "model_version",
+          "tool_version",
+          "context_version",
+          "memory_version",
+          "search_version",
+          "eval_harness_version"
         ],
         "title": "EvalRunStatusResponse",
         "type": "object"

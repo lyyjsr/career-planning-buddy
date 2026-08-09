@@ -1,9 +1,16 @@
 # Eval Harness V2 实施记录
 
+> **Historical implementation note.** 本文保留 PR-0～PR-2 的递进施工记录，不再代表
+> 当前能力边界。当前状态见 [`../../README.md`](../../README.md) 与
+> [`../architecture/current-system-overview.md`](../architecture/current-system-overview.md)。
+> 当前代码已经实现 TrialRunner、ProviderCall audit、fixture replay、确定性 grader、
+> Eval API、Pairwise Judge/Calibration，以及 live Eval 的有界 retry/backoff/pacing。
+
 ## 范围
 
-V2 按实施计划递进交付。本文记录已冻结和已实现的边界，完整 TrialRunner、Replay 引擎、
-真实模型评估、统计门禁和线上漂移监控属于后续 PR，不在 PR-0/PR-1/PR-2 中提前伪实现。
+V2 按实施计划递进交付。以下“后续”仅描述当时 PR-0/PR-1/PR-2 的历史边界，不能据此
+判断当前缺口。线上漂移监控仍不在 v1 范围；统计门禁只有在足量真实人工 calibration
+后才可从 `diagnostic_only` 升级。
 
 ## PR-0：Truth Baseline 与契约冻结
 
@@ -41,8 +48,8 @@ V2 按实施计划递进交付。本文记录已冻结和已实现的边界，�
 PR-2 只建立控制面和数据骨架，不宣称 Agent 已真实执行，不生成占位 Score，也不新增
 Grader。ProviderCall、授权 EvidenceItem、TrialRunner 和真实 Runtime Outcome 仍由后续 PR 交付。
 
-## 后续顺序
+## 当时的后续顺序（现已大部分完成）
 
-PR-3 真实 Runtime TrialRunner 最小纵切，PR-4 Evidence Projection 与六域确定性 Grader，
-随后再推进 Fixture Replay、Fault Injection、统计门禁、多 Trial/Judge、可观测性和持续交付。
-后续 PR 不得把 Mock 规则回归指标描述为真实模型或生产质量结论。
+PR-3 真实 Runtime TrialRunner、Evidence Projection/确定性 Grader、Fixture Replay、
+Fault Injection、多 Trial/Judge、可观测性与 CI smoke 均已在当前代码中落地。人工样本不足时
+统计门禁仍保持诊断语义；不得把 Mock 规则回归指标描述为真实模型或生产质量结论。

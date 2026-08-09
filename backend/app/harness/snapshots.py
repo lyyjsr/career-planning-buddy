@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.models.agent_run import AgentRun
+from app.runtime.versioning import build_runtime_identity
 from app.schemas.agent_runs import RunInputSnapshot, RuntimeConfigSnapshot
 
 NODE_TIMEOUTS: dict[str, float] = {
@@ -27,6 +28,7 @@ class SnapshotService:
     @staticmethod
     def build_config(settings: Settings) -> RuntimeConfigSnapshot:
         is_real = settings.llm_provider == "openai_compatible"
+        identity = build_runtime_identity(settings)
         node_timeouts = dict(NODE_TIMEOUTS)
         if is_real:
             # LLM nodes may legitimately perform an initial generation plus
@@ -37,8 +39,8 @@ class SnapshotService:
             node_timeouts["career_planning_agent"] = llm_node_timeout
             node_timeouts["revise_or_fallback"] = llm_node_timeout
         return RuntimeConfigSnapshot(
-            graph_version=settings.agent_graph_version,
-            feature_stage=settings.agent_feature_stage,
+            graph_version=identity.graph_version,
+            feature_stage=identity.feature_stage,
             available_tools=["memory_lookup", "rag_retrieve", "web_search"],
             provider=settings.llm_provider,
             model_alias=(
@@ -46,19 +48,7 @@ class SnapshotService:
                 if is_real and settings.llm_model is not None
                 else "mock-career-planner-v1"
             ),
-            prompt_versions={
-                "career_planning": (
-                    "openai_compatible_plan_stage6_context_v1"
-                    if is_real
-                    else "mock_plan_stage6_context_v1"
-                ),
-                "format_repair": (
-                    "openai_compatible_format_repair_v1" if is_real else "mock_format_repair_v1"
-                ),
-                "business_repair": (
-                    "openai_compatible_business_repair_v1" if is_real else "mock_business_repair_v1"
-                ),
-            },
+            prompt_versions=identity.prompt_versions,
             max_llm_calls=settings.agent_max_llm_calls,
             max_tool_rounds=settings.agent_max_tool_rounds,
             max_tool_calls=settings.agent_max_tool_calls,

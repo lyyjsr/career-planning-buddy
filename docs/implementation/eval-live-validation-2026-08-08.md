@@ -1,5 +1,13 @@
 # Eval Live Validation - 2026-08-08
 
+> **Historical implementation note.** This is evidence from a small live run on
+> 2026-08-08, not the current system specification and not a quality superiority claim.
+> See [`../../README.md`](../../README.md) and
+> [`../architecture/current-system-overview.md`](../architecture/current-system-overview.md)
+> for current behavior. The bounded Eval-only retry/backoff/pacing layer requested by
+> this run's findings is now implemented; human calibration remains insufficient for a
+> quality gate, so Pairwise results remain diagnostic.
+
 ## Scope
 
 This record validates the local Eval V2 path with real providers:

@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
+from app.runtime.versioning import build_runtime_identity
 from app.services.evals import EvalService
 from evals.v2.contracts import ExperimentCreate
 from evals.v2.dataset_loader import DatasetBundle, filter_cases, load_dataset
@@ -52,17 +53,21 @@ def _build_config(
     settings: Settings, bundle: DatasetBundle, *, trial_count: int
 ) -> ExperimentCreate:
     manifest = bundle.manifest
+    identity = build_runtime_identity(settings)
     return ExperimentCreate(
         dataset_id=manifest.dataset_id,
         dataset_version=manifest.dataset_version,
         dataset_hash=manifest.source_sha256,
-        git_commit="0000000",
-        graph_version=settings.agent_graph_version,
-        prompt_version="career-plan-v1",
+        git_commit=identity.git_commit,
+        graph_version=identity.graph_version,
+        feature_stage=identity.feature_stage,
+        prompt_version=identity.primary_prompt_version,
         model_version=settings.llm_model or "mock-v1",
-        tool_version="tool-contract-v1",
-        context_version="context-v1",
-        memory_version="memory-v1",
+        tool_version=identity.tool_contract_version,
+        context_version=identity.context_version,
+        memory_version=identity.memory_version,
+        search_version=identity.search_version,
+        eval_harness_version=identity.eval_harness_version,
         execution_mode=_PROVIDER_MODE_TO_EXECUTION[settings.eval_provider_mode],
         variant_role="baseline",
         trial_count=trial_count,

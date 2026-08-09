@@ -280,11 +280,14 @@ def main() -> int:
     try:
         result = asyncio.run(run_smoke(settings))
     except Exception as exc:
+        error_code = getattr(exc, "error_code", None) or getattr(
+            exc, "code", "SMOKE_EXECUTION_FAILED"
+        )
         print(
             json.dumps(
                 {
                     "status": "failed",
-                    "error_code": getattr(exc, "error_code", "SMOKE_EXECUTION_FAILED"),
+                    "error_code": error_code,
                     "stage": getattr(exc, "stage", "smoke_setup"),
                     "error_type": type(exc).__name__,
                     "details": getattr(exc, "details", {}),

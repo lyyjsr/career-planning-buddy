@@ -1,174 +1,134 @@
 # Career Planning Buddy
 
-Career Planning Buddy is a single-user-facing career-planning Agent MVP. It turns a
-profile and execution feedback into a versioned plan with startable daily tasks,
-reviews, replanning, consent-based memory, and cited local RAG evidence.
+Career Planning Buddy is a controlled-workflow career-planning Agent. It closes the loop from profile and planning through daily execution, review, replanning, three-layer memory, source-traceable online knowledge, and reproducible evaluation. It is a production-oriented portfolio / release-candidate system, not a claim of large-scale production validation.
 
-The repository now implements Stages 0–5 and Stage 6A. Codex is used for engineering only; runtime
-model access always goes through the project Provider protocols.
+Runtime model access always goes through Provider protocols. Codex is an engineering tool and is not the application runtime model. The MVP intentionally uses one backend worker because its Agent and Eval executors are in-process.
 
-## Stack and boundaries
+## Architecture
 
-- Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 Async, Alembic
-- PostgreSQL 16 with pgvector
-- React, TypeScript strict, Vite, React Router, TanStack Query
-- one controlled LangGraph runtime and one backend worker
-- DeepSeek through the OpenAI-compatible Provider, or deterministic Mock
-- local BGE embeddings (1024 dimensions), or deterministic Mock
-- MockSearchProvider only; no real search API
-- no Redis, Celery, MCP, multi-agent framework, microservices, or paid CI calls
+```text
+React frontend
+      ↓
+FastAPI HTTP/SSE API
+      ↓
+Controlled LangGraph runtime
+├─ L1 Working Memory: current Run and compressed planning context
+├─ L2 Personal Episodic Memory: confirmed user-private execution memory
+├─ L3 Semantic Knowledge Memory: reviewed, source-traceable career knowledge
+├─ Tool Registry: memory_lookup / rag_retrieve / web_search
+├─ OpenAI-compatible LLM or deterministic Mock
+├─ Baidu Search or deterministic Mock Search
+└─ PostgreSQL 16 + pgvector
 
-## Quick start with Docker
+Eval Harness V2
+Case → Experiment → Trial → Run → Grade → Report
+```
 
-```bash
-cp .env.example .env
+The backend is Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 Async and Alembic. The frontend is React, strict TypeScript, Vite, React Router and TanStack Query. The MVP has no Redis, Celery, MCP, multi-agent framework, microservices or object storage.
+
+## Product flow and memory boundaries
+
+The user flow is Guest Login → Profile → Plan → Today Tasks → Task feedback → Review → Replan → Memories → Plan history/evidence. Runs persist snapshots, steps, tool calls and SSE events before streaming; each Run has exactly one terminal event.
+
+The three memory layers are deliberately different:
+
+- L1 is the current Run working context: request, profile, plan, recent task/review history, deterministic compression, budgets and snapshots.
+- L2 is user-private episodic memory: Review → MemoryCandidate → explicit confirm/reject → Memory → embedding/pgvector retrieval → later PlanningContext and evidence references. Unconfirmed or inactive items are excluded.
+- L3 is shared semantic knowledge: Baidu Search → SearchSource → ExperienceAtomCandidate → developer review → ExperienceAtom → local BGE/pgvector → `rag_retrieve` and plan evidence. Search output is evidence, not automatically accepted truth, and L2 data never becomes global L3 data.
+
+## Provider modes
+
+Safe defaults use deterministic Mock LLM, embeddings and search. Real modes are explicit opt-ins:
+
+- LLM: `openai_compatible`, including DeepSeek-compatible endpoints.
+- Embedding: local BGE, with a pre-downloaded 1024-dimensional model directory.
+- Search: `baidu`, using Baidu AI Search.
+- Eval: `mock`, `fixture` or `live`; normal CI uses only free deterministic modes.
+
+Missing or invalid real-provider configuration fails explicitly. Real-provider failures never silently fall back to Mock. Secrets must remain server-side and must never use browser-visible `VITE_` variables.
+
+## Safe Mock mode with Docker
+
+Requirements: Docker Desktop with Compose.
+
+```powershell
+Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
-curl http://localhost:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-Open `http://localhost:5173`. Compose deliberately uses Mock LLM and Mock embeddings by
-default so the complete stack starts without secrets or host model mounts. PostgreSQL
-data is kept in the named `postgres_data` volume. The backend runs exactly one Uvicorn
-worker, as required by the in-process Stage 5 executor.
+Open `http://localhost:5173`. Compose defaults to Mock providers, uses a named PostgreSQL volume, applies Alembic migrations, and starts exactly one Uvicorn worker.
 
-Compose reads only the separately named `COMPOSE_LLM_*` variables. This prevents a
-host-only real Provider credential from being copied into the default Mock container.
+Docker search has a real but explicit opt-in through `COMPOSE_SEARCH_PROVIDER` and the `COMPOSE_BAIDU_SEARCH_*` settings documented in `.env.example`. Host real-provider settings are not implicitly copied into the container. Local backend mode is recommended for a host-mounted BGE model; this release does not add GPU/CUDA container deployment.
 
-Apply migrations independently with:
+## Local development and real providers
 
-```bash
-cd backend
-python -m alembic upgrade head
-```
+Requirements: Python 3.12, Node.js 20, npm and PostgreSQL 16 with pgvector. Start only the database if desired:
 
-## Local development
-
-Requirements: Python 3.12, Node.js 20, npm, and Docker.
-
-```bash
+```powershell
 docker compose up -d postgres
 cd backend
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.lock   # Windows
-.venv/Scripts/python -m pip install --no-deps -e .
-.venv/Scripts/python -m alembic upgrade head
-.venv/Scripts/python -m uvicorn app.main:app --reload
+.\.venv\Scripts\python -m pip install -r requirements.lock
+.\.venv\Scripts\python -m pip install --no-deps -e .
+.\.venv\Scripts\python -m alembic upgrade head
+.\.venv\Scripts\python -m uvicorn app.main:app --reload
 ```
 
-On Linux/macOS, use `.venv/bin/python`. In another terminal:
+In another terminal:
 
-```bash
+```powershell
 cd frontend
 npm ci
 npm run dev
 ```
 
-Copy `.env.example` to `.env`. Never commit `.env` or an API key. Browser-visible
-`VITE_` variables must never contain secrets.
+Copy `.env.example` to the ignored root `.env` and select real providers there. Supply the LLM endpoint/model, a pre-downloaded local BGE path, and Baidu configuration only when using those modes. The application does not download model weights automatically. Never commit `.env` or credentials.
 
-### Real DeepSeek and local BGE
+## Developer surfaces
 
-Set these only in the ignored root `.env`:
+After normal login, users whose persisted server-side role is `dev` see:
 
-```dotenv
-LLM_PROVIDER=openai_compatible
-LLM_API_KEY=
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=
-EMBEDDING_PROVIDER=local
-EMBEDDING_MODEL_PATH=
-EMBEDDING_MODEL_NAME=BAAI/bge-large-zh-v1.5
-EMBEDDING_DIM=1024
-SEARCH_PROVIDER=mock
-```
+- `/dev/runs`: redacted snapshots and hashes, steps, tools, persisted events, cost/latency and terminal invariants.
+- `/dev/evals`: a small Experiment list/create/status/progress/cancel/report console for Mock/fixture runs, including runtime identity, failure categories, token summary and calibration state.
 
-`EMBEDDING_MODEL_PATH` must point to an already downloaded local model. The application
-does not auto-download weights. Missing or invalid real Provider configuration fails
-explicitly; it never silently falls back to Mock.
+Both pages reuse the normal access token. Backend `require_dev` authorization remains the security boundary; there is no HTTP privilege-escalation endpoint. Legacy replay is explicitly named `legacy_trace_clone` and is not presented as Graph re-execution.
 
-## Product and developer flows
+## Eval Harness V2
 
-The API flow is:
+V2 freezes Dataset, Git/Graph/Prompt/Model/Tool/Context/Memory/Search/Harness versions and executes the real Case → Experiment → Trial → Run → Grade → Report path. It supports fixture record/replay, per-physical-call Provider audit, token/error accounting, deterministic graders, baseline/agent variants, Pairwise Judge and human calibration.
 
-1. `POST /api/v1/auth/guest`
-2. `PUT /api/v1/profile`
-3. `POST /api/v1/agent-runs`, then consume persisted SSE events
-4. query the generated Plan and update Task state
-5. `POST /api/v1/reviews`
-6. `POST /api/v1/reviews/{id}/start-next-plan`
-7. review the deterministic Memory candidates, then confirm or reject them
-8. let later planning runs retrieve confirmed active memories by semantic relevance
+Discover and run a deterministic one-case smoke:
 
-The developer console is at `http://localhost:5173/dev/runs`. It requires a JWT for a
-local user whose persisted role is `dev`. It displays redacted snapshots and hashes,
-steps, Tool calls, durable events, costs/latency, execution lineage, and the exactly-one,
-terminal-last invariant. `POST /api/v1/dev/runs/{id}/replay` is currently a compatibility
-trace-clone endpoint and returns `execution_kind=legacy_trace_clone`; it is not a Graph
-re-execution Replay and never mutates the source Run or Plan.
-
-## Eval, Replay, and Bad Cases
-
-Run the frozen 30-case Stage 5 suite and the 12-case Stage 6A memory/context suite offline:
-
-```bash
+```powershell
 cd backend
-python -m scripts.run_eval
+.\.venv\Scripts\python -m evals.v2 --help
+.\.venv\Scripts\python -m evals.v2 run --dataset runtime-smoke --cases runtime-tool-error-01 --provider-mode mock --trial-count 1
 ```
 
-The runner executes the real deterministic risk, routing, Mock structured-output,
-format-repair, business-rule validation/repair, and fallback code paths. It reports 12
-graders and writes reports to `backend/evals/artifacts/`; failed cases are written as
-JSONL to `backend/evals/bad_cases/`. Generated artifacts are ignored by Git. Replay and
-CI never call DeepSeek, external embeddings, or search.
+The legacy Stage 5/Stage 6 regression suite remains available:
 
-Stage 6A additionally verifies pinned/semantic memory selection, candidate consent
-boundaries, user isolation, embedding text fallback, and at least 40% deterministic
-compression on the large-history fixture. Planning context is rendered in stable,
-explicitly untrusted sections instead of one undifferentiated JSON block.
-
-Latest verified Stage 5 baseline (2026-08-01): 30/30 cases passed; 21 completed and 9
-contractually degraded (four clarification, three safety, two controlled fallbacks).
-All 12 grader pass rates were 1.0. These numbers come from `python -m scripts.run_eval`,
-not from hand-authored results.
-
-Run the full HTTP + database + configured Provider demonstration while a backend is
-running:
-
-```bash
-cd backend
-python -m scripts.e2e_demo --base-url http://127.0.0.1:8000
+```powershell
+.\.venv\Scripts\python -m scripts.run_eval --no-persist
 ```
 
-The verified real run used `deepseek-v4-flash` and `BAAI/bge-large-zh-v1.5`: create
-plan produced a Schema-valid degraded fallback in 25.329 seconds (7,503 input / 1,361
-output tokens), replan completed in 9.811 seconds (7,274 input / 710 output tokens),
-and local RAG returned the seeded atom with cosine similarity 1.0 at 1024 dimensions.
+`live` Eval is an explicit developer/CLI operation. It applies bounded transient retry, exponential backoff with jitter, `Retry-After`, pacing, concurrency and deadline/cancellation limits; 401/403, schema and business-contract failures are not retried. Without enough completed paired trials and genuine human labels, Pairwise output remains `diagnostic_only`, not final quality truth. Historical small live samples do not prove the full Agent is better than the direct-LLM baseline.
 
-## Checks
+## Verification
 
-PowerShell:
+Canonical local verification:
 
 ```powershell
 .\scripts\check.ps1
 ```
 
-Git Bash, WSL, Linux, or macOS:
+The check runs Ruff, Mypy, Alembic upgrade, Pytest, legacy deterministic Eval, an Eval V2 end-to-end smoke, frontend tests and the production frontend build. GitHub Actions uses Python 3.12, Node.js 20, PostgreSQL/pgvector, locked dependencies, `APP_GIT_COMMIT=${{ github.sha }}` and Mock providers only.
 
-```bash
-bash scripts/check.sh
-```
+Useful endpoints:
 
-Both run Ruff, Mypy, Alembic upgrade, Pytest, both offline Eval datasets, frontend tests,
-and the production frontend build. GitHub Actions uses Python 3.12, Node.js 20,
-PostgreSQL+pgvector, locked dependencies, and Mock Providers only.
+- API docs: `http://127.0.0.1:8000/docs`
+- OpenAPI: `http://127.0.0.1:8000/openapi.json`
+- Health: `GET /health`
 
-## Delivery notes
-
-- API schema is available at `/docs` and `/openapi.json`.
-- Health probe: `GET /health`.
-- All timestamps and deadlines use UTC.
-- Agent events are persisted before SSE delivery; each Run has exactly one terminal
-  event and it is last.
-- Plans remain versioned; replan archives history instead of overwriting it.
-- Real Web Search remains intentionally out of scope; fixed Mock evidence is labeled.
+The current architecture and limits are maintained in `docs/architecture/current-system-overview.md`; release evidence is in `docs/review/v1-release-verification-2026-08-09.md`.

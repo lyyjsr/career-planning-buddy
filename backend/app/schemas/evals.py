@@ -56,7 +56,23 @@ class EvalRunStatusResponse(StrictModel):
     trial_count: int
     started_at: datetime | None
     finished_at: datetime | None
+    cancel_requested_at: datetime | None
     trials: list[TrialStatusSummary]
+    execution_mode: str
+    dataset_version: str
+    variant_role: Literal["baseline", "candidate"]
+    baseline_experiment_id: UUID | None
+    agent_variant: str | None
+    git_commit: str
+    graph_version: str
+    feature_stage: int
+    prompt_version: str
+    model_version: str
+    tool_version: str
+    context_version: str
+    memory_version: str
+    search_version: str
+    eval_harness_version: str
 
 
 class EvalRunReportResponse(StrictModel):
@@ -74,6 +90,7 @@ class EvalRunReportResponse(StrictModel):
     # pre-PR-9a consumers continue to deserialise cleanly.
     case_stats: dict[str, dict[str, object]] = Field(default_factory=dict)
     experiment_stats: dict[str, object] | None = None
+    failure_counts: dict[str, int] = Field(default_factory=dict)
     # PR-9b: report revision (content-hash driven, not call-driven) plus
     # the fact-record of any implised cancel request.
     revision: int = 0
@@ -87,10 +104,24 @@ class EvalRunListItem(StrictModel):
     status: str
     execution_mode: str
     dataset_id: str
+    dataset_version: str
     trial_count: int
     started_at: datetime | None
     finished_at: datetime | None
     cancel_requested_at: datetime | None
+    variant_role: Literal["baseline", "candidate"]
+    baseline_experiment_id: UUID | None
+    agent_variant: str | None
+    git_commit: str
+    graph_version: str
+    feature_stage: int
+    prompt_version: str
+    model_version: str
+    tool_version: str
+    context_version: str
+    memory_version: str
+    search_version: str
+    eval_harness_version: str
 
 
 class EvalRunListResponse(StrictModel):

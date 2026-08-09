@@ -33,6 +33,14 @@ from app.harness.provider_calls.recorder import (
     ProviderInvocationResult,
 )
 from app.harness.provider_calls.repository import ProviderCallRepository
+from app.harness.provider_calls.retry import (
+    LiveEvalCallController,
+    LiveEvalRetryPolicy,
+    RetryAttemptState,
+    RetryingEmbeddingProvider,
+    RetryingPlanningProvider,
+    RetryingSearchProvider,
+)
 
 __all__ = [
     "AuditEmbeddingProvider",
@@ -44,7 +52,13 @@ __all__ = [
     "FixturePlanningProvider",
     "FixtureSearchProvider",
     "FixtureStore",
+    "LiveEvalCallController",
+    "LiveEvalRetryPolicy",
     "ProviderCallRecorder",
     "ProviderCallRepository",
     "ProviderInvocationResult",
+    "RetryAttemptState",
+    "RetryingEmbeddingProvider",
+    "RetryingPlanningProvider",
+    "RetryingSearchProvider",
 ]

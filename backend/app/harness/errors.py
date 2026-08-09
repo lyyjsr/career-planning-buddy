@@ -33,6 +33,7 @@ class EvalFailureCode(StrEnum):
     PROVIDER_AUTHENTICATION_FAILED = "PROVIDER_AUTHENTICATION_FAILED"
     PROVIDER_RATE_LIMITED = "PROVIDER_RATE_LIMITED"
     PROVIDER_CONFIGURATION_INVALID = "PROVIDER_CONFIGURATION_INVALID"
+    PROVIDER_RETRIES_EXHAUSTED = "PROVIDER_RETRIES_EXHAUSTED"
     TOOL_PROVIDER_UNAVAILABLE = "TOOL_PROVIDER_UNAVAILABLE"
     TOOL_ARGUMENT_INVALID = "TOOL_ARGUMENT_INVALID"
     TOOL_EXECUTION_FAILED = "TOOL_EXECUTION_FAILED"
@@ -78,6 +79,15 @@ class FailureCategory(StrEnum):
     UNKNOWN = "unknown"
 
 
+class EvalFailureKind(StrEnum):
+    MODEL_FAILURE = "model_failure"
+    PROVIDER_TRANSIENT_FAILURE = "provider_transient_failure"
+    PROVIDER_EXHAUSTED_AFTER_RETRY = "provider_exhausted_after_retry"
+    CANCELLED = "cancelled"
+    CONFIGURATION_ERROR = "configuration_error"
+    INTERNAL_ERROR = "internal_error"
+
+
 _FAILURE_CATEGORY: dict[EvalFailureCode, FailureCategory] = {
     # PROVIDER
     EvalFailureCode.PROVIDER_UNAVAILABLE: FailureCategory.PROVIDER,
@@ -85,6 +95,7 @@ _FAILURE_CATEGORY: dict[EvalFailureCode, FailureCategory] = {
     EvalFailureCode.PROVIDER_AUTHENTICATION_FAILED: FailureCategory.PROVIDER,
     EvalFailureCode.PROVIDER_RATE_LIMITED: FailureCategory.PROVIDER,
     EvalFailureCode.PROVIDER_CONFIGURATION_INVALID: FailureCategory.PROVIDER,
+    EvalFailureCode.PROVIDER_RETRIES_EXHAUSTED: FailureCategory.PROVIDER,
     EvalFailureCode.TOOL_PROVIDER_UNAVAILABLE: FailureCategory.PROVIDER,
     EvalFailureCode.TOOL_ARGUMENT_INVALID: FailureCategory.PROVIDER,
     EvalFailureCode.TOOL_EXECUTION_FAILED: FailureCategory.PROVIDER,
@@ -192,3 +203,37 @@ def is_configuration_failure(code: str) -> bool:
 
 def is_user_cancel(code: str) -> bool:
     return category(code) == FailureCategory.USER_ACTION
+
+
+def failure_kind(code: str) -> EvalFailureKind:
+    normalized = normalize_failure_code(code)
+    if normalized == EvalFailureCode.PROVIDER_RETRIES_EXHAUSTED:
+        return EvalFailureKind.PROVIDER_EXHAUSTED_AFTER_RETRY
+    if normalized in {
+        EvalFailureCode.PROVIDER_UNAVAILABLE,
+        EvalFailureCode.PROVIDER_TIMEOUT,
+        EvalFailureCode.PROVIDER_RATE_LIMITED,
+        EvalFailureCode.TOOL_PROVIDER_UNAVAILABLE,
+    }:
+        return EvalFailureKind.PROVIDER_TRANSIENT_FAILURE
+    if normalized in {
+        EvalFailureCode.STRUCTURED_OUTPUT_INVALID,
+        EvalFailureCode.QUALITY_HARD_GATE_FAILED,
+    }:
+        return EvalFailureKind.MODEL_FAILURE
+    if is_user_cancel(normalized.value):
+        return EvalFailureKind.CANCELLED
+    if is_configuration_failure(normalized.value) or normalized in {
+        EvalFailureCode.PROVIDER_AUTHENTICATION_FAILED,
+        EvalFailureCode.PROVIDER_CONFIGURATION_INVALID,
+    }:
+        return EvalFailureKind.CONFIGURATION_ERROR
+    return EvalFailureKind.INTERNAL_ERROR
+
+
+def summarize_failure_kinds(codes: list[str | None]) -> dict[str, int]:
+    counts = {kind.value: 0 for kind in EvalFailureKind}
+    for code in codes:
+        if code:
+            counts[failure_kind(code).value] += 1
+    return counts

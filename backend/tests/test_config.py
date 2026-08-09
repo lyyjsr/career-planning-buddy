@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from pytest import MonkeyPatch
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 
 
 def test_settings_load_safe_defaults(monkeypatch: MonkeyPatch) -> None:
@@ -37,6 +37,18 @@ def test_environment_overrides_settings(monkeypatch: MonkeyPatch) -> None:
     assert settings.app_env == "test"
     assert settings.backend_port == 9001
     assert settings.database_url.endswith("/test_db")
+
+
+def test_cached_test_settings_ignore_env_files(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test_only")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.app_env == "test"
+        assert settings.database_url == "postgresql+asyncpg://localhost/test_only"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_synchronous_database_url_is_rejected() -> None:

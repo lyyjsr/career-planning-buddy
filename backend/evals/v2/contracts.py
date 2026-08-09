@@ -126,13 +126,16 @@ class ExperimentCreate(StrictModel):
     dataset_id: Annotated[str, Field(min_length=1, max_length=64)]
     dataset_version: NonEmptyVersion
     dataset_hash: Sha256Hex
-    git_commit: Annotated[str, Field(pattern=r"^[0-9a-f]{7,64}$")]
+    git_commit: Annotated[str, Field(pattern=r"^(unknown|[0-9a-f]{7,64})$")]
     graph_version: NonEmptyVersion
+    feature_stage: Annotated[int, Field(ge=1, le=99)] = 5
     prompt_version: NonEmptyVersion
     model_version: NonEmptyVersion
     tool_version: NonEmptyVersion
     context_version: NonEmptyVersion
     memory_version: NonEmptyVersion
+    search_version: NonEmptyVersion = "legacy-unversioned"
+    eval_harness_version: NonEmptyVersion = "eval-harness-v2"
     execution_mode: Literal["mock_provider", "fixture_provider", "live_provider"]
     variant_role: Literal["baseline", "candidate"]
     baseline_experiment_id: UUID | None = None
