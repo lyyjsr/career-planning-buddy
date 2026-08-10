@@ -65,4 +65,7 @@ PlanDetail 由 plans、tasks、`weekly_focus_json`、`evidence_refs_json`、对�
 - completed 计划仍可作为“生成次日任务”的来源；
 - 新 continue/adjust 计划事务成功后，来源计划转 archived；
 - 无单独“采纳”接口，首个任务开始即视为采纳；
-- `/today` 只展示当前 `plan_date` 的 Task，中期 weekly_focus 不会一次展开成几十个未来 Task。
+- `weekly_focus` 只作为 1~8 周总览；当前 Plan 的 `tasks` 展开从 `plan_date` 开始的 7 天执行表。
+- `/today` 使用 `active_plan.tasks` 展示七天总览，同时只把当天 Task 作为可执行动作。
+- 每日总览展示 `starter_action`、`deliverable` 和 `rationale`；未来日期任务可预览，到 `scheduled_date` 后自动进入当天可执行区。
+- 未来周保持方向级重点，进入下一轮复盘/调整时再滚动生成新的七天执行表，避免一次生成几十个易过期 Task。

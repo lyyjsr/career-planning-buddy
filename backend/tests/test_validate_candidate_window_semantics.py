@@ -103,7 +103,7 @@ def test_multi_day_in_window_within_daily_budget_passes() -> None:
         context,
         [
             _task(window.planning_date, 40, title="today", deliverable="d1"),
-            _task(window.planning_date + timedelta(days=7), 30, title="w2", deliverable="d2"),
+            _task(window.planning_date + timedelta(days=6), 30, title="day7", deliverable="d2"),
         ],
     )
     report = validate_candidate(plan, context)
@@ -121,6 +121,18 @@ def test_task_outside_window_still_fails_schedule_date() -> None:
     assert "SCHEDULE_DATE" in _failed_codes(report)
 
 
+def test_task_after_seven_day_action_window_fails_schedule_date() -> None:
+    context = _context(daily_budget=60)
+    window = context.planning_window
+    plan = _candidate(
+        context,
+        [_task(window.planning_date + timedelta(days=7), 10, title="day8", deliverable="d8")],
+    )
+    report = validate_candidate(plan, context)
+    assert report.passed is False
+    assert "SCHEDULE_DATE" in _failed_codes(report)
+
+
 # 4. 多日，某一天的总和超预算 —— TIME_BUDGET 按日分组生效
 def test_multi_day_one_day_over_budget_fails_only_time_budget() -> None:
     context = _context(daily_budget=60)
@@ -130,7 +142,7 @@ def test_multi_day_one_day_over_budget_fails_only_time_budget() -> None:
         [
             _task(window.planning_date, 40, title="a", deliverable="da"),
             _task(window.planning_date, 40, title="b", deliverable="db"),
-            _task(window.planning_date + timedelta(days=7), 30, title="c", deliverable="dc"),
+            _task(window.planning_date + timedelta(days=6), 30, title="c", deliverable="dc"),
         ],
     )
     report = validate_candidate(plan, context)

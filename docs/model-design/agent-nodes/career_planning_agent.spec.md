@@ -7,7 +7,7 @@
 产品输出分两层：
 
 1. **方向层**：面向 1~8 周的整体方向和每周重点；
-2. **行动层**：只生成 `planning_date` 当天可执行的 1~3 个任务。
+2. **行动层**：生成从 `planning_date` 开始的七天执行表，每天默认 1 个关键任务。
 
 这样既能回答“未来几周怎么准备”，又避免一次生成几十个很快失效的任务。次日通过来源计划和复盘生成新的计划版本。
 
@@ -61,7 +61,7 @@ class PlanCandidate(BaseModel):
     rationale: str = Field(min_length=1, max_length=2000)
     adjustment_reason: str | None = Field(default=None, max_length=1000)
     assumptions: list[str] = Field(default_factory=list, max_length=5)
-    tasks: list[TaskCandidate] = Field(min_length=1, max_length=3)
+    tasks: list[TaskCandidate] = Field(min_length=1, max_length=7)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=10)
 
 class EvidenceRef(BaseModel):
@@ -92,8 +92,9 @@ class TaskCandidate(BaseModel):
 ## 业务不变量
 
 - `weekly_focus` 覆盖规划窗口，week_index 连续且不重复；
-- 所有 Task 的 `scheduled_date == plan_date`；
-- 当天任务 1~3 个，总时长不超过用户每日预算；
+- 所有 Task 的 `scheduled_date` 必须落在从 `plan_date` 开始的七天行动窗口；
+- 七天执行表最多 7 个任务，每天的总时长不超过用户每日预算；
+- 每项 Task 的 `starter_action` 包含 2~3 个有对象、有数量或方法的有序步骤，`deliverable` 同时写明可量化产物和通过条件；
 - `evidence_refs` 只能引用产生当前候选的 Provider 调用实际可见的
   Memory/ExperienceAtom/SearchSource；Graph 不得自动补齐引用；
 - 不允许自行改变用户 `goal_type`；
@@ -123,7 +124,7 @@ Trace 必须记录：prompt_version、实际 model_id、每次 call 的 token/la
 ## 测试
 
 - Stage 3 无 Tool 一次生成；
-- 5 周请求得到 5 个 weekly focus，但只产生当天 1~3 个任务；
+- 5 周请求得到 5 个递进 weekly focus，同时只展开当前七天执行表；
 - 次日 continue 保持方向并推进下一步；
 - adjust replan 保留 completed facts 并解释调整；
 - 两轮 Tool 后正常输出；

@@ -163,6 +163,8 @@ async def test_task_state_machine_optimistic_lock_and_plan_completion(
                 actual_minutes=25,
             ),
         )
+        if index < len(tasks) - 1:
+            assert completed.plan_status.value == "active"
     assert completed.plan_status.value == "completed"
     db_session.expire_all()
     completed_plan = await db_session.get(Plan, plan_id)
@@ -230,7 +232,7 @@ async def test_review_counts_rules_idempotency_listing_and_isolation(
 
     assert repeated.review_id == created.review_id
     assert created.completed_count == 1
-    assert created.abandoned_count == 1
+    assert created.abandoned_count == 0
     assert created.suggested_replan is True
     assert created.next_plan_action.value == "adjust"
     assert created.replan_reason is not None

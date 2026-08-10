@@ -18,7 +18,7 @@
 
 ```text
 Guest 登录 → 建档 → 创建 Agent Run → SSE 查看进度
-→ 获得中期方向与今日任务 → 更新任务状态 → 提交复盘 → 生成次日 continue/adjust 计划
+→ 获得多周方向与未来 7 天每日计划 → 完成当天任务 → 提交复盘 → 生成下一版 continue/adjust 计划
 → 系统建议重规划 → 用户确认 → 产生新计划版本
 ```
 
@@ -102,7 +102,7 @@ pending → expired
 - 单 Run 默认截止时间 45 秒；
 - 单 Run 默认总 Token 预算 16000，单次输入 6000、输出 1500（均可配置）；
 - 结构化格式失败最多修复 1 次；业务规则失败最多使用专用 repair Prompt 修复 1 次；
-- 计划包含 1~8 周方向与周重点；今日任务 1~3 个，总预计时长不得超过用户预算；
+- 计划包含 1~8 周方向与互不重复的周重点；当前执行层展开未来 7 天、每天 1 个关键任务，每日预计时长不得超过用户预算；
 - 取消和超时必须通过统一 Finalizer 写唯一最终状态及事件；
 - Run 冻结 graph/config snapshot，context_builder 后冻结 input snapshot；
 - 终态 result_kind 仅为 plan/clarification/safe_response；failed/cancelled 无结果。

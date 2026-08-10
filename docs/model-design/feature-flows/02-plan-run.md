@@ -54,7 +54,7 @@ sequenceDiagram
 - completed 必须有 Plan，degraded 必须有 result_kind；
 - 每个非 heartbeat SSE 事件已在 agent_events 持久化；
 - 每个 Run 只有一个 terminal event；
-- 新计划包含 1~8 周方向/weekly_focus，且只展开 planning_date 当天 1~3 个任务；
+- 新计划包含 1~8 周方向/weekly_focus，并展开从 planning_date 开始的 7 天执行表；每天默认 1 个关键任务；
 - 同用户不能并发两个活动 Run；
 - input/config snapshot 可用于 Replay；
 - Stage 3 无 Tool，Stage 4 Tool 预算和白名单生效。

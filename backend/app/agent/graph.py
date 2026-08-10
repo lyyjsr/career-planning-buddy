@@ -168,6 +168,7 @@ class FixedPlanningGraph:
                     hint_intent=request.hint_intent,
                     profile=state["profile"],
                     source_plan_exists=source_plan_exists,
+                    goal_type_override=request.goal_type_override,
                     forced_replan_mode=state.get("server_replan_mode"),
                 ),
                 {"method": "rule"},

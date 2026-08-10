@@ -66,7 +66,7 @@
     "plan_date": "2026-07-31",
     "horizon_end": "2026-09-03",
     "summary": "今天先补齐可演示闭环",
-    "task_count": 3
+    "task_count": 7
   },
   "final_plan_id": "...",
   "fallback_reason": null,

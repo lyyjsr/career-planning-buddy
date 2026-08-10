@@ -72,7 +72,7 @@ Executor:
 lock active plan + verify run running/not cancelled
 + archive old active plan first inside transaction if replan
 + create plan(generated, parent_plan_id)
-+ create 1~3 tasks
++ create rolling seven-day tasks
 + create companion_message
 + validate and store evidence_refs_json
 + set run.final_plan_id/result_kind/result_payload/status
@@ -127,7 +127,7 @@ POST /reviews
 POST /reviews/{id}/start-next-plan
   → 用户确认后 create Agent Run(replan, source_plan_id, source_review_id)
   → context_builder 读取 planning window/completed facts/blockers
-  → Agent 生成中期方向 + 下一 planning_date 的 1~3 个任务
+  → Agent 生成中期方向 + 从下一 planning_date 开始的七天执行表
   → 归档来源计划与创建新计划在同一事务提交
 ```
 

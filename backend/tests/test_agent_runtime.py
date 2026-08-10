@@ -123,8 +123,13 @@ async def test_happy_run_persists_plan_tasks_snapshot_and_last_terminal_event(
     assert run.input_snapshot_json is not None
     assert plan is not None
     assert len(plan.weekly_focus_json) == 5
-    assert 1 <= len(tasks) <= 3
-    assert sum(task.estimated_minutes for task in tasks) <= 90
+    assert len(tasks) == 7
+    assert [task.scheduled_date for task in tasks] == [
+        plan.plan_date + timedelta(days=offset) for offset in range(7)
+    ]
+    assert all(task.estimated_minutes <= 90 for task in tasks)
+    assert all(task.starter_action.startswith("1. ") for task in tasks)
+    assert all(task.rationale is not None for task in tasks)
     assert [event.sequence for event in events] == list(range(1, len(events) + 1))
     assert [
         event.payload_json["node_name"] for event in events if event.event_type == "node.started"

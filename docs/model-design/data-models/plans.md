@@ -1,6 +1,6 @@
 # plans — 求职计划版本
 
-一个 Plan 是“中期方向 + 当前 planning_date 的行动批次”。它不会一次生成未来数周的所有 Task；次日续接或明显调整会基于来源 Plan 创建新版本。
+一个 Plan 是“中期方向 + 从当前 planning_date 开始的七天行动表”。它不会一次生成未来数周的所有 Task；后续续接或明显调整会基于来源 Plan 创建新版本并滚动未来七天。
 
 | 字段 | 类型 | NULL | 默认/约束 | 说明 |
 |---|---|---:|---|---|
@@ -9,7 +9,7 @@
 | source_run_id | uuid | NO | UNIQUE, FK agent_runs.id | 产生该计划的 Run |
 | parent_plan_id | uuid | YES | FK plans.id | continue/adjust 的上一个计划 |
 | status | varchar(16) | NO | generated/active/completed/archived | 见状态机 |
-| plan_date | date | NO | | 当前行动批次日期，按用户时区确定 |
+| plan_date | date | NO | | 当前七天执行表起始日期，按用户时区确定 |
 | horizon_start | date | NO | | 方向层起始日期 |
 | horizon_end | date | NO | | 最多展开 8 周 |
 | overall_direction | varchar(500) | NO | | 中期整体方向 |
@@ -22,7 +22,7 @@
 | metadata_json | jsonb | NO | default '{}' | prompt/model/replan_mode 等非核心元数据 |
 | version | integer | NO | default 1 | 乐观锁 |
 | adopted_at | timestamptz | YES | | 首个任务开始时写入 |
-| completed_at | timestamptz | YES | | 当日批次全部完成时写入 |
+| completed_at | timestamptz | YES | | 当前七天行动表全部完成时写入 |
 | archived_at | timestamptz | YES | | 被下一版本替代或手动归档 |
 | created_at | timestamptz | NO | now() | |
 | updated_at | timestamptz | NO | now() | |

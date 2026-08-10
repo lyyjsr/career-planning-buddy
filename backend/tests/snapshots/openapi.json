@@ -1186,11 +1186,6 @@
             "title": "Dataset",
             "type": "string"
           },
-          "grade": {
-            "default": true,
-            "title": "Grade",
-            "type": "boolean"
-          },
           "fixture_source_experiment_id": {
             "anyOf": [
               {
@@ -1202,6 +1197,11 @@
               }
             ],
             "title": "Fixture Source Experiment Id"
+          },
+          "grade": {
+            "default": true,
+            "title": "Grade",
+            "type": "boolean"
           },
           "provider_mode": {
             "anyOf": [
@@ -3125,7 +3125,7 @@
             "type": "string"
           },
           "task_count": {
-            "maximum": 3.0,
+            "maximum": 7.0,
             "minimum": 1.0,
             "title": "Task Count",
             "type": "integer"

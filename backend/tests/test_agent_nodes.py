@@ -10,6 +10,7 @@ from app.agent.errors import BudgetExceededError
 from app.agent.graph import FixedPlanningGraph
 from app.agent.nodes import (
     build_planning_context,
+    fallback_candidate,
     risk_gate,
     route_intent,
     validate_candidate,
@@ -146,6 +147,50 @@ def test_risk_intent_and_rule_validation_are_deterministic() -> None:
     failed = validate_candidate(over_budget, context)
     assert not failed.passed
     assert [check.code for check in failed.checks if not check.passed] == ["TIME_BUDGET"]
+
+
+def test_explicit_goal_override_wins_when_replanning() -> None:
+    intent = route_intent(
+        message="调整后续计划",
+        hint_intent="replan",
+        profile=profile(),
+        source_plan_exists=True,
+        goal_type_override=GoalType.AI_BACKEND,
+    )
+
+    assert intent.effective_goal_type == GoalType.AI_BACKEND
+    assert intent.replan_mode == ReplanMode.ADJUST
+
+
+def test_fallback_has_progressive_weeks_and_seven_dated_tasks() -> None:
+    _, context = candidate()
+    plan = fallback_candidate(context, ReplanMode.INITIAL)
+
+    assert len({item.focus for item in plan.weekly_focus}) == 5
+    assert len({item.success_signal for item in plan.weekly_focus}) == 5
+    assert [task.scheduled_date for task in plan.tasks] == [
+        context.planning_window.planning_date + timedelta(days=offset)
+        for offset in range(7)
+    ]
+    assert all(task.starter_action.startswith("1. ") for task in plan.tasks)
+    assert all("包含" in task.deliverable for task in plan.tasks)
+
+
+def test_repeated_weekly_focus_fails_validation() -> None:
+    plan, context = candidate()
+    repeated = plan.model_copy(
+        update={
+            "weekly_focus": [
+                item.model_copy(update={"focus": "重复重点", "success_signal": "重复产物"})
+                for item in plan.weekly_focus
+            ]
+        }
+    )
+
+    report = validate_candidate(repeated, context)
+
+    assert report.passed is False
+    assert [check.code for check in report.checks if not check.passed] == ["WEEKLY_FOCUS"]
 
 
 def test_stage2_budget_and_tool_registry_enforce_empty_tool_list() -> None:

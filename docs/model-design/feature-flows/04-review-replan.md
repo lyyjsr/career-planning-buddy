@@ -29,7 +29,7 @@ sequenceDiagram
 - 保留 overall_direction；
 - 延续 weekly_focus，推进下一可执行步骤；
 - 读取昨天 completed/abandoned facts；
-- 生成下一 planning_date 的 1~3 个任务；
+- 从下一 planning_date 开始滚动生成未来七天行动表；
 - 不需要伪造 adjustment_reason。
 
 ### adjust
@@ -39,7 +39,7 @@ sequenceDiagram
 - 保留已完成事实；
 - 可修改后续 weekly_focus，但不能未经确认改变 goal_type；
 - 必须给出 adjustment_reason；
-- 仍只生成下一 planning_date 的行动任务。
+- 仍只滚动生成从下一 planning_date 开始的七天行动表。
 
 ## 约束
 
@@ -49,3 +49,4 @@ sequenceDiagram
 - 新 Run 失败时旧计划保持可查询；
 - Review 的任务统计来自数据库，不信任客户端；
 - completed Plan 可以作为 next plan 的来源。
+- 用户在画像设置页选择“保存并重新规划”时，以显式确认替代 Review 确认：先保存新画像，再用当前 Plan 发起 adjust Run；Run 上下文仍必须读取已完成、进行中和放弃事实。

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -10,12 +10,13 @@ import {
   Sparkles,
   WifiOff,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMe } from "@/api/auth";
 import { useCancelRun, useCreateRun, useRun } from "@/api/agent-runs";
 import { useRunEventStream, type RunStreamState } from "@/api/sse";
 import type { AgentRunResponse, TaskResponse } from "@/api/types";
 import { TaskCard } from "@/components/TaskCard";
+import { localDateIso, WeeklyTaskSchedule } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,16 +45,31 @@ function nextActionTask(tasks: TaskResponse[]): TaskResponse | undefined {
 }
 
 export function TodayPage(): JSX.Element {
+  const [searchParams] = useSearchParams();
   const me = useMe();
   const createRun = useCreateRun();
   const cancelRun = useCancelRun();
   const [message, setMessage] = useState("");
-  const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
+  const [submittedRunId, setSubmittedRunId] = useState<string | null>(() => searchParams.get("run_id"));
   const [feedback, setFeedback] = useState<string | null>(null);
+  const refreshedPlanId = useRef<string | null>(null);
 
   const activeRunId = submittedRunId ?? me.data?.active_run?.run_id ?? null;
   const stream = useRunEventStream(activeRunId ?? undefined);
   const runQuery = useRun(activeRunId ?? undefined);
+  const run = runQuery.data;
+
+  useEffect(() => {
+    if (
+      run?.final_plan_id !== null
+      && run?.final_plan_id !== undefined
+      && TERMINAL.has(run.status)
+      && refreshedPlanId.current !== run.final_plan_id
+    ) {
+      refreshedPlanId.current = run.final_plan_id;
+      void me.refetch();
+    }
+  }, [me, run?.final_plan_id, run?.status]);
 
   if (me.isLoading || me.data === undefined || me.data === null) {
     return <div className="text-sm text-muted-foreground">正在准备今天的行动…</div>;
@@ -66,8 +82,11 @@ export function TodayPage(): JSX.Element {
   const allSettled = tasks.length > 0 && tasks.every((task) => ["completed", "abandoned", "expired"].includes(task.state));
   const completedCount = tasks.filter((task) => task.state === "completed").length;
   const totalMinutes = tasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
-  const run = runQuery.data;
   const isPlanning = run?.status === "pending" || run?.status === "running";
+  const today = localDateIso();
+  const nextPlannedTask = activePlan?.tasks
+    .filter((task) => task.scheduled_date > today && ["pending", "in_progress"].includes(task.state))
+    .sort((left, right) => left.scheduled_date.localeCompare(right.scheduled_date) || left.order_index - right.order_index)[0];
 
   function submitPlan(event: React.FormEvent): void {
     event.preventDefault();
@@ -141,6 +160,21 @@ export function TodayPage(): JSX.Element {
         />
       )}
 
+      {!isPlanning && activePlan !== null && (
+        <section className="space-y-3" aria-labelledby="week-schedule-heading">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">未来 7 天</p>
+              <h2 id="week-schedule-heading" className="mt-1 text-lg font-semibold">本周每日计划</h2>
+            </div>
+            <Link to={`/journey/${activePlan.plan_id}`} className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
+              查看详情 <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+          <WeeklyTaskSchedule startDate={activePlan.plan_date} tasks={activePlan.tasks} />
+        </section>
+      )}
+
       {!isPlanning && firstTask !== undefined && (
         <section className="space-y-4" aria-labelledby="first-step-heading">
           <div className="flex items-center justify-between">
@@ -187,6 +221,21 @@ export function TodayPage(): JSX.Element {
         </Card>
       )}
 
+      {!isPlanning && activePlan !== null && firstTask === undefined && nextPlannedTask !== undefined && (
+        <Card className="border-primary/15">
+          <CardHeader>
+            <CardDescription>下一项将在 {nextPlannedTask.scheduled_date} 自动开放</CardDescription>
+            <CardTitle className="text-lg">{nextPlannedTask.title}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm leading-6">
+            <p><span className="font-medium">怎么做：</span>{nextPlannedTask.starter_action}</p>
+            <p><span className="font-medium">完成标志：</span>{nextPlannedTask.deliverable}</p>
+            <p className="text-muted-foreground">不用手动解锁；到排期日期后，它会自动成为“今天”的可执行任务。</p>
+            <Button asChild variant="outline" size="sm"><Link to={`/journey/${activePlan.plan_id}`}>查看完整每日计划</Link></Button>
+          </CardContent>
+        </Card>
+      )}
+
       {activePlan !== null && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
@@ -208,9 +257,10 @@ export function TodayPage(): JSX.Element {
           </Card>
           {!isPlanning && (
             <details className="rounded-xl">
-              <summary className="cursor-pointer py-2 text-sm text-muted-foreground hover:text-foreground">需要调整今天或方向？</summary>
+              <summary className="cursor-pointer py-2 text-sm text-muted-foreground hover:text-foreground">需要调整计划内容？</summary>
               <form onSubmit={submitPlan} className="space-y-3 rounded-2xl border bg-card p-4">
-                <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} maxLength={2000} placeholder="例如：今天只有 30 分钟，请减少任务量" />
+                <p className="text-xs leading-5 text-muted-foreground">如果目标方向或每日可投入时间变了，请先到“目标与时间”保存并重新规划。</p>
+                <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} maxLength={2000} placeholder="例如：保留当前每日时间，但后续优先补 Agent 评测与可观测性" />
                 <Button type="submit" size="sm" disabled={createRun.isPending || message.trim().length === 0}>生成调整方案</Button>
               </form>
             </details>

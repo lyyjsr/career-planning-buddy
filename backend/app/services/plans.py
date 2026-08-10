@@ -226,7 +226,7 @@ class PlanQueryService:
                 counts = await self._plans.task_state_counts(
                     user_id=user_id,
                     plan_id=plan.id,
-                    scheduled_date=plan.plan_date,
+                    scheduled_date=None,
                 )
                 total = sum(counts.values())
                 if total > 0 and counts.get("completed", 0) == total:

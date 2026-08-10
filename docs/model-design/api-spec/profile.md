@@ -47,3 +47,5 @@
 - `preferences` 只允许已定义字段；
 - version 冲突返回 409；
 - 请求不允许 user_id。
+
+Profile API 只保存画像，不静默替换现有计划。前端在用户明确选择“保存并重新规划”后，先完成 PATCH，再以当前 generated/active Plan、否则最近 completed Plan 为 `source_plan_id` 创建 replan Run；新 Run 会读取更新后的画像和当前执行事实。

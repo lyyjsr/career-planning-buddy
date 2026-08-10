@@ -28,5 +28,5 @@
 ## 约束
 
 - UNIQUE `(plan_id, scheduled_date, order_index)`；
-- “每日最多 3 个、总时间不超预算”由 Service 和 rule_validator 保证；
+- 当前七天执行表默认每天 1 个关键任务；每日总时间不超预算由 rule_validator 保证；
 - `user_id` 必须与 plan.user_id 一致，由 Service 写入并测试。

@@ -51,7 +51,7 @@ class PlanResultSummary(StrictModel):
     plan_date: date
     horizon_end: date
     summary: str = Field(min_length=1, max_length=500)
-    task_count: int = Field(ge=1, le=3)
+    task_count: int = Field(ge=1, le=7)
 
 
 class ClarificationRequest(StrictModel):
@@ -298,7 +298,7 @@ class PlanCandidate(StrictModel):
     rationale: str = Field(min_length=1, max_length=2000)
     adjustment_reason: str | None = Field(default=None, max_length=1000)
     assumptions: list[str] = Field(default_factory=list, max_length=5)
-    tasks: list[TaskCandidate] = Field(min_length=1, max_length=3)
+    tasks: list[TaskCandidate] = Field(min_length=1, max_length=7)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=10)
 
     @field_validator("weekly_focus")

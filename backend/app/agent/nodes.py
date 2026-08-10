@@ -50,6 +50,7 @@ def route_intent(
     hint_intent: str | None,
     profile: ProfileContext | None,
     source_plan_exists: bool,
+    goal_type_override: GoalType | None = None,
     forced_replan_mode: ReplanMode | None = None,
 ) -> IntentResult:
     query_only = any(term in message for term in ("查看计划", "查询任务", "我的计划"))
@@ -79,7 +80,7 @@ def route_intent(
         replan_mode=mode,
         confidence=1,
         missing_slots=missing_slots,
-        effective_goal_type=profile.goal_type if profile else None,
+        effective_goal_type=goal_type_override or (profile.goal_type if profile else None),
         requested_horizon_weeks=requested_weeks,
         requires_fresh_information=requires_fresh_information,
         method="rule",
@@ -252,13 +253,19 @@ def validate_candidate(
             len(candidate.weekly_focus) == window.horizon_weeks
             and [item.week_index for item in candidate.weekly_focus]
             == list(range(1, len(candidate.weekly_focus) + 1))
+            and len({item.focus for item in candidate.weekly_focus})
+            == len(candidate.weekly_focus)
+            and len({item.success_signal for item in candidate.weekly_focus})
+            == len(candidate.weekly_focus)
         ),
-        "TASK_COUNT": 1 <= len(candidate.tasks) <= 3,
+        "TASK_COUNT": 1 <= len(candidate.tasks) <= 7,
         "TIME_BUDGET": _within_daily_budget(candidate.tasks, context.time_budget_minutes),
         "STARTER_ACTION": all(bool(task.starter_action.strip()) for task in candidate.tasks),
         "DELIVERABLE": all(bool(task.deliverable.strip()) for task in candidate.tasks),
         "SCHEDULE_DATE": all(
-            window.horizon_start <= task.scheduled_date <= window.horizon_end
+            window.planning_date
+            <= task.scheduled_date
+            <= min(window.planning_date + timedelta(days=6), window.horizon_end)
             for task in candidate.tasks
         ),
         "RECENT_DUPLICATE": not any(
@@ -314,7 +321,60 @@ def _valid_replan_continuity(candidate: PlanCandidate, context: PlanningContext)
 def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandidate:
     window = context.planning_window
     minutes = max(5, min(context.time_budget_minutes, 30))
-    dated_deliverable = f"{window.planning_date.isoformat()} fallback evidence artifact"
+    weekly_templates = [
+        ("明确目标岗位与能力差距", "形成岗位要求与能力差距清单"),
+        ("完成可展示的项目核心增量", "产出可运行、可验证的项目成果"),
+        ("沉淀简历与项目表达材料", "形成可投递的简历项目描述"),
+        ("开展模拟面试并验证准备效果", "完成复盘记录并修正薄弱点"),
+        ("扩大岗位样本并校准投递方向", "形成目标岗位优先级列表"),
+        ("强化高频面试专题与表达", "完成一轮专题问答演练"),
+        ("集中投递并跟踪反馈", "形成投递与反馈跟踪表"),
+        ("复盘结果并确定下一阶段策略", "形成下一阶段行动决策"),
+    ]
+    daily_templates = [
+        (
+            "梳理目标岗位要求",
+            TaskType.LEARNING,
+            "1. 收集3份目标岗位JD；2. 标出重复的技能、项目和学历要求；3. 按出现次数排序",
+            "岗位要求表，至少包含3份JD、10项要求及出现频次",
+        ),
+        (
+            "盘点当前能力差距",
+            TaskType.LEARNING,
+            "1. 将要求分成已掌握、待补和可证明；2. 给待补项标优先级；3. 选出本周首要差距",
+            "能力差距表，包含优先级、现有证据和本周首要补齐项",
+        ),
+        (
+            "完成最小项目增量",
+            TaskType.PROJECT,
+            "1. 选择首要差距对应的项目功能；2. 先写验收用例；3. 实现最小闭环并提交",
+            "一次代码提交，包含可运行功能、至少1个自动化测试和运行说明",
+        ),
+        (
+            "验证并记录项目结果",
+            TaskType.PROJECT,
+            "1. 运行项目和测试；2. 保存关键输入输出；3. 记录失败原因、修复动作和最终结果",
+            "验证记录，包含测试命令、通过结果以及截图或关键日志",
+        ),
+        (
+            "整理简历项目表达",
+            TaskType.RESUME,
+            "1. 用背景、行动、结果重写项目经历；2. 补充技术取舍；3. 压缩成3至4条要点",
+            "3至4条可直接放入简历的项目描述，每条包含动作和结果",
+        ),
+        (
+            "演练项目面试问答",
+            TaskType.INTERVIEW,
+            "1. 准备架构、难点、取舍各1题；2. 每题限时2分钟口述；3. 重答含糊部分",
+            "3组项目问答记录，每组包含首答问题和改进后的答案",
+        ),
+        (
+            "复盘本周并安排下一步",
+            TaskType.OTHER,
+            "1. 汇总前6天产物；2. 标记完成、阻碍和欠账；3. 确定下周第一项可执行任务",
+            "周复盘，包含完成清单、最多3个阻碍和下一步行动",
+        ),
+    ]
     return PlanCandidate(
         plan_date=window.planning_date,
         horizon_start=window.horizon_start,
@@ -327,23 +387,29 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
         weekly_focus=[
             WeeklyFocusCandidate(
                 week_index=index,
-                focus="完成一个小而可验证的准备增量",
-                success_signal="形成一份可以复查的产物",
+                focus=weekly_templates[index - 1][0],
+                success_signal=weekly_templates[index - 1][1],
             )
             for index in range(1, window.horizon_weeks + 1)
         ],
-        summary="本次先采用保守计划，完成一个最小行动。",
-        rationale="候选计划未通过规则检查，因此使用确定性模板保证可执行性。",
+        summary="本次采用保守的七天执行表，每天只推进一个可验证结果。",
+        rationale="候选计划未通过规则检查，因此使用递进周目标和七天确定性模板保证可执行性。",
         adjustment_reason="根据复盘阻碍采用保守调整" if mode == ReplanMode.ADJUST else None,
         tasks=[
             TaskCandidate(
-                title="完成一个最小准备动作",
-                task_type=TaskType.OTHER,
-                scheduled_date=window.planning_date,
-                starter_action="打开当前求职材料并选择一个最小改进点",
-                deliverable=dated_deliverable,
+                title=title,
+                task_type=task_type,
+                scheduled_date=window.planning_date + timedelta(days=day_offset),
+                starter_action=starter_action,
+                deliverable=(
+                    f"{(window.planning_date + timedelta(days=day_offset)).isoformat()} "
+                    f"{deliverable}"
+                ),
                 estimated_minutes=minutes,
-                rationale="先恢复稳定、可执行的行动节奏",
+                rationale="结合当前目标、每日预算和近期执行事实推进下一项可验证成果",
+            )
+            for day_offset, (title, task_type, starter_action, deliverable) in enumerate(
+                daily_templates
             )
         ],
     )
@@ -351,6 +417,6 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
 
 def build_companion(candidate: PlanCandidate) -> CompanionMessageCandidate:
     return CompanionMessageCandidate(
-        message=f"今天先从“{candidate.tasks[0].title}”开始，完成可验证产物即可。",
+        message=f"七天安排已经展开，今天先从“{candidate.tasks[0].title}”开始。",
         template_version="plan_ready_v1",
     )

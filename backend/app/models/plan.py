@@ -23,7 +23,7 @@ from app.core.database import Base
 
 
 class Plan(Base):
-    """Versioned medium-term direction plus one day's action batch."""
+    """Versioned medium-term direction plus one rolling seven-day action schedule."""
 
     __tablename__ = "plans"
     __table_args__ = (

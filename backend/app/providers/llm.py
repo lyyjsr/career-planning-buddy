@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import Mapping
+from datetime import timedelta
 from hashlib import sha256
 from time import monotonic
 from typing import Protocol
@@ -609,23 +610,7 @@ class MockPlanningProvider:
                 ),
             }
         if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
-            # PR-9c.2 Stage B repair-path fault-injection: force every task's
-            # estimated_minutes above the time budget so the rule validator
-            # downstream is guaranteed to fire. Originally hard-coded to
-            # ``tasks[0]`` / ``tasks[1]``, which assumed ≥2 tasks; PairSmoke
-            # ``compact_v1`` legitimately produces a single-task candidate,
-            # tripping IndexError that ``AgentRunExecutor`` swallowed into
-            # ``AGENT_EXECUTION_FAILED``. Iterate over whatever tasks exist.
-            invalid_candidate = candidate.model_copy(
-                update={
-                    "tasks": [
-                        task.model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        )
-                        for task in candidate.tasks
-                    ]
-                }
-            )
+            invalid_candidate = self._over_budget_candidate(candidate, context)
             return AgentTurnResponse(
                 final=invalid_candidate,
                 usage=self._usage(),
@@ -717,21 +702,7 @@ class MockPlanningProvider:
                 ),
             }
         if "[mock:rule-repair]" in message or "[mock:rule-fallback]" in message:
-            # PR-9c.2 Stage B repair-path fault-injection (see note on the
-            # generate_agent_turn branch above): inflate every task's
-            # estimated_minutes past the budget so the rule validator fires.
-            # Originally hard-coded to ``tasks[0]`` / ``tasks[1]`` which
-            # assumed ≥2 tasks.
-            invalid_candidate = candidate.model_copy(
-                update={
-                    "tasks": [
-                        task.model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        )
-                        for task in candidate.tasks
-                    ]
-                }
-            )
+            invalid_candidate = self._over_budget_candidate(candidate, context)
             return ProviderPlanResponse(
                 candidate=invalid_candidate, usage=self._usage()
             ).model_dump(mode="json")
@@ -786,73 +757,117 @@ class MockPlanningProvider:
         del candidate, repair_instructions, evidence_catalog
         repaired = self._candidate(context, replan_mode)
         if "[mock:rule-fallback]" in message:
-            repaired = repaired.model_copy(
-                update={
-                    "tasks": [
-                        repaired.tasks[0].model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        ),
-                        repaired.tasks[1].model_copy(
-                            update={"estimated_minutes": context.time_budget_minutes}
-                        ),
-                    ]
-                }
-            )
+            repaired = self._over_budget_candidate(repaired, context)
         return ProviderPlanResponse(
             candidate=repaired,
             usage=self._usage(tokens_in=250, tokens_out=400),
         ).model_dump(mode="json")
 
-    def _candidate(self, context: PlanningContext, replan_mode: ReplanMode) -> PlanCandidate:
+    def _candidate(
+        self, context: PlanningContext, replan_mode: ReplanMode
+    ) -> PlanCandidate:
         window = context.planning_window
+        weekly_templates = [
+            ("明确目标岗位与能力差距", "形成岗位要求与能力差距清单"),
+            ("完成可展示的项目核心增量", "产出可运行、可验证的项目成果"),
+            ("沉淀简历与项目表达材料", "形成可投递的简历项目描述"),
+            ("开展模拟面试并验证准备效果", "完成复盘记录并修正薄弱点"),
+            ("扩大岗位样本并校准投递方向", "形成目标岗位优先级列表"),
+            ("强化高频面试专题与表达", "完成一轮专题问答演练"),
+            ("集中投递并跟踪反馈", "形成投递与反馈跟踪表"),
+            ("复盘结果并确定下一阶段策略", "形成下一阶段行动决策"),
+        ]
         if replan_mode == ReplanMode.CONTINUE and context.source_plan is not None:
-            weekly = [
+            source_weekly = [
                 WeeklyFocusCandidate.model_validate(item.model_dump())
-                for item in context.source_plan.weekly_focus[: window.horizon_weeks]
+                for item in context.source_plan.weekly_focus[
+                    : window.horizon_weeks
+                ]
             ]
-            while len(weekly) < window.horizon_weeks:
-                index = len(weekly) + 1
-                weekly.append(
+            weekly = (
+                source_weekly
+                if len(source_weekly) == window.horizon_weeks
+                and len({item.focus for item in source_weekly}) == len(source_weekly)
+                else [
                     WeeklyFocusCandidate(
                         week_index=index,
-                        focus=f"第 {index} 周继续推进可验证的求职准备成果",
-                        success_signal=f"第 {index} 周产出可展示证据",
+                        focus=weekly_templates[index - 1][0],
+                        success_signal=weekly_templates[index - 1][1],
                     )
-                )
+                    for index in range(1, window.horizon_weeks + 1)
+                ]
+            )
         else:
             weekly = [
                 WeeklyFocusCandidate(
                     week_index=index,
-                    focus=f"第 {index} 周完成一个可验证的求职准备增量",
-                    success_signal=f"第 {index} 周产出可展示证据",
+                    focus=weekly_templates[index - 1][0],
+                    success_signal=weekly_templates[index - 1][1],
                 )
                 for index in range(1, window.horizon_weeks + 1)
             ]
-        first_minutes = max(5, min(30, context.time_budget_minutes // 2))
-        remaining = max(5, min(30, context.time_budget_minutes - first_minutes))
+        daily_templates = [
+            (
+                "梳理目标岗位要求",
+                TaskType.LEARNING,
+                "1. 收集3份目标岗位JD；2. 标出重复的技能、项目和学历要求；3. 按出现次数排序",
+                "岗位要求表，至少包含3份JD、10项要求及出现频次",
+            ),
+            (
+                "盘点当前能力差距",
+                TaskType.LEARNING,
+                "1. 将要求分成已掌握、待补和可证明；2. 给待补项标优先级；3. 选出本周首要差距",
+                "能力差距表，包含优先级、现有证据和本周首要补齐项",
+            ),
+            (
+                "完成最小项目增量",
+                TaskType.PROJECT,
+                "1. 选择首要差距对应的项目功能；2. 先写验收用例；3. 实现最小闭环并提交",
+                "一次代码提交，包含可运行功能、至少1个自动化测试和运行说明",
+            ),
+            (
+                "验证并记录项目结果",
+                TaskType.PROJECT,
+                "1. 运行项目和测试；2. 保存关键输入输出；3. 记录失败原因、修复动作和最终结果",
+                "验证记录，包含测试命令、通过结果以及截图或关键日志",
+            ),
+            (
+                "整理简历项目表达",
+                TaskType.RESUME,
+                "1. 用背景、行动、结果重写项目经历；2. 补充技术取舍；3. 压缩成3至4条要点",
+                "3至4条可直接放入简历的项目描述，每条包含动作和结果",
+            ),
+            (
+                "演练项目面试问答",
+                TaskType.INTERVIEW,
+                "1. 准备架构、难点、取舍各1题；2. 每题限时2分钟口述；3. 重答含糊部分",
+                "3组项目问答记录，每组包含首答问题和改进后的答案",
+            ),
+            (
+                "复盘本周并安排下一步",
+                TaskType.OTHER,
+                "1. 汇总前6天产物；2. 标记完成、阻碍和欠账；3. 确定下周第一项可执行任务",
+                "周复盘，包含完成清单、最多3个阻碍和下一步行动",
+            ),
+        ]
+        minutes = max(5, min(45, context.time_budget_minutes))
         tasks = [
             TaskCandidate(
-                title="梳理目标岗位能力差距",
-                task_type=TaskType.LEARNING,
-                scheduled_date=window.planning_date,
-                starter_action="打开岗位描述并标出三个高频能力词",
-                deliverable="一份包含三个能力差距的清单",
-                estimated_minutes=first_minutes,
-                rationale="先明确可验证的准备重点",
+                title=title,
+                task_type=task_type,
+                scheduled_date=window.planning_date + timedelta(days=day_offset),
+                starter_action=starter_action,
+                deliverable=(
+                    f"{(window.planning_date + timedelta(days=day_offset)).isoformat()} "
+                    f"{deliverable}"
+                ),
+                estimated_minutes=minutes,
+                rationale="结合当前目标、每日预算和近期执行事实推进下一项可验证成果",
+            )
+            for day_offset, (title, task_type, starter_action, deliverable) in enumerate(
+                daily_templates
             )
         ]
-        if first_minutes + remaining <= context.time_budget_minutes:
-            tasks.append(
-                TaskCandidate(
-                    title="完成一个最小项目增量",
-                    task_type=TaskType.PROJECT,
-                    scheduled_date=window.planning_date,
-                    starter_action="打开项目并选择一个可以在今天闭环的小改动",
-                    deliverable="一个可运行且有测试结果的项目增量",
-                    estimated_minutes=remaining,
-                    rationale="把学习内容转成可展示证据",
-                )
-            )
         adjustment_reason = None
         if replan_mode == ReplanMode.ADJUST:
             review = context.source_review
@@ -875,13 +890,41 @@ class MockPlanningProvider:
                 else "在规划窗口内形成可展示项目证据并推进面试准备"
             ),
             weekly_focus=weekly,
-            summary="今天先完成能力差距梳理和一个可验证项目增量",
-            rationale="任务被限制在当前时间预算内，并同时覆盖方向判断与实际产出。",
+            summary="七天内按定位、项目、表达和复盘逐步推进",
+            rationale="每个日期只安排一个关键结果，并分别限制在每日时间预算内。",
             adjustment_reason=adjustment_reason,
             assumptions=["计划基于当前画像与每日时间预算"],
             tasks=tasks,
             evidence_refs=[],
         )
+
+    @staticmethod
+    def _over_budget_candidate(
+        candidate: PlanCandidate,
+        context: PlanningContext,
+    ) -> PlanCandidate:
+        if len(candidate.tasks) < 2:
+            return candidate.model_copy(
+                update={
+                    "tasks": [
+                        candidate.tasks[0].model_copy(
+                            update={"estimated_minutes": context.time_budget_minutes + 1}
+                        )
+                    ]
+                }
+            )
+        first_date = candidate.tasks[0].scheduled_date
+        invalid = list(candidate.tasks)
+        invalid[0] = invalid[0].model_copy(
+            update={"estimated_minutes": context.time_budget_minutes}
+        )
+        invalid[1] = invalid[1].model_copy(
+            update={
+                "scheduled_date": first_date,
+                "estimated_minutes": context.time_budget_minutes,
+            }
+        )
+        return candidate.model_copy(update={"tasks": invalid})
 
     def _usage(self, *, tokens_in: int = 300, tokens_out: int = 450) -> ProviderUsage:
         return ProviderUsage(

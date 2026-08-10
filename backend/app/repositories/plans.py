@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.plan import CompanionMessage, Plan, Task
@@ -112,17 +112,15 @@ class PlanRepository:
         *,
         user_id: UUID,
         plan_id: UUID,
-        scheduled_date: date,
+        scheduled_date: date | None,
     ) -> dict[str, int]:
-        result = await self._session.execute(
-            select(Task.state, func.count(Task.id))
-            .where(
-                Task.user_id == user_id,
-                Task.plan_id == plan_id,
-                Task.scheduled_date == scheduled_date,
-            )
-            .group_by(Task.state)
+        statement = select(Task.state, func.count(Task.id)).where(
+            Task.user_id == user_id,
+            Task.plan_id == plan_id,
         )
+        if scheduled_date is not None:
+            statement = statement.where(Task.scheduled_date == scheduled_date)
+        result = await self._session.execute(statement.group_by(Task.state))
         return {state: count for state, count in result.all()}
 
     async def recent_task_states(self, user_id: UUID, *, limit: int = 2) -> list[str]:
@@ -143,7 +141,16 @@ class PlanRepository:
         result = await self._session.execute(
             select(Task)
             .where(Task.user_id == user_id)
-            .order_by(Task.updated_at.desc(), Task.id.desc())
+            .order_by(
+                case(
+                    (Task.state == "completed", 0),
+                    (Task.state == "abandoned", 1),
+                    (Task.state == "in_progress", 2),
+                    else_=3,
+                ),
+                Task.updated_at.desc(),
+                Task.id.desc(),
+            )
             .limit(limit)
         )
         return list(result.scalars())

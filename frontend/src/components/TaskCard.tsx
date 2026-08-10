@@ -147,6 +147,12 @@ export function TaskCard({
           <span className="text-muted-foreground">完成标志：</span>
           {task.deliverable}
         </div>
+        {task.rationale && (
+          <div className="text-sm">
+            <span className="text-muted-foreground">为什么现在做：</span>
+            {task.rationale}
+          </div>
+        )}
 
         {updateTask.isError && (
           <div className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">

@@ -111,8 +111,8 @@ export function PlansPage(): JSX.Element {
       )}
 
       <div className="flex flex-wrap gap-3">
-        <Button asChild><Link to="/today">回到今天 <ArrowRight className="h-4 w-4" /></Link></Button>
-        <Button asChild variant="outline"><Link to={`/journey/${plan.plan_id}`}>查看安排依据与来源</Link></Button>
+        <Button asChild><Link to={`/journey/${plan.plan_id}`}>查看每日计划 <ArrowRight className="h-4 w-4" /></Link></Button>
+        <Button asChild variant="outline"><Link to="/today">去完成今天</Link></Button>
       </div>
 
       {history.length > 0 && <HistoryList plans={history} />}

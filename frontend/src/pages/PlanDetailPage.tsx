@@ -1,7 +1,7 @@
 import { ArrowLeft, ExternalLink, Lightbulb, Link2 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { usePlan } from "@/api/plans";
-import { TaskCard } from "@/components/TaskCard";
+import { WeeklyTaskSchedule } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PLAN_STATUS_LABELS } from "@/lib/labels";
@@ -30,11 +30,13 @@ export function PlanDetailPage(): JSX.Element {
       </Card>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">周路线</h2>
-        <Card><CardContent className="space-y-5 p-5 sm:p-6">{plan.weekly_focus.map((item) => <div key={item.week_index} className="border-b pb-5 last:border-0 last:pb-0"><div className="text-sm font-semibold text-primary">第 {item.week_index} 周</div><p className="mt-1 text-sm leading-6">{item.focus}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">成功信号：{item.success_signal}</p></div>)}</CardContent></Card>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">从 {plan.plan_date} 开始</p>
+          <h2 className="mt-1 text-lg font-semibold">每日计划</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">每天只安排一个关键结果；任务状态只记录在对应日期。</p>
+        </div>
+        <WeeklyTaskSchedule startDate={plan.plan_date} tasks={plan.tasks} detailed />
       </section>
-
-      {plan.tasks.length > 0 && <section className="space-y-3"><h2 className="text-lg font-semibold">这份路线已展开的行动</h2><div className="space-y-3">{plan.tasks.map((task) => <TaskCard key={task.task_id} task={task} />)}</div></section>}
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">安排依据与来源</h2>

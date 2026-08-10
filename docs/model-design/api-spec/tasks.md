@@ -35,6 +35,7 @@ Query：
 - completed 需要 actual_minutes；
 - abandoned 需要 abandoned_reason；other 时还需 reason_text；
 - 首个任务开始时，同事务把计划 generated→active 并写 adopted_at。
+- 任务完成只更新它所属的 `scheduled_date`；Plan 只有在当前七天执行表的全部 Task 都完成后才进入 completed。
 
 ### Response 200
 

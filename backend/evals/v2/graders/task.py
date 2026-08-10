@@ -10,7 +10,7 @@ yields explicit hard-gate failures on intent_result_kind / allowed_run_status.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -68,11 +68,12 @@ def _not_applicable(name: str, evidence_ids: list[UUID], rationale: str) -> Grad
 
 
 def _horizon_in_window(plan: dict[str, object]) -> bool:
-    """Mirror HORIZON_MATCH: every scheduled_date falls in [horizon_start, horizon_end]."""
+    """Every scheduled date must fall in the current seven-day action window."""
 
     try:
-        start = date.fromisoformat(str(plan["horizon_start"]))
-        end = date.fromisoformat(str(plan["horizon_end"]))
+        start = date.fromisoformat(str(plan.get("plan_date", plan["horizon_start"])))
+        horizon_end = date.fromisoformat(str(plan["horizon_end"]))
+        end = min(start + timedelta(days=6), horizon_end)
         tasks = as_dict_list(plan.get("tasks", []))
         if not tasks:
             return False
@@ -95,8 +96,13 @@ def _within_budget(tasks: list[dict[str, object]], budget: int | None) -> bool:
         return False
     if budget is None:
         return True
-    total = sum(as_int(t.get("estimated_minutes", 0)) for t in tasks if isinstance(t, dict))
-    return total <= budget
+    per_day: dict[str, int] = {}
+    for task in tasks:
+        scheduled = str(task.get("scheduled_date", ""))
+        per_day[scheduled] = per_day.get(scheduled, 0) + as_int(
+            task.get("estimated_minutes", 0)
+        )
+    return all(total <= budget for total in per_day.values())
 
 
 def _startability(tasks: list[dict[str, object]]) -> bool:
@@ -162,6 +168,15 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
             return None
         return scenario.profile.time_budget_minutes
 
+    def _minutes_by_day() -> dict[str, int]:
+        per_day: dict[str, int] = {}
+        for task in outcome.tasks:
+            scheduled = str(task.get("scheduled_date", ""))
+            per_day[scheduled] = per_day.get(scheduled, 0) + as_int(
+                task.get("estimated_minutes", 0)
+            )
+        return per_day
+
     if applicable:
         # 3. horizon_match
         plan = outcome.plan or {}
@@ -169,27 +184,30 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
             name="horizon_match",
             passed=_horizon_in_window({**plan, "tasks": outcome.tasks}),
             actual=sorted({str(t.get("scheduled_date")) for t in outcome.tasks}),
-            expected=f"within [{plan.get('horizon_start')}, {plan.get('horizon_end')}]",
+            expected=(
+                "within the 7-day action window from "
+                f"{plan.get('plan_date', plan.get('horizon_start'))}"
+            ),
             evidence_ids=task_ids,
-            rationale="every task scheduled_date must fall in the plan horizon window",
+            rationale="every task scheduled_date must fall in the seven-day action window",
         ))
         # 4. task_count
         results.append(_boolean_grade(
             name="task_count",
-            passed=1 <= len(outcome.tasks) <= 3,
-            actual=len(outcome.tasks), expected="1 <= count <= 3",
+            passed=1 <= len(outcome.tasks) <= 7,
+            actual=len(outcome.tasks), expected="1 <= count <= 7",
             evidence_ids=task_ids,
-            rationale="a plan must carry between one and three executable tasks",
+            rationale="a plan may carry up to seven executable tasks for its action week",
         ))
         # 5. time_budget
         budget = _budget()
         results.append(_boolean_grade(
             name="time_budget",
             passed=_within_budget(outcome.tasks, budget),
-            actual=sum(as_int(t.get("estimated_minutes", 0)) for t in outcome.tasks),
-            expected=f"<= {budget}" if budget is not None else "(no profile budget)",
+            actual=_minutes_by_day(),
+            expected=f"each day <= {budget}" if budget is not None else "(no profile budget)",
             evidence_ids=task_ids + ([profile_id] if profile_id else []),
-            rationale="plan tasks must fit the profile time budget",
+            rationale="each scheduled day must fit the profile daily time budget",
         ))
         # 6. startability
         results.append(_boolean_grade(

@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { useCreateRun } from "@/api/agent-runs";
+import { useMe } from "@/api/auth";
+import { usePlans } from "@/api/plans";
 import { usePatchProfile, useProfile } from "@/api/profile";
 import type { CareerStage, GoalType, SkillLevel } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -16,7 +19,10 @@ const TIME_OPTIONS = [30, 45, 60, 90, 120];
 
 export function ProfileSettingsPage(): JSX.Element {
   const profile = useProfile();
+  const me = useMe();
+  const plans = usePlans();
   const patchProfile = usePatchProfile();
+  const createRun = useCreateRun();
   const navigate = useNavigate();
   const [goalType, setGoalType] = useState<GoalType>("agent_app");
   const [stage, setStage] = useState<CareerStage>("preparing");
@@ -39,13 +45,17 @@ export function ProfileSettingsPage(): JSX.Element {
     return <div className="text-sm text-muted-foreground">正在加载画像…</div>;
   }
 
-  const error = patchProfile.error === null ? null : toUserFacingError(patchProfile.error);
+  const mutationError = createRun.error ?? patchProfile.error;
+  const error = mutationError === null ? null : toUserFacingError(mutationError);
+  const sourcePlan = me.data?.active_plan
+    ?? plans.data?.items.find((plan) => ["generated", "active", "completed"].includes(plan.status))
+    ?? null;
+  const isPending = patchProfile.isPending || createRun.isPending;
 
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    if (profile.data === undefined || patchProfile.isPending) return;
-    patchProfile.mutate(
-      {
+  async function save(regeneratePlan: boolean): Promise<void> {
+    if (profile.data === undefined || isPending) return;
+    try {
+      const updated = await patchProfile.mutateAsync({
         payload: {
           version: profile.data.version,
           goal_type: goalType,
@@ -55,10 +65,25 @@ export function ProfileSettingsPage(): JSX.Element {
           deadline: deadline || null,
           skill_summary: skillSummary.trim() || null,
         },
-        idempotencyKey: `profile-patch-${profile.data.version}`,
-      },
-      { onSuccess: () => navigate("/me") },
-    );
+        idempotencyKey: `profile-patch-${profile.data.version}-${regeneratePlan ? "replan" : "save"}`,
+      });
+      if (regeneratePlan && sourcePlan !== null) {
+        const created = await createRun.mutateAsync({
+          payload: {
+            message: `我已更新求职画像：目标为${GOAL_LABELS[updated.goal_type]}，当前阶段为${STAGE_LABELS[updated.stage]}，每天可投入${updated.time_budget_minutes}分钟。请结合当前计划中已经完成、进行中和放弃的任务，调整后续路线并生成新的七天每日计划。`,
+            hint_intent: "replan",
+            goal_type_override: updated.goal_type,
+            source_plan_id: sourcePlan.plan_id,
+          },
+          idempotencyKey: `profile-replan-${updated.version}-${sourcePlan.plan_id}`,
+        });
+        navigate(`/today?run_id=${created.run_id}`);
+        return;
+      }
+      navigate("/me");
+    } catch {
+      // Mutation hooks retain the API error for the inline error panel.
+    }
   }
 
   return (
@@ -69,11 +94,11 @@ export function ProfileSettingsPage(): JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">目标与时间</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          计划会按这里的目标和每日时间控制任务强度。
+          计划会按这里的目标和每日时间控制任务强度；已有计划需要确认后才会重新生成。
         </p>
       </header>
 
-      <form onSubmit={submit}>
+      <form onSubmit={(event) => event.preventDefault()}>
         <Card>
           <CardHeader><CardTitle className="text-lg">当前画像</CardTitle></CardHeader>
           <CardContent className="space-y-5">
@@ -156,9 +181,21 @@ export function ProfileSettingsPage(): JSX.Element {
               </div>
             )}
 
-            <Button className="w-full sm:w-auto" type="submit" disabled={patchProfile.isPending || timeBudget < 15 || timeBudget > 480}>
-              {patchProfile.isPending ? "保存中…" : "保存调整"}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {sourcePlan !== null && (
+                <Button type="button" variant="outline" onClick={() => void save(false)} disabled={isPending || timeBudget < 15 || timeBudget > 480}>
+                  仅保存资料
+                </Button>
+              )}
+              <Button type="button" onClick={() => void save(sourcePlan !== null)} disabled={isPending || timeBudget < 15 || timeBudget > 480}>
+                {isPending ? "处理中…" : sourcePlan !== null ? "保存并按当前进度重新规划" : "保存调整"}
+              </Button>
+            </div>
+            {sourcePlan !== null && (
+              <p className="text-xs leading-5 text-muted-foreground">
+                重新规划会读取最近计划中的完成、进行中和放弃记录；新计划成功后，来源计划会归档。
+              </p>
+            )}
           </CardContent>
         </Card>
       </form>
