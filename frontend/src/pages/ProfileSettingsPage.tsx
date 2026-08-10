@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { useCreateRun } from "@/api/agent-runs";
+import { useCreateGoalBrief } from "@/api/goal-briefs";
 import { useMe } from "@/api/auth";
 import { usePlans } from "@/api/plans";
 import { usePatchProfile, useProfile } from "@/api/profile";
@@ -22,7 +22,7 @@ export function ProfileSettingsPage(): JSX.Element {
   const me = useMe();
   const plans = usePlans();
   const patchProfile = usePatchProfile();
-  const createRun = useCreateRun();
+  const createGoalBrief = useCreateGoalBrief();
   const navigate = useNavigate();
   const [goalType, setGoalType] = useState<GoalType>("agent_app");
   const [stage, setStage] = useState<CareerStage>("preparing");
@@ -45,12 +45,12 @@ export function ProfileSettingsPage(): JSX.Element {
     return <div className="text-sm text-muted-foreground">正在加载画像…</div>;
   }
 
-  const mutationError = createRun.error ?? patchProfile.error;
+  const mutationError = createGoalBrief.error ?? patchProfile.error;
   const error = mutationError === null ? null : toUserFacingError(mutationError);
   const sourcePlan = me.data?.active_plan
     ?? plans.data?.items.find((plan) => ["generated", "active", "completed"].includes(plan.status))
     ?? null;
-  const isPending = patchProfile.isPending || createRun.isPending;
+  const isPending = patchProfile.isPending || createGoalBrief.isPending;
 
   async function save(regeneratePlan: boolean): Promise<void> {
     if (profile.data === undefined || isPending) return;
@@ -68,16 +68,15 @@ export function ProfileSettingsPage(): JSX.Element {
         idempotencyKey: `profile-patch-${profile.data.version}-${regeneratePlan ? "replan" : "save"}`,
       });
       if (regeneratePlan && sourcePlan !== null) {
-        const created = await createRun.mutateAsync({
+        await createGoalBrief.mutateAsync({
           payload: {
             message: `我已更新求职画像：目标为${GOAL_LABELS[updated.goal_type]}，当前阶段为${STAGE_LABELS[updated.stage]}，每天可投入${updated.time_budget_minutes}分钟。请结合当前计划中已经完成、进行中和放弃的任务，调整后续路线并生成新的七天每日计划。`,
             hint_intent: "replan",
-            goal_type_override: updated.goal_type,
             source_plan_id: sourcePlan.plan_id,
           },
           idempotencyKey: `profile-replan-${updated.version}-${sourcePlan.plan_id}`,
         });
-        navigate(`/today?run_id=${created.run_id}`);
+        navigate("/today");
         return;
       }
       navigate("/me");
@@ -188,12 +187,12 @@ export function ProfileSettingsPage(): JSX.Element {
                 </Button>
               )}
               <Button type="button" onClick={() => void save(sourcePlan !== null)} disabled={isPending || timeBudget < 15 || timeBudget > 480}>
-                {isPending ? "处理中…" : sourcePlan !== null ? "保存并按当前进度重新规划" : "保存调整"}
+                {isPending ? "处理中…" : sourcePlan !== null ? "保存并整理重新规划目标" : "保存调整"}
               </Button>
             </div>
             {sourcePlan !== null && (
               <p className="text-xs leading-5 text-muted-foreground">
-                重新规划会读取最近计划中的完成、进行中和放弃记录；新计划成功后，来源计划会归档。
+                保存后会先展示重新规划目标供你确认；确认后读取完成、进行中和放弃记录并生成新计划。
               </p>
             )}
           </CardContent>

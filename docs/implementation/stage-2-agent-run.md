@@ -28,7 +28,7 @@
 
 ### API
 
-- POST `/api/v1/agent-runs`
+- 内部 `AgentRunService.create` 命令（面向用户的创建只能由 Goal Brief 确认或复盘流程触发）
 - GET `/api/v1/agent-runs/{id}`
 - GET `/api/v1/agent-runs/{id}/events`
 - POST `/api/v1/agent-runs/{id}/cancel`
@@ -99,7 +99,7 @@ Stage 2 `available_tools=[]`，不实现检索 Tool；但 tool_calls 表和 Regi
 
 ## 验收
 
-- happy path 产生 1 个带 planning window/weekly_focus 的计划和当天 1~3 个任务；
+- happy path 产生 1 个带 planning window/weekly_focus 的计划，以及从当天开始连续 7 天、每天 1 个任务；
 - completed 必有 result_kind=plan/final_plan_id；
 - degraded clarification/safe_response 刷新后仍可恢复；
 - SSE 事件顺序稳定，terminal event 唯一；

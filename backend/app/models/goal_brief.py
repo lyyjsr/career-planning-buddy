@@ -37,6 +37,11 @@ class GoalBrief(Base):
             "duration_weeks IS NULL OR duration_weeks BETWEEN 1 AND 8",
             name="ck_goal_briefs_duration",
         ),
+        CheckConstraint(
+            "objective_type IS NULL OR objective_type IN "
+            "('career_plan','project','application','interview','skill_transition')",
+            name="ck_goal_briefs_objective_type",
+        ),
         CheckConstraint("version >= 1", name="ck_goal_briefs_version"),
         Index(
             "uq_goal_briefs_one_active_per_user",
@@ -60,8 +65,9 @@ class GoalBrief(Base):
         PostgreSQLUUID(as_uuid=True), ForeignKey("plans.id")
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    objective_type: Mapped[str | None] = mapped_column(String(32))
     target_role: Mapped[str | None] = mapped_column(String(120))
-    project_goal: Mapped[str | None] = mapped_column(String(500))
+    objective: Mapped[str | None] = mapped_column(String(500))
     capability_focus_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     tech_stack_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     duration_weeks: Mapped[int | None] = mapped_column(SmallInteger)

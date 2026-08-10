@@ -1,12 +1,12 @@
 # Agent Run API
 
-面向用户的计划创建入口先使用 `/api/v1/goal-briefs` 完成澄清与确认；确认接口才会创建本页定义的 Agent Run。直接创建 Agent Run 的接口保留给内部流程、复盘续接和兼容调用。
+面向用户的计划创建入口必须先使用 `/api/v1/goal-briefs` 完成澄清与确认；确认接口才会创建本页定义的 Agent Run。HTTP API 不提供直接创建 Agent Run 的端点。复盘续接等受控流程调用内部 `AgentRunService.create` 命令，并自行承担明确的用户确认语义。
 
-## POST /api/v1/agent-runs
+## 内部 Agent Run 创建命令
 
-创建规划或重规划 Run。需要 JWT 与 `Idempotency-Key`。
+创建规划或重规划 Run。它不是公开 HTTP 接口，只能由 Goal Brief 确认事务或受控复盘流程调用。
 
-### Request
+### 命令输入
 
 ```json
 {
@@ -43,7 +43,7 @@ Run 返回结构化页面导航，不调用规划模型，也不创建新 Plan�
 5. 生成并冻结 `graph_version/config_snapshot_json`；
 6. 创建 `agent_runs(pending)` 后提交执行器。
 
-### Response 202
+### 创建结果
 
 ```json
 {
@@ -53,7 +53,7 @@ Run 返回结构化页面导航，不调用规划模型，也不创建新 Plan�
 }
 ```
 
-重复 `(user_id, Idempotency-Key)` 返回原 Run；同用户已有活动 Run 返回 409。
+重复 `(user_id, Idempotency-Key)` 返回原 Run；同用户已有活动 Run 返回冲突。普通客户端向 `POST /api/v1/agent-runs` 发起请求时返回 404，不能通过拼装请求绕过确认门禁。
 
 ## GET /api/v1/agent-runs/{run_id}
 

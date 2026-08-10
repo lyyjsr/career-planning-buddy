@@ -23,10 +23,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.nodes import HIGH_RISK_PATTERNS
 from app.models.agent_run import AgentEvent, AgentStep
 from app.models.evidence import Memory
 from app.models.plan import Plan, Task
+from app.services.input_safety import HIGH_RISK_PATTERNS
 from evals.v2.collectors.outcome import (
     RunOutcome,
     _plan_projection,

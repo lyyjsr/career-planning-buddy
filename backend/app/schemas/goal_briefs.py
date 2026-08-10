@@ -8,12 +8,13 @@ from pydantic import Field
 
 from app.schemas.agent_runs import AgentRunCreatedResponse
 from app.schemas.base import StrictModel
-from app.schemas.enums import GoalBriefStatus
+from app.schemas.enums import GoalBriefStatus, ObjectiveType
 
 
 class GoalExtraction(StrictModel):
+    objective_type: ObjectiveType | None = None
     target_role: str | None = Field(default=None, max_length=120)
-    project_goal: str | None = Field(default=None, max_length=500)
+    objective: str | None = Field(default=None, max_length=500)
     capability_focus: list[str] = Field(default_factory=list, max_length=8)
     tech_stack: list[str] = Field(default_factory=list, max_length=12)
     duration_weeks: int | None = Field(default=None, ge=1, le=8)
@@ -42,8 +43,9 @@ class GoalBriefResponse(StrictModel):
     source_message: str
     hint_intent: Literal["create_plan", "replan"]
     source_plan_id: UUID | None
+    objective_type: ObjectiveType | None
     target_role: str | None
-    project_goal: str | None
+    objective: str | None
     capability_focus: list[str]
     tech_stack: list[str]
     duration_weeks: int | None

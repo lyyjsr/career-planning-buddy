@@ -22,13 +22,6 @@ from app.schemas.enums import (
 )
 
 
-class AgentRunCreateRequest(StrictModel):
-    message: str = Field(min_length=1, max_length=2000)
-    hint_intent: Literal["create_plan", "replan"] | None = None
-    goal_type_override: GoalType | None = None
-    source_plan_id: UUID | None = None
-
-
 class AgentRunCreatedResponse(StrictModel):
     run_id: UUID
     status: RunStatus
@@ -51,6 +44,7 @@ class PlanResultSummary(StrictModel):
     plan_date: date
     horizon_end: date
     summary: str = Field(min_length=1, max_length=500)
+    # Historical Runs may predate the strict seven-day generation contract.
     task_count: int = Field(ge=1, le=7)
 
 

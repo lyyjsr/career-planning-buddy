@@ -950,11 +950,9 @@ class PairSmokePlanningProvider(MockPlanningProvider):
     * no import of ``evals.*`` (provider layer stays below evals runtime)
 
     Two profiles:
-      * ``compact_v1``  — single high-leverage task, terse summary,
-                          aggressive horizon focus.
-      * ``structured_v1``— three explicitly-staged tasks, verbose
-                           summary anchoring the structure, longer
-                           horizon narrative.
+      * ``compact_v1``  — seven terse, high-leverage daily tasks.
+      * ``structured_v1``— seven explicitly-staged daily tasks with
+                           richer decomposition and rationale.
 
     Differences are REAL (actionability, clarity, decomposition), not
     numeric noise. Both summaries differ in wording so ``PLAN_PROJECTION``
@@ -1042,19 +1040,20 @@ class PairSmokePlanningProvider(MockPlanningProvider):
         if self._profile == "compact_v1":
             tasks = [
                 TaskCandidate(
-                    title="闭环一个可展示求职准备增量",
+                    title=f"第 {day + 1} 天闭环一个求职准备增量",
                     task_type=TaskType.PROJECT,
-                    scheduled_date=window.planning_date,
+                    scheduled_date=window.planning_date + timedelta(days=day),
                     starter_action="选择一个能在今天闭环的小改动并执行",
-                    deliverable="一个可运行且有测试结果的项目增量",
+                    deliverable=f"第 {day + 1} 天可验证的求职准备增量",
                     estimated_minutes=max(
                         5, min(30, context.time_budget_minutes)
                     ),
                     rationale="把准备动作压缩为最小可展示单位",
                 )
+                for day in range(7)
             ]
             summary = (
-                f"[compact_v1] 单任务版本:本周聚焦一次可闭环的项目增量,"
+                f"[compact_v1] 七天精简版本:每天闭环一个高杠杆增量,"
                 f"在 {window.horizon_weeks} 周窗口内形成一条清晰的证据线"
             )
             rationale = (
@@ -1062,52 +1061,29 @@ class PairSmokePlanningProvider(MockPlanningProvider):
                 "牺牲分解粒度换取执行确定性"
             )
         else:  # structured_v1
-            first_minutes = max(
-                5, min(15, context.time_budget_minutes // 3)
-            )
-            second_minutes = max(
-                5, min(15, context.time_budget_minutes // 3)
-            )
-            third_minutes = max(
-                5,
-                min(
-                    15,
-                    context.time_budget_minutes
-                    - first_minutes
-                    - second_minutes,
-                ),
-            )
+            structured_templates = [
+                ("梳理目标岗位能力差距", TaskType.LEARNING, "一份包含三个能力差距的清单"),
+                ("确定七天优先级", TaskType.LEARNING, "一份七天行动优先级表"),
+                ("完成最小项目增量", TaskType.PROJECT, "一个可运行且有测试结果的项目增量"),
+                ("验证项目证据", TaskType.PROJECT, "一份包含测试结果的验证记录"),
+                ("整理简历表达", TaskType.RESUME, "三条包含动作和结果的简历要点"),
+                ("开展模拟面试", TaskType.INTERVIEW, "一份包含改进点的模拟面试记录"),
+                ("复盘并安排下一步", TaskType.LEARNING, "一份七天复盘和下一步清单"),
+            ]
             tasks = [
                 TaskCandidate(
-                    title="梳理目标岗位能力差距",
-                    task_type=TaskType.LEARNING,
-                    scheduled_date=window.planning_date,
-                    starter_action="打开岗位描述并标出三个高频能力词",
-                    deliverable="一份包含三个能力差距的清单",
-                    estimated_minutes=first_minutes,
-                    rationale="先明确可验证的准备重点",
-                ),
-                TaskCandidate(
-                    title="完成最小项目增量",
-                    task_type=TaskType.PROJECT,
-                    scheduled_date=window.planning_date,
-                    starter_action="选择一个能在今天闭环的小改动并执行",
-                    deliverable="一个可运行且有测试结果的项目增量",
-                    estimated_minutes=second_minutes,
-                    rationale="把学习内容转成可展示证据",
-                ),
-                TaskCandidate(
-                    title="复盘并产出可复用笔记",
-                    task_type=TaskType.LEARNING,
-                    scheduled_date=window.planning_date,
-                    starter_action="把今天的进展写成可复用的复盘要点",
-                    deliverable="一份三句话的可复用复盘笔记",
-                    estimated_minutes=third_minutes,
-                    rationale="为下一轮迭代沉淀明确输入",
-                ),
+                    title=title,
+                    task_type=task_type,
+                    scheduled_date=window.planning_date + timedelta(days=day),
+                    starter_action=f"按第 {day + 1} 天模板执行并记录关键过程",
+                    deliverable=f"第 {day + 1} 天：{deliverable}",
+                    estimated_minutes=max(5, min(30, context.time_budget_minutes)),
+                    rationale="按岗位差距、实践证据、表达和复盘的显式链条推进",
+                )
+                for day, (title, task_type, deliverable) in enumerate(structured_templates)
             ]
             summary = (
-                f"[structured_v1] 三任务分解版本:本周按学习→项目→复盘"
+                f"[structured_v1] 七天结构化版本:本周按差距→实践→表达→复盘"
                 f"的显式链条推进,在 {window.horizon_weeks} 周窗口内形成"
                 "可追溯的多步证据链"
             )

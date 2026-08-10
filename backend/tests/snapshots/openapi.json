@@ -174,59 +174,6 @@
         "title": "AgentRunCancelResponse",
         "type": "object"
       },
-      "AgentRunCreateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "goal_type_override": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/GoalType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "hint_intent": {
-            "anyOf": [
-              {
-                "enum": [
-                  "create_plan",
-                  "replan"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hint Intent"
-          },
-          "message": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
-          },
-          "source_plan_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Plan Id"
-          }
-        },
-        "required": [
-          "message"
-        ],
-        "title": "AgentRunCreateRequest",
-        "type": "object"
-      },
       "AgentRunCreatedResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2116,7 +2063,7 @@
             ],
             "title": "Model Id"
           },
-          "project_goal": {
+          "objective": {
             "anyOf": [
               {
                 "type": "string"
@@ -2125,7 +2072,17 @@
                 "type": "null"
               }
             ],
-            "title": "Project Goal"
+            "title": "Objective"
+          },
+          "objective_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectiveType"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "questions": {
             "items": {
@@ -2194,8 +2151,9 @@
           "source_message",
           "hint_intent",
           "source_plan_id",
+          "objective_type",
           "target_role",
-          "project_goal",
+          "objective",
           "capability_focus",
           "tech_stack",
           "duration_weeks",
@@ -2771,6 +2729,17 @@
           "adjust"
         ],
         "title": "NextPlanAction",
+        "type": "string"
+      },
+      "ObjectiveType": {
+        "enum": [
+          "career_plan",
+          "project",
+          "application",
+          "interview",
+          "skill_transition"
+        ],
+        "title": "ObjectiveType",
         "type": "string"
       },
       "PairwiseAnnotationListResponse": {
@@ -4868,95 +4837,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/agent-runs": {
-      "post": {
-        "operationId": "create_agent_run_api_v1_agent_runs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentRunCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentRunCreatedResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Agent Run",
-        "tags": [
-          "agent-runs"
-        ]
-      }
-    },
     "/api/v1/agent-runs/{run_id}": {
       "get": {
         "operationId": "get_agent_run_api_v1_agent_runs__run_id__get",

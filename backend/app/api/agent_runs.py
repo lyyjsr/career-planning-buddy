@@ -13,8 +13,6 @@ from app.core.security import AuthenticatedUser
 from app.schemas.agent_runs import (
     AgentRunCancelRequest,
     AgentRunCancelResponse,
-    AgentRunCreatedResponse,
-    AgentRunCreateRequest,
     AgentRunResponse,
 )
 from app.schemas.enums import RunStatus
@@ -22,40 +20,6 @@ from app.schemas.errors import ErrorResponse
 from app.services.agent_runs import AgentRunService
 
 router = APIRouter(prefix="/agent-runs", tags=["agent-runs"])
-
-
-@router.post(
-    "",
-    status_code=HTTPStatus.ACCEPTED,
-    response_model=AgentRunCreatedResponse,
-    responses={
-        401: {"model": ErrorResponse},
-        404: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-    },
-)
-async def create_agent_run(
-    payload: AgentRunCreateRequest,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
-    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=64)],
-) -> AgentRunCreatedResponse:
-    run = await service.create(
-        user_id=current_user.id,
-        message=payload.message,
-        hint_intent=payload.hint_intent,
-        goal_type_override=(
-            payload.goal_type_override.value if payload.goal_type_override else None
-        ),
-        source_plan_id=payload.source_plan_id,
-        idempotency_key=idempotency_key,
-    )
-    return AgentRunCreatedResponse(
-        run_id=run.id,
-        status=RunStatus(run.status),
-        events_url=f"/api/v1/agent-runs/{run.id}/events",
-    )
 
 
 @router.get(

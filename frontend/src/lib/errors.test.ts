@@ -28,6 +28,15 @@ describe("toUserFacingError", () => {
     expect(result.action).toBe("refresh");
   });
 
+  it("shows a fixed safety response for high-risk goal input", () => {
+    const result = toUserFacingError(
+      new ApiError(422, "SAFETY_HIGH_RISK_INPUT", "raw", "request-safe"),
+    );
+    expect(result.title).toBe("请先确保你现在是安全的");
+    expect(result.message).toContain("当地紧急服务");
+    expect(result.message).not.toContain("raw");
+  });
+
   it("reads the shared backend error envelope", async () => {
     vi.stubGlobal(
       "fetch",

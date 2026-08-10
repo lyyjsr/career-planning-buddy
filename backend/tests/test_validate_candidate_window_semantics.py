@@ -1,8 +1,4 @@
-"""Guards for the multi-day SCHEDULE_DATE / per-day TIME_BUDGET validator semantics.
-
-These tests pin the bug fix that lets a real LLM spread tasks across the
-1~8 week planning window while still enforcing each individual day's budget.
-"""
+"""Guards for the exact seven-day daily action contract."""
 
 from datetime import date, timedelta
 from uuid import uuid4
@@ -80,16 +76,24 @@ def _failed_codes(report: ValidationReport) -> list[str]:
     return [check.code for check in report.checks if not check.passed]
 
 
+def _daily_tasks(context: PlanningContext, minutes: int = 30) -> list[TaskCandidate]:
+    return [
+        _task(
+            context.planning_window.planning_date + timedelta(days=offset),
+            minutes,
+            title=f"day-{offset + 1}",
+            deliverable=f"deliverable-{offset + 1}",
+        )
+        for offset in range(7)
+    ]
+
+
 # 1. 旧语义（单日多 task 总和超预算）依然要失败 —— 守护预算硬约束没被放开
 def test_single_day_over_budget_still_fails() -> None:
     context = _context(daily_budget=60)
-    plan = _candidate(
-        context,
-        [
-            _task(context.planning_window.planning_date, 40, title="a", deliverable="da"),
-            _task(context.planning_window.planning_date, 40, title="b", deliverable="db"),
-        ],
-    )
+    tasks = _daily_tasks(context)
+    tasks[0] = tasks[0].model_copy(update={"estimated_minutes": 61})
+    plan = _candidate(context, tasks)
     report = validate_candidate(plan, context)
     assert report.passed is False
     assert "TIME_BUDGET" in _failed_codes(report)
@@ -98,14 +102,7 @@ def test_single_day_over_budget_still_fails() -> None:
 # 2. 新语义：窗口内多日任务（每天各自不超预算）必须通过 —— 守护修复本身
 def test_multi_day_in_window_within_daily_budget_passes() -> None:
     context = _context(daily_budget=60)
-    window = context.planning_window
-    plan = _candidate(
-        context,
-        [
-            _task(window.planning_date, 40, title="today", deliverable="d1"),
-            _task(window.planning_date + timedelta(days=6), 30, title="day7", deliverable="d2"),
-        ],
-    )
+    plan = _candidate(context, _daily_tasks(context, 40))
     report = validate_candidate(plan, context)
     assert report.passed, _failed_codes(report)
 
@@ -115,7 +112,9 @@ def test_task_outside_window_still_fails_schedule_date() -> None:
     context = _context(daily_budget=60)
     window = context.planning_window
     out_of_range = window.horizon_end + timedelta(days=2)
-    plan = _candidate(context, [_task(out_of_range, 10, title="x", deliverable="dx")])
+    tasks = _daily_tasks(context)
+    tasks[-1] = _task(out_of_range, 10, title="x", deliverable="dx")
+    plan = _candidate(context, tasks)
     report = validate_candidate(plan, context)
     assert report.passed is False
     assert "SCHEDULE_DATE" in _failed_codes(report)
@@ -124,10 +123,11 @@ def test_task_outside_window_still_fails_schedule_date() -> None:
 def test_task_after_seven_day_action_window_fails_schedule_date() -> None:
     context = _context(daily_budget=60)
     window = context.planning_window
-    plan = _candidate(
-        context,
-        [_task(window.planning_date + timedelta(days=7), 10, title="day8", deliverable="d8")],
+    tasks = _daily_tasks(context)
+    tasks[-1] = _task(
+        window.planning_date + timedelta(days=7), 10, title="day8", deliverable="d8"
     )
+    plan = _candidate(context, tasks)
     report = validate_candidate(plan, context)
     assert report.passed is False
     assert "SCHEDULE_DATE" in _failed_codes(report)
@@ -136,15 +136,9 @@ def test_task_after_seven_day_action_window_fails_schedule_date() -> None:
 # 4. 多日，某一天的总和超预算 —— TIME_BUDGET 按日分组生效
 def test_multi_day_one_day_over_budget_fails_only_time_budget() -> None:
     context = _context(daily_budget=60)
-    window = context.planning_window
-    plan = _candidate(
-        context,
-        [
-            _task(window.planning_date, 40, title="a", deliverable="da"),
-            _task(window.planning_date, 40, title="b", deliverable="db"),
-            _task(window.planning_date + timedelta(days=6), 30, title="c", deliverable="dc"),
-        ],
-    )
+    tasks = _daily_tasks(context)
+    tasks[3] = tasks[3].model_copy(update={"estimated_minutes": 61})
+    plan = _candidate(context, tasks)
     report = validate_candidate(plan, context)
     assert report.passed is False
     codes = _failed_codes(report)
@@ -154,11 +148,30 @@ def test_multi_day_one_day_over_budget_fails_only_time_budget() -> None:
 
 
 # 5. 单 task 单日，正好等于预算 —— 边界通过
-def test_single_task_equal_to_budget_passes() -> None:
+def test_each_daily_task_equal_to_budget_passes() -> None:
     context = _context(daily_budget=60)
-    plan = _candidate(
-        context,
-        [_task(context.planning_window.planning_date, 60, title="only", deliverable="d")],
-    )
+    plan = _candidate(context, _daily_tasks(context, 60))
     report = validate_candidate(plan, context)
     assert report.passed, _failed_codes(report)
+
+
+def test_missing_day_fails_exact_daily_coverage() -> None:
+    context = _context()
+    tasks = _daily_tasks(context)[:-1]
+    report = validate_candidate(_candidate(context, tasks), context)
+
+    assert report.passed is False
+    assert "TASK_COUNT" in _failed_codes(report)
+    assert "SCHEDULE_DATE" in _failed_codes(report)
+
+
+def test_duplicate_day_fails_exact_daily_coverage() -> None:
+    context = _context()
+    tasks = _daily_tasks(context)
+    tasks[-1] = tasks[-1].model_copy(
+        update={"scheduled_date": context.planning_window.planning_date + timedelta(days=5)}
+    )
+    report = validate_candidate(_candidate(context, tasks), context)
+
+    assert report.passed is False
+    assert "SCHEDULE_DATE" in _failed_codes(report)

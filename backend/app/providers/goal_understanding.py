@@ -8,7 +8,33 @@ import httpx
 
 from app.core.config import Settings
 from app.prompts.goal_understanding import goal_understanding_messages
+from app.schemas.enums import ObjectiveType
 from app.schemas.goal_briefs import GoalExtraction
+
+OBJECTIVE_PATTERNS: tuple[tuple[ObjectiveType, re.Pattern[str]], ...] = (
+    (ObjectiveType.INTERVIEW, re.compile(r"面试|mock interview|interview", re.I)),
+    (ObjectiveType.APPLICATION, re.compile(r"投递|申请|简历投递|application|apply", re.I)),
+    (ObjectiveType.PROJECT, re.compile(r"项目|作品|portfolio|系统|应用", re.I)),
+    (
+        ObjectiveType.SKILL_TRANSITION,
+        re.compile(r"技能|学习|转型|转行|skill|transition", re.I),
+    ),
+    (
+        ObjectiveType.CAREER_PLAN,
+        re.compile(r"求职|职业|岗位规划|秋招|春招|job search|career", re.I),
+    ),
+)
+
+
+def classify_objective_type(message: str) -> ObjectiveType | None:
+    return next(
+        (
+            objective_type
+            for objective_type, pattern in OBJECTIVE_PATTERNS
+            if pattern.search(message)
+        ),
+        None,
+    )
 
 
 class GoalUnderstandingProvider(Protocol):
@@ -53,10 +79,11 @@ class RuleGoalUnderstandingProvider:
             )
             if re.search(re.escape(name), message, re.I)
         ]
-        project_signal = re.search(r"项目|作品|portfolio|系统|应用", message, re.I)
+        objective_type = classify_objective_type(message)
         return GoalExtraction(
+            objective_type=objective_type,
             target_role=target,
-            project_goal=message.strip() if project_signal else None,
+            objective=message.strip() if objective_type is not None else None,
             tech_stack=technologies,
             duration_weeks=duration,
         )

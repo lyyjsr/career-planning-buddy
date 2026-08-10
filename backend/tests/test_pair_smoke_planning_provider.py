@@ -13,15 +13,14 @@ determinism + comparability contract WITHOUT going through EvalRunner:
   profiles (external plan-date comparators stay valid)
 * ``weekly_focus`` is contiguous-from-1 (PlanCandidate validator
   invariant)
-* ``tasks`` length is within schema bound (1..3); compact = 1,
-  structured = 3
+* both profiles satisfy the product contract: seven consecutive daily tasks
 * ReplanMode.ADJUST path still produces adjustment_reason under both
   profiles (no safety regression)
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from uuid import UUID
 
 import pytest
@@ -170,11 +169,12 @@ def test_task_counts_match_profile() -> None:
     structured = PairSmokePlanningProvider("structured_v1")._candidate(
         _context(), ReplanMode.INITIAL
     )
-    assert len(compact.tasks) == 1
-    assert len(structured.tasks) == 3
-    # Schema-bound invariant (PlanCandidate: 1..3).
+    assert len(compact.tasks) == 7
+    assert len(structured.tasks) == 7
     for cand in (compact, structured):
-        assert 1 <= len(cand.tasks) <= 3
+        assert [task.scheduled_date for task in cand.tasks] == [
+            cand.plan_date + timedelta(days=offset) for offset in range(7)
+        ]
 
 
 def test_weekly_focus_contiguous() -> None:

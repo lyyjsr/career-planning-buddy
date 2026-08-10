@@ -20,7 +20,6 @@ from app.core.config import get_settings
 from app.harness.budget import BudgetGuard, CancellationToken
 from app.harness.snapshots import SnapshotService
 from app.schemas.agent_runs import (
-    AgentRunCreateRequest,
     PlanCandidate,
     PlanningContext,
     PlanningState,
@@ -89,21 +88,20 @@ def candidate() -> tuple[PlanCandidate, PlanningContext]:
         rationale="先形成可验证证据",
         tasks=[
             TaskCandidate(
-                title="实现一个闭环",
+                title=f"第 {offset + 1} 天实现一个闭环",
                 task_type=TaskType.PROJECT,
-                scheduled_date=window.planning_date,
+                scheduled_date=window.planning_date + timedelta(days=offset),
                 starter_action="打开项目并运行测试",
-                deliverable="一次通过的测试报告",
+                deliverable=f"第 {offset + 1} 天通过的测试报告",
                 estimated_minutes=60,
             )
+            for offset in range(7)
         ],
     )
     return plan, context
 
 
 def test_run_schema_is_strict_and_weekly_focus_is_contiguous() -> None:
-    with pytest.raises(ValidationError):
-        AgentRunCreateRequest.model_validate({"message": "计划", "user_id": str(uuid4())})
     with pytest.raises(ValidationError):
         PlanCandidate(
             plan_date=datetime.now(UTC).date(),
@@ -143,7 +141,12 @@ def test_risk_intent_and_rule_validation_are_deterministic() -> None:
     report = validate_candidate(plan, context)
     assert report.passed
     over_budget = plan.model_copy(
-        update={"tasks": [plan.tasks[0].model_copy(update={"estimated_minutes": 61})]}
+        update={
+            "tasks": [
+                plan.tasks[0].model_copy(update={"estimated_minutes": 61}),
+                *plan.tasks[1:],
+            ]
+        }
     )
     failed = validate_candidate(over_budget, context)
     assert not failed.passed

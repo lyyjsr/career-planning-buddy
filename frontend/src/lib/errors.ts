@@ -33,6 +33,14 @@ export function toUserFacingError(error: unknown): UserFacingError {
       requestId: error.requestId,
     };
   }
+  if (error.code === "SAFETY_HIGH_RISK_INPUT") {
+    return {
+      title: "请先确保你现在是安全的",
+      message: "请尽快联系身边可信任的人或当地紧急服务。本服务不提供医疗诊断或紧急救援。",
+      action: "retry",
+      requestId: error.requestId,
+    };
+  }
   if (error.code?.includes("VERSION") === true || error.status === 409) {
     return {
       title: "内容已经更新",

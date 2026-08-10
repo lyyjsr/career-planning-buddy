@@ -27,11 +27,7 @@ from app.schemas.agent_runs import (
     WeeklyFocusCandidate,
 )
 from app.schemas.enums import GoalType, ReplanMode, RunIntent, TaskStatus, TaskType
-
-HIGH_RISK_PATTERNS = (
-    ("risk_self_harm_zh", re.compile(r"自杀|结束生命|伤害自己")),
-    ("risk_self_harm_en", re.compile(r"\b(suicide|kill myself|self[- ]harm)\b", re.I)),
-)
+from app.services.input_safety import assess_input_risk
 
 INTENT_ROUTER_VERSION = "intent-rule-v3"
 
@@ -103,14 +99,7 @@ INTENT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
 
 
 def risk_gate(message: str) -> RiskResult:
-    matched = [rule_id for rule_id, pattern in HIGH_RISK_PATTERNS if pattern.search(message)]
-    return RiskResult(
-        level="high" if matched else "none",
-        category="self_harm" if matched else None,
-        method="rule",
-        matched_rule_ids=matched,
-        confidence=1 if matched else None,
-    )
+    return assess_input_risk(message)
 
 
 def route_intent(
@@ -474,6 +463,10 @@ def validate_candidate(
     completed_deliverables.update(
         task.deliverable for task in context.recent_tasks if task.state == TaskStatus.COMPLETED
     )
+    expected_action_dates = {
+        window.planning_date + timedelta(days=offset) for offset in range(7)
+    }
+    scheduled_dates = [task.scheduled_date for task in candidate.tasks]
     results = {
         "HORIZON_MATCH": (
             candidate.plan_date == window.planning_date
@@ -488,15 +481,12 @@ def validate_candidate(
             and len({item.success_signal for item in candidate.weekly_focus})
             == len(candidate.weekly_focus)
         ),
-        "TASK_COUNT": 1 <= len(candidate.tasks) <= 7,
+        "TASK_COUNT": len(candidate.tasks) == 7,
         "TIME_BUDGET": _within_daily_budget(candidate.tasks, context.time_budget_minutes),
         "STARTER_ACTION": all(bool(task.starter_action.strip()) for task in candidate.tasks),
         "DELIVERABLE": all(bool(task.deliverable.strip()) for task in candidate.tasks),
-        "SCHEDULE_DATE": all(
-            window.planning_date
-            <= task.scheduled_date
-            <= min(window.planning_date + timedelta(days=6), window.horizon_end)
-            for task in candidate.tasks
+        "SCHEDULE_DATE": (
+            len(scheduled_dates) == 7 and set(scheduled_dates) == expected_action_dates
         ),
         "RECENT_DUPLICATE": not any(
             task.deliverable in completed_deliverables for task in candidate.tasks

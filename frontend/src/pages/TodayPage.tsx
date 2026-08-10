@@ -15,7 +15,7 @@ import { useMe } from "@/api/auth";
 import { useCancelRun, useRun } from "@/api/agent-runs";
 import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
 import { useRunEventStream, type RunStreamState } from "@/api/sse";
-import type { AgentRunResponse, GoalBriefResponse, TaskResponse } from "@/api/types";
+import type { AgentRunResponse, GoalBriefResponse, ObjectiveType, TaskResponse } from "@/api/types";
 import { TaskCard } from "@/components/TaskCard";
 import { localDateIso, WeeklyTaskSchedule } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,13 @@ const QUICK_INTENTS = [
   "开始准备投递",
   "准备下一场面试",
 ];
+const OBJECTIVE_LABELS: Record<ObjectiveType, string> = {
+  career_plan: "职业规划",
+  project: "项目设计",
+  application: "岗位投递",
+  interview: "面试准备",
+  skill_transition: "技能转型",
+};
 
 function displayDate(): string {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -320,7 +327,7 @@ function GoalBriefPanel({
     <Card className="border-primary/25 bg-gradient-to-br from-accent/45 to-card">
       <CardHeader>
         <CardDescription>{needsClarification ? "再补充一点，避免做错方向" : "执行前请确认目标"}</CardDescription>
-        <CardTitle className="text-xl">{brief.project_goal ?? "待明确的项目目标"}</CardTitle>
+        <CardTitle className="text-xl">{brief.objective ?? "待明确的职业目标"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         {needsClarification && (
@@ -332,6 +339,7 @@ function GoalBriefPanel({
           </div>
         )}
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">目标类型</dt><dd className="mt-1 font-medium">{brief.objective_type === null ? "待补充" : OBJECTIVE_LABELS[brief.objective_type]}</dd></div>
           <div><dt className="text-muted-foreground">面向岗位</dt><dd className="mt-1 font-medium">{brief.target_role ?? "待补充"}</dd></div>
           <div><dt className="text-muted-foreground">总体周期</dt><dd className="mt-1 font-medium">{brief.duration_weeks === null ? "待补充" : `${brief.duration_weeks} 周`}</dd></div>
           <div><dt className="text-muted-foreground">能力重点</dt><dd className="mt-1 leading-6">{brief.capability_focus.join("、")}</dd></div>

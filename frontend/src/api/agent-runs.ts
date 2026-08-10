@@ -1,31 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type {
-  AgentRunCreateRequest,
-  AgentRunCreatedResponse,
   AgentRunResponse,
 } from "./types";
-
-export function useCreateRun() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      payload,
-      idempotencyKey,
-    }: {
-      payload: AgentRunCreateRequest;
-      idempotencyKey: string;
-    }) =>
-      apiRequest<AgentRunCreatedResponse>("/api/v1/agent-runs", {
-        method: "POST",
-        body: payload,
-        idempotencyKey,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["me"] });
-    },
-  });
-}
 
 export function useRun(runId: string | undefined) {
   return useQuery({

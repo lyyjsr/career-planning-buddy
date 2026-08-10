@@ -19,11 +19,12 @@ from app.models.user_profile import UserProfile
 from app.providers.goal_understanding import (
     GoalUnderstandingProvider,
     RuleGoalUnderstandingProvider,
+    classify_objective_type,
 )
 from app.repositories.goal_briefs import GoalBriefRepository
 from app.repositories.profiles import ProfileRepository
 from app.schemas.agent_runs import AgentRunCreatedResponse
-from app.schemas.enums import GoalBriefStatus, GoalType, RunStatus
+from app.schemas.enums import GoalBriefStatus, GoalType, ObjectiveType, RunStatus
 from app.schemas.goal_briefs import (
     GoalBriefConfirmResponse,
     GoalBriefCreateRequest,
@@ -32,6 +33,7 @@ from app.schemas.goal_briefs import (
     GoalExtraction,
 )
 from app.services.agent_runs import AgentRunService
+from app.services.input_safety import assess_input_risk
 
 GOAL_LABELS = {
     GoalType.AI_BACKEND.value: "AI 后端工程师",
@@ -39,6 +41,47 @@ GOAL_LABELS = {
     GoalType.BACKEND_JAVA.value: "Java 后端工程师",
     GoalType.DATA_ENGINEER.value: "数据工程师",
     GoalType.FULLSTACK.value: "全栈工程师",
+}
+
+OBJECTIVE_DEFAULTS: dict[ObjectiveType, dict[str, list[str]]] = {
+    ObjectiveType.CAREER_PLAN: {
+        "capability_focus": ["岗位定位", "求职材料", "行动反馈"],
+        "tech_stack": ["根据目标岗位和现有能力确定"],
+        "deliverables": ["目标岗位清单", "阶段行动计划", "求职进展记录"],
+        "success_criteria": ["方向明确", "行动可执行", "进展可复盘"],
+    },
+    ObjectiveType.PROJECT: {
+        "capability_focus": ["岗位核心能力", "可展示的项目交付", "项目表达与复盘"],
+        "tech_stack": ["由系统根据目标岗位和现有能力推荐"],
+        "deliverables": ["可运行的项目成果", "README 与架构说明", "可用于简历的项目描述"],
+        "success_criteria": ["核心流程可演示", "成果可被验证", "能够说明关键设计取舍"],
+    },
+    ObjectiveType.APPLICATION: {
+        "capability_focus": ["岗位筛选", "材料匹配", "投递反馈"],
+        "tech_stack": ["根据目标岗位要求核对"],
+        "deliverables": ["目标岗位清单", "定制版简历", "投递与反馈跟踪表"],
+        "success_criteria": ["岗位与方向匹配", "材料完成针对性调整", "投递状态可追踪"],
+    },
+    ObjectiveType.INTERVIEW: {
+        "capability_focus": ["岗位知识", "项目表达", "模拟与复盘"],
+        "tech_stack": ["根据目标岗位和面试范围确定"],
+        "deliverables": ["面试范围清单", "高频问题答案", "模拟面试复盘"],
+        "success_criteria": ["重点覆盖完整", "回答有证据", "薄弱项经过复测"],
+    },
+    ObjectiveType.SKILL_TRANSITION: {
+        "capability_focus": ["能力差距", "学习实践", "成果验证"],
+        "tech_stack": ["根据转型方向和现有能力推荐"],
+        "deliverables": ["能力差距清单", "学习实践成果", "阶段复盘记录"],
+        "success_criteria": ["差距有优先级", "学习形成实践产物", "阶段结果可验证"],
+    },
+}
+
+OBJECTIVE_QUESTIONS = {
+    ObjectiveType.CAREER_PLAN: "你这次最希望解决求职规划中的哪个具体问题？",
+    ObjectiveType.PROJECT: "你希望设计哪类项目，或它要解决什么具体问题？",
+    ObjectiveType.APPLICATION: "你希望优先投递哪类岗位，当前最需要解决什么投递问题？",
+    ObjectiveType.INTERVIEW: "你准备的是哪类面试，预计重点解决什么问题？",
+    ObjectiveType.SKILL_TRANSITION: "你希望补齐或转向哪项能力，目标结果是什么？",
 }
 
 
@@ -55,6 +98,7 @@ class GoalBriefService:
     async def create(
         self, *, user_id: UUID, payload: GoalBriefCreateRequest, idempotency_key: str
     ) -> GoalBrief:
+        self._ensure_safe_for_external_processing(payload.message)
         request_hash = self._hash(payload.model_dump(mode="json"))
         async with session_transaction(self._session):
             existing = await self._briefs.get_by_idempotency(user_id, idempotency_key)
@@ -115,14 +159,16 @@ class GoalBriefService:
     async def refine(
         self, *, brief_id: UUID, user_id: UUID, payload: GoalBriefRefineRequest
     ) -> GoalBrief:
+        self._ensure_safe_for_external_processing(payload.message)
         extraction, method, model_id = await self._extract(payload.message)
         async with session_transaction(self._session):
             brief = await self._require_mutable(brief_id, user_id, payload.version)
             profile = await self._profiles.get_for_user(user_id)
             assert profile is not None
             current = {
+                "objective_type": extraction.objective_type or brief.objective_type,
                 "target_role": extraction.target_role or brief.target_role,
-                "project_goal": extraction.project_goal or brief.project_goal,
+                "objective": extraction.objective or brief.objective,
                 "capability_focus": extraction.capability_focus or brief.capability_focus_json,
                 "tech_stack": extraction.tech_stack or brief.tech_stack_json,
                 "duration_weeks": extraction.duration_weeks or brief.duration_weeks,
@@ -219,47 +265,71 @@ class GoalBriefService:
     ) -> dict[str, object]:
         assumptions: list[str] = []
         target = extracted.get("target_role") or GOAL_LABELS.get(profile.goal_type)
-        extracted_goal = extracted.get("project_goal")
-        goal = (
-            extracted_goal.strip()
-            if isinstance(extracted_goal, str) and extracted_goal.strip()
+        raw_objective_type = extracted.get("objective_type") or classify_objective_type(message)
+        try:
+            objective_type = (
+                raw_objective_type
+                if isinstance(raw_objective_type, ObjectiveType)
+                else ObjectiveType(raw_objective_type)
+                if isinstance(raw_objective_type, str)
+                else None
+            )
+        except ValueError:
+            objective_type = None
+        extracted_objective = extracted.get("objective")
+        objective = (
+            extracted_objective.strip()
+            if isinstance(extracted_objective, str) and extracted_objective.strip()
             else message.strip()
-            if "项目" in message
+            if objective_type is not None
             else None
         )
         duration = extracted.get("duration_weeks")
         if duration is None:
             duration = 4
             assumptions.append("未指定周期，暂按 4 周总体路线设计")
+        defaults = OBJECTIVE_DEFAULTS.get(
+            objective_type or ObjectiveType.CAREER_PLAN,
+            OBJECTIVE_DEFAULTS[ObjectiveType.CAREER_PLAN],
+        )
         capability = GoalBriefService._string_list(extracted.get("capability_focus"))
         if not capability:
-            capability = ["岗位核心能力", "可展示的项目交付", "项目表达与复盘"]
-            assumptions.append("能力重点按岗位能力、项目交付和表达复盘推荐")
+            capability = defaults["capability_focus"]
+            assumptions.append("能力重点已根据本次目标类型推荐")
         stack = GoalBriefService._string_list(extracted.get("tech_stack"))
         if not stack:
-            stack = ["由系统根据目标岗位和现有能力推荐"]
-            assumptions.append("技术栈未限定，将由计划阶段给出推荐")
+            stack = defaults["tech_stack"]
+            assumptions.append("相关技能或技术范围将在计划阶段结合岗位确定")
         deliverables = GoalBriefService._string_list(extracted.get("deliverables"))
         if not deliverables:
-            deliverables = ["可运行的项目成果", "README 与架构说明", "可用于简历的项目描述"]
-            assumptions.append("交付物采用求职项目的标准组合")
+            deliverables = defaults["deliverables"]
+            assumptions.append("交付物已根据本次目标类型推荐")
         criteria = GoalBriefService._string_list(extracted.get("success_criteria"))
         if not criteria:
-            criteria = ["核心流程可演示", "成果可被验证", "能够清楚说明关键设计取舍"]
+            criteria = defaults["success_criteria"]
         missing: list[str] = []
         questions: list[str] = []
+        if objective_type is None:
+            missing.append("objective_type")
+            questions.append("你希望重点推进求职规划、项目、投递、面试，还是技能转型？")
         if not target:
             missing.append("target_role")
-            questions.append("这个项目主要面向什么岗位或岗位方向？")
-        if not goal:
-            missing.append("project_goal")
-            questions.append("你希望设计哪类项目，或它要解决什么具体问题？")
+            questions.append("这次目标主要面向什么岗位或岗位方向？")
+        if not objective:
+            missing.append("objective")
+            questions.append(
+                OBJECTIVE_QUESTIONS.get(
+                    objective_type or ObjectiveType.CAREER_PLAN,
+                    "你这次希望达成什么具体结果？",
+                )
+            )
         return {
             "status": GoalBriefStatus.CLARIFICATION_REQUIRED.value
             if missing
             else GoalBriefStatus.AWAITING_CONFIRMATION.value,
+            "objective_type": objective_type.value if objective_type is not None else None,
             "target_role": target,
-            "project_goal": goal,
+            "objective": objective,
             "capability_focus_json": capability,
             "tech_stack_json": stack,
             "duration_weeks": duration,
@@ -331,8 +401,15 @@ class GoalBriefService:
         tech_stack = "、".join(brief.tech_stack_json)
         deliverables = "、".join(brief.deliverables_json)
         success_criteria = "、".join(brief.success_criteria_json)
+        objective_label = {
+            ObjectiveType.CAREER_PLAN.value: "职业规划",
+            ObjectiveType.PROJECT.value: "项目设计",
+            ObjectiveType.APPLICATION.value: "岗位投递",
+            ObjectiveType.INTERVIEW.value: "面试准备",
+            ObjectiveType.SKILL_TRANSITION.value: "技能转型",
+        }.get(brief.objective_type or "", "职业目标")
         return (
-            f"已由用户确认的目标：面向{brief.target_role}，{brief.project_goal}。"
+            f"已由用户确认的{objective_label}目标：面向{brief.target_role}，{brief.objective}。"
             f"总体周期 {brief.duration_weeks} 周；能力重点：{capability_focus}；"
             f"技术栈：{tech_stack}；交付物：{deliverables}；"
             f"成功标准：{success_criteria}。"
@@ -347,8 +424,11 @@ class GoalBriefService:
             source_message=brief.source_message,
             hint_intent=brief.hint_intent,
             source_plan_id=brief.source_plan_id,
+            objective_type=(
+                ObjectiveType(brief.objective_type) if brief.objective_type is not None else None
+            ),
             target_role=brief.target_role,
-            project_goal=brief.project_goal,
+            objective=brief.objective,
             capability_focus=brief.capability_focus_json,
             tech_stack=brief.tech_stack_json,
             duration_weeks=brief.duration_weeks,
@@ -363,3 +443,16 @@ class GoalBriefService:
             created_at=brief.created_at,
             updated_at=brief.updated_at,
         )
+
+    @staticmethod
+    def _ensure_safe_for_external_processing(message: str) -> None:
+        risk = assess_input_risk(message)
+        if risk.level == "high":
+            raise AppError(
+                code="SAFETY_HIGH_RISK_INPUT",
+                message=(
+                    "现在最重要的是先确保你的安全。请尽快联系身边可信任的人或当地紧急服务；"
+                    "本服务不提供医疗诊断或紧急救援。"
+                ),
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            )

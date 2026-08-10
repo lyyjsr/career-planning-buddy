@@ -97,3 +97,11 @@ class GoalBriefStatus(StrEnum):
     AWAITING_CONFIRMATION = "awaiting_confirmation"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
+
+
+class ObjectiveType(StrEnum):
+    CAREER_PLAN = "career_plan"
+    PROJECT = "project"
+    APPLICATION = "application"
+    INTERVIEW = "interview"
+    SKILL_TRANSITION = "skill_transition"

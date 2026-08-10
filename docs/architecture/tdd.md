@@ -228,7 +228,7 @@ POST /agent-runs
 
 ## 14. 结构化输出
 
-主 Agent 返回 `PlanCandidate`，包含 plan_date/horizon、overall_direction、1~8 条 weekly_focus、summary、rationale、adjustment_reason、assumptions、当天 1~3 个 tasks 和结构化 evidence_refs。
+主 Agent 返回 `PlanCandidate`，包含 plan_date/horizon、overall_direction、1~8 条 weekly_focus、summary、rationale、adjustment_reason、assumptions、连续七天每天 1 个 task 和结构化 evidence_refs。
 
 Pydantic Schema 失败时只允许一次格式修复。确定性规则失败交给专用 repair Prompt 一次；仍失败使用程序模板计划并标记 degraded。禁止用正则从自由文本中“捞 JSON”作为主路径。
 

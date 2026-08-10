@@ -222,14 +222,8 @@ export interface AgentRunCreatedResponse {
   events_url: string;
 }
 
-export interface AgentRunCreateRequest {
-  message: string;
-  hint_intent?: "create_plan" | "replan" | null;
-  goal_type_override?: GoalType | null;
-  source_plan_id?: string | null;
-}
-
 export type GoalBriefStatus = "clarification_required" | "awaiting_confirmation" | "confirmed" | "cancelled";
+export type ObjectiveType = "career_plan" | "project" | "application" | "interview" | "skill_transition";
 
 export interface GoalBriefResponse {
   goal_brief_id: string;
@@ -237,8 +231,9 @@ export interface GoalBriefResponse {
   source_message: string;
   hint_intent: "create_plan" | "replan";
   source_plan_id: string | null;
+  objective_type: ObjectiveType | null;
   target_role: string | null;
-  project_goal: string | null;
+  objective: string | null;
   capability_focus: string[];
   tech_stack: string[];
   duration_weeks: number | null;

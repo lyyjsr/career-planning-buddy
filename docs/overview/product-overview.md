@@ -28,7 +28,7 @@
 ## 4. 核心价值
 
 1. 根据目标、阶段、截止时间和技能现状生成 1~8 周方向与每周重点；
-2. 每次只展开当天 1~3 个高质量任务；
+2. 每次展开未来连续 7 天、每天 1 个高质量任务；
 3. 每个任务都有 starter_action、deliverable 和预计时长；
 4. 记录开始、完成、放弃和实际耗时；
 5. 复盘后根据事实建议重规划；
@@ -104,7 +104,7 @@ flowchart TD
 
 - 1~8 周的 planning window、overall_direction 和 weekly_focus；
 - summary、rationale；
-- 仅 `plan_date` 当天的 1~3 个任务；
+- 从 `plan_date` 开始连续 7 天、每天 1 个任务；
 - 每个任务的 title、task_type、scheduled_date、starter_action、deliverable、estimated_minutes；
 - 使用过的来源；
 - adjust replan 时的 adjustment_reason。

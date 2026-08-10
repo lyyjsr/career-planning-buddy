@@ -37,7 +37,7 @@
 
 ### FR-04 计划生成
 
-- 计划包含 1~8 周方向、weekly_focus、summary、rationale 和当天 1~3 个任务；
+- 计划包含 1~8 周方向、weekly_focus、summary、rationale，以及从当天开始连续 7 天、每天 1 个任务；
 - 任务总时长不超过时间预算；
 - 动态来源必须可追踪；
 - 模型结构化格式失败最多修复一次；

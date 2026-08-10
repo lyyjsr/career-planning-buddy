@@ -17,7 +17,7 @@
 ## 1. 核心用例
 
 ```text
-Guest 登录 → 建档 → 创建 Agent Run → SSE 查看进度
+Guest 登录 → 建档 → 创建 Goal Brief → 补充信息并确认 → 创建 Agent Run → SSE 查看进度
 → 获得多周方向与未来 7 天每日计划 → 完成当天任务 → 提交复盘 → 生成下一版 continue/adjust 计划
 → 系统建议重规划 → 用户确认 → 产生新计划版本
 ```
@@ -121,6 +121,7 @@ pending → expired
 - search_sources
 - experience_atoms
 - companion_messages
+- goal_briefs
 
 运行表：
 
