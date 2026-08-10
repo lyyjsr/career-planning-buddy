@@ -157,7 +157,7 @@ Stage 2/3 Tool 列表为空。`context_summarize` 是内部确定性 helper，�
 POST /agent-runs
   → 校验 JWT、Profile、source plan、幂等与活动 Run
   → 创建 agent_runs(pending) + config snapshot
-  → 注册单 Worker asyncio.Task
+  → PostgreSQL dispatcher 抢占 pending Run 并取得 lease
   → running
   → NodeRunner 包装每个节点
   → context snapshot
@@ -166,12 +166,12 @@ POST /agent-runs
   → completed/degraded/failed/cancelled
 ```
 
-### 单 Worker 限制
+### Worker 执行边界
 
-- Uvicorn `--workers 1`；
-- 进程崩溃时执行中的 Run 不自动续跑；
-- 启动恢复器把超时 pending/running 标为 failed(process_interrupted)；
-- 多 Worker 前必须通过 ADR 引入可靠调度和分布式取消。
+- 多个 Worker 通过 `SKIP LOCKED`、lease、heartbeat 和 attempt fencing 竞争执行；
+- 进程崩溃或优雅停机后，Run 在 lease 到期/释放后有界 requeue；
+- 取消标记持久化，heartbeat 与节点边界都能跨进程传播；
+- 当前没有节点级 checkpoint，重试从 Graph 起点开始，LLM 不承诺 exactly-once。
 
 ## 10. 预算与失败收敛
 
@@ -201,6 +201,7 @@ POST /agent-runs
 - `result_kind=plan` + final_plan_id；
 - `result_kind=clarification` + 问题；
 - `result_kind=safe_response` + 审核响应；
+- `result_kind=navigation` + 页面目标与可执行动作；
 - failed/cancelled 无 result。
 
 刷新恢复不能只依赖 SSE。
@@ -210,7 +211,7 @@ POST /agent-runs
 关键事务：
 
 - Persist：replan 先在事务内归档旧活跃 Plan，再插入新 Plan，连同 Task、evidence refs、Companion、Run 终态、plan.ready、terminal event 同事务；
-- Clarification/Safe Response：Run 结果和 terminal event 同事务；
+- Clarification/Navigation/Safe Response：Run 结果和 terminal event 同事务；
 - Task 开始：task pending→in_progress 与 plan generated→active 同事务；
 - Review：写 review、统计任务事实、判断 suggested_replan 同事务；
 - Replan：旧计划只在“归档旧计划 + 插入新计划 + Run 终态”同一事务成功提交后才算归档；
@@ -222,7 +223,7 @@ POST /agent-runs
 - 单用户 pending/running Run 使用 PostgreSQL partial unique index；
 - Profile、Plan、Task、Memory 使用 version 乐观锁；
 - Tool 相同 `run_id + tool_name + args_hash` 可复用；
-- Run 取消先写 `cancel_requested_at`，再取消内存 Task；
+- Run 取消先写 `cancel_requested_at`；本地 Task 立即取消，远端 owner 由 heartbeat/节点边界观察；
 - 终态 Run 不允许再次取消或修改结果。
 
 ## 14. 结构化输出
@@ -290,7 +291,7 @@ Review Service 从数据库计算完成/放弃统计，不信任客户端统计�
 /dev/runs
 ```
 
-前端把 SSE 作为实时增强；页面刷新后通过 GET Run/Plan/Task 恢复。不同 `result_kind` 渲染 Plan、Clarification 或 Safe Response。
+前端把 SSE 作为实时增强；页面刷新后通过 GET Run/Plan/Task 恢复。不同 `result_kind` 渲染 Plan、Clarification、Navigation 或 Safe Response。
 
 ## 20. 测试
 

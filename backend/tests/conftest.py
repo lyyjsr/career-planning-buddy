@@ -16,10 +16,15 @@ from sqlalchemy.ext.asyncio import (
 
 from app.agent.eval_executor import EvalRunnerExecutor
 from app.agent.executor import AgentRunExecutor
-from app.api.dependencies import get_agent_run_executor, get_eval_runner_executor
+from app.api.dependencies import (
+    get_agent_run_executor,
+    get_eval_runner_executor,
+    get_goal_understanding_provider,
+)
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.main import create_app
+from app.providers.goal_understanding import RuleGoalUnderstandingProvider
 from evals.v2.dataset_loader import DatasetBundle
 
 os.environ.setdefault("APP_ENV", "test")
@@ -55,9 +60,7 @@ class StubEvalRunnerExecutor(EvalRunnerExecutor):
         self.submitted: list[tuple[UUID, bool]] = []
         self.cancelled: list[UUID] = []
 
-    def submit(
-        self, experiment_id: UUID, dataset: DatasetBundle, *, grade: bool = True
-    ) -> None:
+    def submit(self, experiment_id: UUID, dataset: DatasetBundle, *, grade: bool = True) -> None:
         _ = dataset  # not needed for the recorded submit signature
         self.submitted.append((experiment_id, grade))
 
@@ -101,6 +104,9 @@ async def api_application(db_session: AsyncSession) -> AsyncIterator[FastAPI]:
     application.dependency_overrides[get_db_session] = override_db_session
     application.dependency_overrides[get_agent_run_executor] = lambda: executor
     application.dependency_overrides[get_eval_runner_executor] = lambda: eval_executor
+    application.dependency_overrides[get_goal_understanding_provider] = (
+        RuleGoalUnderstandingProvider
+    )
     try:
         yield application
     finally:

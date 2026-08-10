@@ -23,7 +23,9 @@ from app.schemas.agent_runs import (
     AgentRunCancelRequest,
     AgentRunResponse,
     ClarificationRequest,
+    NavigationResult,
     PlanResultSummary,
+    RunUserStatus,
     SafeResponse,
     TerminalResult,
 )
@@ -54,6 +56,8 @@ class AgentRunService:
         goal_type_override: str | None,
         source_plan_id: UUID | None,
         idempotency_key: str,
+        goal_brief_id: UUID | None = None,
+        schedule: bool = True,
     ) -> AgentRun:
         config = SnapshotService.build_config(self._settings)
         created = False
@@ -65,9 +69,9 @@ class AgentRunService:
                         existing.request_text != message
                         or existing.hint_intent != hint_intent
                         or existing.goal_type_override != goal_type_override
+                        or existing.goal_brief_id != goal_brief_id
                         or (
-                            source_plan_id is not None
-                            and existing.source_plan_id != source_plan_id
+                            source_plan_id is not None and existing.source_plan_id != source_plan_id
                         )
                     ):
                         raise AppError(
@@ -90,6 +94,7 @@ class AgentRunService:
                     )
                 run = AgentRun(
                     user_id=user_id,
+                    goal_brief_id=goal_brief_id,
                     idempotency_key=idempotency_key,
                     request_text=message,
                     hint_intent=hint_intent,
@@ -113,9 +118,16 @@ class AgentRunService:
                 message="another Agent Run is already active",
                 status_code=HTTPStatus.CONFLICT,
             ) from exc
-        if created:
+        if created and schedule:
             self._executor.submit(run.id)
         return run
+
+    def schedule(self, run_id: UUID) -> None:
+        """Wake the durable executor after the caller's transaction commits."""
+        self._executor.submit(run_id)
+
+    async def get_by_goal_brief(self, brief_id: UUID, user_id: UUID) -> AgentRun | None:
+        return await self._runs.get_by_goal_brief(brief_id, user_id)
 
     async def get(self, run_id: UUID, user_id: UUID) -> AgentRun:
         async with session_transaction(self._session):
@@ -267,9 +279,14 @@ class AgentRunService:
                 result = ClarificationRequest.model_validate(run.result_payload_json)
             elif run.result_kind == "safe_response":
                 result = SafeResponse.model_validate(run.result_payload_json)
+            elif run.result_kind == "navigation":
+                result = NavigationResult.model_validate(run.result_payload_json)
+        user_status, status_message = AgentRunService._user_status(run)
         return AgentRunResponse(
             run_id=run.id,
             status=RunStatus(run.status),
+            user_status=user_status,
+            status_message=status_message,
             resolved_intent=(
                 RunIntent(run.resolved_intent) if run.resolved_intent is not None else None
             ),
@@ -286,7 +303,30 @@ class AgentRunService:
             total_latency_ms=run.total_latency_ms,
             created_at=run.created_at,
             finished_at=run.finished_at,
+            cancel_requested_at=run.cancel_requested_at,
         )
+
+    @staticmethod
+    def _user_status(run: AgentRun) -> tuple[RunUserStatus, str]:
+        if run.cancel_requested_at is not None and run.status not in TERMINAL_STATUSES:
+            return "stopping", "正在停止本次生成"
+        if run.status == "pending":
+            if run.attempt_count > 0:
+                return "recovering", "服务恢复中，将自动继续"
+            return "queued", "正在进入规划队列"
+        if run.status == "running":
+            return "generating", "正在整理适合你的行动路径"
+        if run.status == "failed":
+            return "failed", "生成失败，可以重新尝试"
+        if run.status == "cancelled":
+            return "cancelled", "本次生成已取消"
+        if run.status == "degraded" and run.result_kind in {
+            "clarification",
+            "safe_response",
+            "navigation",
+        }:
+            return "action_required", "需要你确认下一步"
+        return "ready", "计划已经准备好"
 
     @staticmethod
     def _format_sse(

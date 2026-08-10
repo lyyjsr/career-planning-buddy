@@ -19,7 +19,7 @@
 Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-runs` 的 202 响应，而是收敛到数据库状态和 SSE 终态：
 
 - `completed`：正常 Plan 已持久化，result_kind=plan；
-- `degraded`：存在可用但受限的结果，必须有 result_kind 和 fallback_reason；结果可以是模板 Plan、Clarification 或 Safe Response；
+- `degraded`：存在可用但受限的结果，必须有 result_kind 和 fallback_reason；结果可以是模板 Plan、Clarification、Navigation 或 Safe Response；
 - `failed`：没有可用结果，必须有 error_code；
 - `cancelled`：用户取消，必须有 error_code=RUN_CANCELLED。
 
@@ -61,8 +61,9 @@ Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-
 
 ## 6. 取消
 
-取消接口先持久化 `cancel_requested_at`，再取消持有 lease 的本地 Task。节点、模型和 Tool
-调用前后检查取消。用户取消通过 Finalizer 写 cancelled；进程优雅停机释放 lease 并 requeue，
+取消接口先持久化 `cancel_requested_at`，再尝试取消本地 Task。远端 lease owner 通过 heartbeat
+读取标记并取消 owner Task，NodeRunner 在节点边界做数据库兜底检查；模型和 Tool 调用前后也
+检查取消。用户取消通过 Finalizer 写 cancelled；进程优雅停机释放 lease 并 requeue，
 不得伪装成用户取消或业务失败。
 
 ## 7. 日志与 Trace

@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agent.context_compression import compress_context_history
 from app.agent.context_selection import MemorySelectionResult, select_memories
 from app.agent.errors import StructuredOutputError
-from app.agent.finalizer import AgentRunFinalizer
 from app.agent.node_runner import NodeOutput, NodeRunner, NodeTelemetry
 from app.agent.nodes import (
     build_clarification,
     build_companion,
+    build_navigation,
     build_planning_context,
     build_safe_response,
     fallback_candidate,
@@ -25,6 +25,7 @@ from app.agent.nodes import (
     route_intent,
     validate_candidate,
 )
+from app.agent.ports import PlanningResultPort
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.evidence import build_evidence_visibility
@@ -45,6 +46,7 @@ from app.schemas.agent_runs import (
     EvidenceVisibility,
     IntentResult,
     MemoryContext,
+    NavigationResult,
     PlanCandidate,
     PlanContext,
     PlanFocusContext,
@@ -71,7 +73,7 @@ class FixedPlanningGraph:
         session_factory: async_sessionmaker[AsyncSession],
         provider: PlanningProvider,
         node_runner: NodeRunner,
-        finalizer: AgentRunFinalizer,
+        finalizer: PlanningResultPort,
         budget: BudgetGuard,
         tool_registry: ToolRegistry,
         embedding_provider: EmbeddingProvider,
@@ -96,6 +98,7 @@ class FixedPlanningGraph:
         builder.add_node("risk_gate", self._risk_node)
         builder.add_node("safe_response", self._safe_response_node)
         builder.add_node("intent_router", self._intent_node)
+        builder.add_node("navigation", self._navigation_node)
         builder.add_node("clarification", self._clarification_node)
         builder.add_node("context_builder", self._context_node)
         builder.add_node("career_planning_agent", self._agent_node)
@@ -113,8 +116,13 @@ class FixedPlanningGraph:
         builder.add_conditional_edges(
             "intent_router",
             self._after_intent,
-            {"clarification": "clarification", "ready": "context_builder"},
+            {
+                "navigation": "navigation",
+                "clarification": "clarification",
+                "ready": "context_builder",
+            },
         )
+        builder.add_edge("navigation", END)
         builder.add_edge("clarification", END)
         builder.add_edge("context_builder", "career_planning_agent")
         builder.add_edge("career_planning_agent", "rule_validator")
@@ -233,6 +241,21 @@ class FixedPlanningGraph:
         )
         return {}
 
+    async def _navigation_node(self, state: PlanningState) -> dict[str, object]:
+        intent = state["intent"]
+        navigation = await self._nodes.run(
+            state["run_id"],
+            "navigation",
+            lambda: self._navigation_output(intent),
+        )
+        await self._finalizer.finalize_degraded(
+            run_id=state["run_id"],
+            result_kind="navigation",
+            result=navigation,
+            fallback_reason="resource_navigation",
+        )
+        return {}
+
     @staticmethod
     async def _clarification_output(
         intent: IntentResult,
@@ -241,6 +264,19 @@ class FixedPlanningGraph:
         return NodeOutput(
             clarification,
             NodeTelemetry(trace_data={"reason": clarification.reason}),
+        )
+
+    @staticmethod
+    async def _navigation_output(intent: IntentResult) -> NodeOutput[NavigationResult]:
+        navigation = build_navigation(intent)
+        return NodeOutput(
+            navigation,
+            NodeTelemetry(
+                trace_data={
+                    "action": navigation.action,
+                    "target_route": navigation.target_route,
+                }
+            ),
         )
 
     async def _context_node(self, state: PlanningState) -> dict[str, object]:
@@ -342,6 +378,8 @@ class FixedPlanningGraph:
     @staticmethod
     def _after_intent(state: PlanningState) -> str:
         intent = state["intent"]
+        if intent.intent == RunIntent.NAVIGATE:
+            return "navigation"
         if intent.intent == RunIntent.UNSUPPORTED or intent.missing_slots:
             return "clarification"
         return "ready"
@@ -899,7 +937,7 @@ class GraphFactory:
         self,
         *,
         node_runner: NodeRunner,
-        finalizer: AgentRunFinalizer,
+        finalizer: PlanningResultPort,
         budget: BudgetGuard,
     ) -> FixedPlanningGraph:
         return FixedPlanningGraph(

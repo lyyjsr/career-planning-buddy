@@ -1,5 +1,9 @@
 # Agent Runtime 施工规范
 
+面向用户的计划请求在进入本执行链前，必须先通过持久化 Goal Brief 确认门，详见
+[`Goal Brief 目标澄清与确认设计`](../goal-brief-confirmation.md)。LLM 可以做结构化抽取，
+但充分性判定和确认权由确定性业务规则与用户操作控制。
+
 本文件是 `Agent Run` 执行链的权威施工说明，用来补齐“节点列表有了，但运行时如何真正落地”的部分。节点的业务细节仍以 [`agent-nodes`](../agent-nodes/README.md) 为准。
 
 ## 1. 设计结论
@@ -282,8 +286,9 @@ Provider 原生 JSON Schema 或 Pydantic 解析失败时，允许同一调用点
 `agent_runs.result_kind`：
 
 - `plan`：存在 `final_plan_id`，`result_payload_json` 只保存 plan id、状态、plan_date、horizon_end 和用户可读摘要；
-- `clarification`：无 Plan，保存问题、slot_names、hint_options；
+- `clarification`：无 Plan，保存说明、问题、slot_names、hint_options 和建议动作；
 - `safe_response`：无 Plan，保存审核后的 message、resource ids 与 disclaimer；
+- `navigation`：无 Plan，保存稳定 action、label、产品路由与说明；
 - failed/cancelled 时 `result_kind` 为空，并写稳定 error_code；fallback_reason 只用于 degraded。
 
 终态语义：
@@ -291,7 +296,7 @@ Provider 原生 JSON Schema 或 Pydantic 解析失败时，允许同一调用点
 | status | 含义 |
 |---|---|
 | completed | 正常计划已持久化 |
-| degraded | 系统给出了可用但受限的结果：模板计划、澄清或安全响应 |
+| degraded | 系统给出了可用但受限的结果：模板计划、澄清、页面导航或安全响应 |
 | failed | 没有可用结果，需要重试或人工排查 |
 | cancelled | 用户明确取消 |
 
@@ -339,7 +344,7 @@ run.completed
 | tool.called | tool_call_id, tool_name, round |
 | tool.returned | tool_call_id, tool_name, success, latency_ms, truncated |
 | progress | stage, message |
-| clarification.requested | questions, slot_names, hint_options, reason |
+| clarification.requested | message, questions, slot_names, hint_options, reason, suggested_actions |
 | companion.message | trigger_tag, message |
 | plan.ready | plan_id, task_count, degraded |
 | run.completed | status=completed, result_kind=plan, final_plan_id |
@@ -351,7 +356,7 @@ run.completed
 
 ## 13. 取消、超时与进程重启
 
-- `POST /cancel` 先持久化 `cancel_requested_at`，返回 cancellation requested，再取消本进程 Task；客户端以 GET Run 的最终 `cancelled` 为准；
+- `POST /cancel` 先持久化 `cancel_requested_at`，返回 cancellation requested，再尝试取消本进程 Task；远端 owner heartbeat 和 NodeRunner 节点边界负责跨进程传播，客户端以 GET Run 的最终 `cancelled` 为准；
 - 每个节点、模型调用和 Tool 调用前后都检查取消；
 - 如果正在执行不可立即取消的 Provider 请求，等待其超时后收敛，但不得继续下一节点；
 - Executor 在 finally 中只允许通过 `AgentRunFinalizer` 写一次终态；

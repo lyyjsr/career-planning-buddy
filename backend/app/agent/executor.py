@@ -12,7 +12,12 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import AgentDeadlineExceededError, AgentError, AgentLeaseLostError
+from app.agent.errors import (
+    AgentDeadlineExceededError,
+    AgentError,
+    AgentLeaseLostError,
+    RunCancelledError,
+)
 from app.agent.finalizer import AgentRunFinalizer
 from app.agent.graph import GraphFactory, load_profile
 from app.agent.node_runner import NodeRunner
@@ -158,11 +163,19 @@ class AgentRunExecutor:
                 run_id, error_code="CONFIG_SNAPSHOT_INVALID"
             )
             return
+        cancellation = CancellationToken()
+        owner_task = asyncio.current_task()
+        if owner_task is None:
+            raise RuntimeError("Agent Run execution requires an asyncio Task")
         heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(run_id, run.attempt_count),
+            self._heartbeat_loop(
+                run_id,
+                run.attempt_count,
+                cancellation,
+                owner_task,
+            ),
             name=f"agent-heartbeat-{run_id}",
         )
-        cancellation = CancellationToken()
         budget = BudgetGuard(config, run.deadline_at, cancellation)
         finalizer = AgentRunFinalizer(
             self._session_factory,
@@ -237,6 +250,9 @@ class AgentRunExecutor:
                 await finalizer.finalize_cancelled(run_id)
         except AgentDeadlineExceededError:
             await finalizer.finalize_failed(run_id, error_code="AGENT_DEADLINE_EXCEEDED")
+        except RunCancelledError:
+            cancellation.cancel()
+            await finalizer.finalize_cancelled(run_id)
         except AgentLeaseLostError:
             logger.info("agent run %s stopped after losing its lease", run_id)
         except AgentError as exc:
@@ -415,7 +431,13 @@ class AgentRunExecutor:
             except TimeoutError:
                 pass
 
-    async def _heartbeat_loop(self, run_id: UUID, attempt_count: int) -> None:
+    async def _heartbeat_loop(
+        self,
+        run_id: UUID,
+        attempt_count: int,
+        cancellation: CancellationToken,
+        owner_task: asyncio.Task[object],
+    ) -> None:
         while True:
             await asyncio.sleep(self._heartbeat_seconds)
             now = datetime.now(UTC)
@@ -434,10 +456,16 @@ class AgentRunExecutor:
                             lease_expires_at=now
                             + timedelta(seconds=self._lease_seconds),
                         )
-                        .returning(AgentRun.id)
+                        .returning(AgentRun.id, AgentRun.cancel_requested_at)
                     )
-                    if result.scalar_one_or_none() is None:
+                    row = result.one_or_none()
+                    if row is None:
                         return
+                    cancel_requested_at = row[1]
+            if cancel_requested_at is not None:
+                cancellation.cancel()
+                owner_task.cancel()
+                return
 
     async def _release_for_retry(
         self,

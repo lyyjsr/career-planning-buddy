@@ -105,7 +105,7 @@ pending → expired
 - 计划包含 1~8 周方向与互不重复的周重点；当前执行层展开未来 7 天、每天 1 个关键任务，每日预计时长不得超过用户预算；
 - 取消和超时必须通过统一 Finalizer 写唯一最终状态及事件；
 - Run 冻结 graph/config snapshot，context_builder 后冻结 input snapshot；
-- 终态 result_kind 仅为 plan/clarification/safe_response；failed/cancelled 无结果。
+- 终态 result_kind 为 plan/clarification/safe_response/navigation；failed/cancelled 无结果。
 
 ## 6. 数据表基线
 

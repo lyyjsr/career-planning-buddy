@@ -21,6 +21,7 @@ Today / Plans / Reviews / Memories；开发模式额外显示 Dev Trace。
 - 根据 result_kind 渲染：
   - plan：invalidate `/plans/active` 与 `/tasks`；
   - clarification：显示固定问题并跳转/内嵌 Profile 表单；
+  - navigation：显示用户可点击的目标页面动作；
   - safe_response：显示审核后的安全响应，不显示计划卡片；
   - failed/cancelled：显示重试或返回，不伪装有结果；
 - SSE 断线显示重连，不清空已有权威数据。

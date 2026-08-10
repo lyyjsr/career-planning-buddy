@@ -46,6 +46,7 @@ def test_stage_one_enums_match_contract_values() -> None:
         "plan",
         "clarification",
         "safe_response",
+        "navigation",
     ]
     assert [item.value for item in PlanStatus] == [
         "generated",

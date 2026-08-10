@@ -2,7 +2,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useCancelRun, useCreateRun, useRun } from "@/api/agent-runs";
+import { useCancelRun, useRun } from "@/api/agent-runs";
+import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
 import { useMe } from "@/api/auth";
 import { useRunEventStream } from "@/api/sse";
 import type { ActivePlanResponse, AgentRunResponse, TaskResponse } from "@/api/types";
@@ -10,8 +11,13 @@ import { TodayPage } from "./TodayPage";
 
 vi.mock("@/api/agent-runs", () => ({
   useCancelRun: vi.fn(),
-  useCreateRun: vi.fn(),
   useRun: vi.fn(),
+}));
+vi.mock("@/api/goal-briefs", () => ({
+  useCancelGoalBrief: vi.fn(),
+  useConfirmGoalBrief: vi.fn(),
+  useCreateGoalBrief: vi.fn(),
+  useRefineGoalBrief: vi.fn(),
 }));
 vi.mock("@/api/auth", () => ({ useMe: vi.fn() }));
 vi.mock("@/api/sse", () => ({ useRunEventStream: vi.fn() }));
@@ -44,6 +50,10 @@ function task(overrides: Partial<TaskResponse>): TaskResponse {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date(2026, 7, 10, 12, 0, 0));
+  vi.mocked(useCreateGoalBrief).mockReturnValue({ isPending: false, error: null, mutate: vi.fn() } as unknown as ReturnType<typeof useCreateGoalBrief>);
+  vi.mocked(useRefineGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useRefineGoalBrief>);
+  vi.mocked(useConfirmGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useConfirmGoalBrief>);
+  vi.mocked(useCancelGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useCancelGoalBrief>);
 });
 
 afterEach(() => {
@@ -110,7 +120,6 @@ describe("TodayPage", () => {
       } as AgentRunResponse,
     } as ReturnType<typeof useRun>);
     vi.mocked(useRunEventStream).mockReturnValue({} as ReturnType<typeof useRunEventStream>);
-    vi.mocked(useCreateRun).mockReturnValue({ isPending: false, error: null } as ReturnType<typeof useCreateRun>);
     vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
 
     render(<MemoryRouter initialEntries={["/today?run_id=run-2"]}><TodayPage /></MemoryRouter>);
@@ -119,5 +128,82 @@ describe("TodayPage", () => {
     expect(screen.getByText("不用手动解锁；到排期日期后，它会自动成为“今天”的可执行任务。")).toBeInTheDocument();
     expect(screen.getAllByText("1. 写背景；2. 补技术取舍；3. 压缩成三条要点").length).toBeGreaterThan(0);
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
+  });
+
+  it("renders a typed navigation result as a concrete next action", () => {
+    vi.mocked(useMe).mockReturnValue({
+      data: {
+        profile_complete: true,
+        profile: {
+          goal_type: "agent_app",
+          stage: "preparing",
+          time_budget_minutes: 90,
+          skill_level: "intermediate",
+        },
+        active_plan: null,
+        today_tasks: [],
+        active_run: null,
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useMe>);
+    vi.mocked(useRun).mockReturnValue({
+      data: {
+        run_id: "run-navigation",
+        status: "degraded",
+        user_status: "action_required",
+        status_message: "可以直接前往对应页面继续。",
+        result_kind: "navigation",
+        result: {
+          action: "view_today_tasks",
+          label: "查看今日任务",
+          target_route: "/today",
+          message: "这个请求不需要重新生成计划，可以直接查看今天的任务。",
+        },
+        final_plan_id: null,
+      } as AgentRunResponse,
+    } as ReturnType<typeof useRun>);
+    vi.mocked(useRunEventStream).mockReturnValue({} as ReturnType<typeof useRunEventStream>);
+    vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
+
+    render(<MemoryRouter initialEntries={["/today?run_id=run-navigation"]}><TodayPage /></MemoryRouter>);
+
+    expect(screen.getByText("这个请求不需要重新生成计划，可以直接查看今天的任务。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看今日任务" })).toHaveAttribute("href", "/today");
+  });
+
+  it("uses the persistent stopping state and disables duplicate cancellation", () => {
+    vi.mocked(useMe).mockReturnValue({
+      data: {
+        profile_complete: true,
+        profile: null,
+        active_plan: null,
+        today_tasks: [],
+        active_run: null,
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useMe>);
+    vi.mocked(useRun).mockReturnValue({
+      data: {
+        run_id: "run-stopping",
+        status: "running",
+        user_status: "stopping",
+        status_message: "正在安全停止本次生成。",
+        result_kind: null,
+        result: null,
+        final_plan_id: null,
+      } as AgentRunResponse,
+    } as ReturnType<typeof useRun>);
+    vi.mocked(useRunEventStream).mockReturnValue({
+      connectionState: "live",
+      progressMessage: null,
+    } as ReturnType<typeof useRunEventStream>);
+    vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
+
+    render(<MemoryRouter initialEntries={["/today?run_id=run-stopping"]}><TodayPage /></MemoryRouter>);
+
+    expect(screen.getByText("正在安全停止本次生成。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "正在停止…" })).toBeDisabled();
   });
 });

@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import AgentLeaseLostError, PersistTransactionError
+from app.agent.errors import AgentLeaseLostError, PersistTransactionError, RunCancelledError
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.events import EventRecorder
@@ -19,6 +19,7 @@ from app.schemas.agent_runs import (
     ClarificationRequest,
     CompanionMessageCandidate,
     EvidenceVisibility,
+    NavigationResult,
     PlanCandidate,
     PlanResultSummary,
     SafeResponse,
@@ -217,7 +218,7 @@ class AgentRunFinalizer:
                         terminal_payload,
                         allow_terminal_run=True,
                     )
-        except AgentLeaseLostError:
+        except (AgentLeaseLostError, RunCancelledError):
             raise
         except Exception:
             await self.finalize_failed(
@@ -232,17 +233,24 @@ class AgentRunFinalizer:
         *,
         run_id: UUID,
         result_kind: str,
-        result: ClarificationRequest | SafeResponse,
+        result: ClarificationRequest | SafeResponse | NavigationResult,
         fallback_reason: str,
     ) -> None:
         async with self._session_factory() as session:
             async with session_transaction(session):
                 run = await self._lock_active_run(session, run_id)
+                self._ensure_can_persist(run)
                 recorder = EventRecorder(session)
                 if isinstance(result, ClarificationRequest):
                     await recorder.record(
                         run_id,
                         "clarification.requested",
+                        result.model_dump(mode="json"),
+                    )
+                elif isinstance(result, NavigationResult):
+                    await recorder.record(
+                        run_id,
+                        "navigation.suggested",
                         result.model_dump(mode="json"),
                     )
                 run.status = "degraded"
@@ -385,6 +393,6 @@ class AgentRunFinalizer:
         if run.status != "running":
             raise PersistTransactionError("Run must be running")
         if run.cancel_requested_at is not None:
-            raise PersistTransactionError("Run cancellation was requested")
+            raise RunCancelledError("Agent Run cancellation was requested")
         if datetime.now(UTC) >= run.deadline_at:
             raise PersistTransactionError("Run deadline was exceeded")

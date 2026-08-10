@@ -13,6 +13,7 @@ from app.schemas.agent_runs import RunInputSnapshot, RuntimeConfigSnapshot
 NODE_TIMEOUTS: dict[str, float] = {
     "risk_gate": 6,
     "intent_router": 6,
+    "navigation": 2,
     "clarification": 2,
     "safe_response": 2,
     "context_builder": 5,

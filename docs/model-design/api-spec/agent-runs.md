@@ -1,5 +1,7 @@
 # Agent Run API
 
+面向用户的计划创建入口先使用 `/api/v1/goal-briefs` 完成澄清与确认；确认接口才会创建本页定义的 Agent Run。直接创建 Agent Run 的接口保留给内部流程、复盘续接和兼容调用。
+
 ## POST /api/v1/agent-runs
 
 创建规划或重规划 Run。需要 JWT 与 `Idempotency-Key`。
@@ -24,9 +26,13 @@
 | goal_type_override | GoalType/null | 仅用户明确表达目标变化时使用 |
 | source_plan_id | UUID/null | replan 可显式指定；省略时优先当前 generated/active，否则最近 completed Plan |
 
-已有计划查询使用 `/plans` 与 `/tasks`，不通过 Agent Run。
+已有计划查询仍由 `/plans` 与 `/tasks` 提供数据；如果用户在 Agent 入口发出查询型消息，
+Run 返回结构化页面导航，不调用规划模型，也不创建新 Plan。
 
-意图路由不依赖 LLM。只有消息包含受支持的规划语义并满足来源约束时才进入生成 Graph；仅有 `hint_intent`、问候或含糊文本会返回 `intent_uncertain`，查询类文本返回 `unsupported_intent`。这两类结果都不会调用规划模型。
+意图路由不依赖 LLM。只有消息包含受支持的规划语义并满足来源约束时才进入生成 Graph；
+仅有 `hint_intent`、问候或含糊文本返回带下一步动作的 `intent_uncertain`；查询类文本返回
+`navigation`。两类结果都不会调用规划模型。服务端 Review 强制的 Replan 优先级高于消息中的
+查询词，避免工作流决策被自然语言表面特征覆盖。
 
 ### 创建前校验
 
@@ -59,6 +65,8 @@
 {
   "run_id": "...",
   "status": "completed",
+  "user_status": "ready",
+  "status_message": "新的职业计划已经准备好。",
   "resolved_intent": "create_plan",
   "replan_mode": "initial",
   "result_kind": "plan",
@@ -79,7 +87,8 @@
   "total_cost_cny": "0.013200",
   "total_latency_ms": 8120,
   "created_at": "...",
-  "finished_at": "..."
+  "finished_at": "...",
+  "cancel_requested_at": null
 }
 ```
 
@@ -91,10 +100,17 @@
   "status": "degraded",
   "result_kind": "clarification",
   "result": {
+    "message": "完善职业画像后，我才能生成更适合你的行动计划。",
     "questions": ["你目前处于哪个求职阶段？"],
     "slot_names": ["stage"],
     "hint_options": {"stage": ["exploring", "preparing", "applying", "interviewing"]},
-    "reason": "profile_incomplete"
+    "reason": "profile_incomplete",
+    "suggested_actions": [{
+      "action": "complete_profile",
+      "label": "完善职业资料",
+      "target_route": "/settings/profile"
+    }],
+    "target_route": "/settings/profile"
   },
   "final_plan_id": null,
   "fallback_reason": "profile_incomplete"
@@ -105,7 +121,31 @@
 
 - `profile_incomplete`：意图已确定，但生成所需 Profile 字段缺失；
 - `intent_uncertain`：消息语义不足、hint 冲突或重规划缺少来源；
-- `unsupported_intent`：明确属于已有计划/任务查询等非生成请求。
+- `unsupported_intent`：保留给无法由当前产品能力处理的非生成请求；计划/任务查询已改为 Navigation。
+
+### Navigation 结果
+
+```json
+{
+  "run_id": "...",
+  "status": "degraded",
+  "user_status": "action_required",
+  "status_message": "可以直接前往对应页面继续。",
+  "resolved_intent": "navigate",
+  "result_kind": "navigation",
+  "result": {
+    "action": "view_today_tasks",
+    "label": "查看今日任务",
+    "target_route": "/today",
+    "message": "这个请求不需要重新生成计划，可以直接查看今天的任务。"
+  },
+  "final_plan_id": null,
+  "fallback_reason": "resource_navigation"
+}
+```
+
+这里的数据库状态仍为 `degraded`，表示 Graph 没有生成 Plan；产品界面必须使用
+`user_status=action_required`，不能向用户展示“降级”术语。
 
 ### Safe Response 结果
 
@@ -183,6 +223,9 @@ data: {"run_id":"...","sequence":7,"stage":"validating","message":"正在检查�
 ```
 
 服务端先写 `cancel_requested_at`，再尝试取消本进程 Task。接口只表示“取消请求已接受”，不能提前声称 Run 已进入 cancelled。
+
+如果 API 请求与 Run owner 不在同一进程，owner heartbeat 会读取取消标记并取消正在执行的
+Task；NodeRunner 在进入下一节点前再次查询数据库，作为跨进程传播兜底。
 
 Response 202：
 

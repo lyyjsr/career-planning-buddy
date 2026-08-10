@@ -12,7 +12,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import AgentDeadlineExceededError, AgentError, AgentLeaseLostError
+from app.agent.errors import (
+    AgentDeadlineExceededError,
+    AgentError,
+    AgentLeaseLostError,
+    RunCancelledError,
+)
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.events import EventRecorder
@@ -82,7 +87,7 @@ class NodeRunner:
             )
             raise AgentDeadlineExceededError from exc
         except BaseException as exc:
-            code = exc.code if isinstance(exc, AgentError) else "NODE_EXECUTION_FAILED"
+            code = self._error_code(exc)
             error_message = str(exc) if isinstance(exc, AgentError) else type(exc).__name__
             await self.fail_step(
                 run_id,
@@ -97,12 +102,24 @@ class NodeRunner:
             int((monotonic() - started) * 1000),
             traced_latency if isinstance(traced_latency, int) else 0,
         )
-        await self._complete_step(
-            run_id,
-            step.id,
-            latency_ms=latency_ms,
-            telemetry=output.telemetry,
-        )
+        try:
+            await self._complete_step(
+                run_id,
+                step.id,
+                latency_ms=latency_ms,
+                telemetry=output.telemetry,
+            )
+        except BaseException as exc:
+            await self.fail_step(
+                run_id,
+                step.id,
+                latency_ms=latency_ms,
+                error_code=self._error_code(exc),
+                error_message=(
+                    str(exc) if isinstance(exc, AgentError) else type(exc).__name__
+                ),
+            )
+            raise
         return output.value
 
     async def run_with_step(
@@ -131,7 +148,7 @@ class NodeRunner:
             )
             raise AgentDeadlineExceededError from exc
         except BaseException as exc:
-            code = exc.code if isinstance(exc, AgentError) else "NODE_EXECUTION_FAILED"
+            code = self._error_code(exc)
             error_message = str(exc) if isinstance(exc, AgentError) else type(exc).__name__
             await self.fail_step(
                 run_id,
@@ -146,12 +163,24 @@ class NodeRunner:
             int((monotonic() - started) * 1000),
             traced_latency if isinstance(traced_latency, int) else 0,
         )
-        await self._complete_step(
-            run_id,
-            step.id,
-            latency_ms=latency_ms,
-            telemetry=output.telemetry,
-        )
+        try:
+            await self._complete_step(
+                run_id,
+                step.id,
+                latency_ms=latency_ms,
+                telemetry=output.telemetry,
+            )
+        except BaseException as exc:
+            await self.fail_step(
+                run_id,
+                step.id,
+                latency_ms=latency_ms,
+                error_code=self._error_code(exc),
+                error_message=(
+                    str(exc) if isinstance(exc, AgentError) else type(exc).__name__
+                ),
+            )
+            raise
         return output.value
 
     async def start_step(self, run_id: UUID, node_name: str, attempt: int = 1) -> AgentStep:
@@ -232,7 +261,7 @@ class NodeRunner:
                 )
                 if run is None:
                     return
-                self._assert_lease_owner(run)
+                self._assert_lease_owner(run, allow_cancel_requested=True)
                 step = await session.get(AgentStep, step_id)
                 if step is None or step.status != "running":
                     return
@@ -255,7 +284,12 @@ class NodeRunner:
                     },
                 )
 
-    def _assert_lease_owner(self, run: AgentRun) -> None:
+    def _assert_lease_owner(
+        self,
+        run: AgentRun,
+        *,
+        allow_cancel_requested: bool = False,
+    ) -> None:
         if self._worker_id is None:
             return
         if (
@@ -266,3 +300,12 @@ class NodeRunner:
             or run.lease_expires_at <= datetime.now(UTC)
         ):
             raise AgentLeaseLostError("Agent Run lease ownership was lost")
+        if run.cancel_requested_at is not None and not allow_cancel_requested:
+            raise RunCancelledError("Agent Run cancellation was requested")
+
+    def _error_code(self, exc: BaseException) -> str:
+        if isinstance(exc, AgentError):
+            return exc.code
+        if isinstance(exc, asyncio.CancelledError) and self._budget.cancelled:
+            return "RUN_CANCELLED"
+        return "NODE_EXECUTION_FAILED"

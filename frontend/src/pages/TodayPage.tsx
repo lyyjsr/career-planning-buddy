@@ -12,9 +12,10 @@ import {
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMe } from "@/api/auth";
-import { useCancelRun, useCreateRun, useRun } from "@/api/agent-runs";
+import { useCancelRun, useRun } from "@/api/agent-runs";
+import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
 import { useRunEventStream, type RunStreamState } from "@/api/sse";
-import type { AgentRunResponse, TaskResponse } from "@/api/types";
+import type { AgentRunResponse, GoalBriefResponse, TaskResponse } from "@/api/types";
 import { TaskCard } from "@/components/TaskCard";
 import { localDateIso, WeeklyTaskSchedule } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
@@ -47,10 +48,15 @@ function nextActionTask(tasks: TaskResponse[]): TaskResponse | undefined {
 export function TodayPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const me = useMe();
-  const createRun = useCreateRun();
+  const createGoalBrief = useCreateGoalBrief();
+  const refineGoalBrief = useRefineGoalBrief();
+  const confirmGoalBrief = useConfirmGoalBrief();
+  const cancelGoalBrief = useCancelGoalBrief();
   const cancelRun = useCancelRun();
   const [message, setMessage] = useState("");
   const [submittedRunId, setSubmittedRunId] = useState<string | null>(() => searchParams.get("run_id"));
+  const [localBrief, setLocalBrief] = useState<GoalBriefResponse | null>(null);
+  const [dismissedBriefId, setDismissedBriefId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const refreshedPlanId = useRef<string | null>(null);
 
@@ -58,6 +64,10 @@ export function TodayPage(): JSX.Element {
   const stream = useRunEventStream(activeRunId ?? undefined);
   const runQuery = useRun(activeRunId ?? undefined);
   const run = runQuery.data;
+  const restoredBrief = me.data?.active_goal_brief ?? null;
+  const activeBrief = localBrief ?? (
+    restoredBrief?.goal_brief_id === dismissedBriefId ? null : restoredBrief
+  );
 
   useEffect(() => {
     if (
@@ -91,8 +101,8 @@ export function TodayPage(): JSX.Element {
   function submitPlan(event: React.FormEvent): void {
     event.preventDefault();
     const trimmed = message.trim();
-    if (trimmed.length === 0 || createRun.isPending || isPlanning) return;
-    createRun.mutate(
+    if (trimmed.length === 0 || createGoalBrief.isPending || isPlanning || activeBrief !== null) return;
+    createGoalBrief.mutate(
       {
         payload: {
           message: trimmed,
@@ -103,7 +113,8 @@ export function TodayPage(): JSX.Element {
       },
       {
         onSuccess: (created) => {
-          setSubmittedRunId(created.run_id);
+          setLocalBrief(created);
+          setDismissedBriefId(null);
           setMessage("");
           setFeedback(null);
           void me.refetch();
@@ -140,6 +151,25 @@ export function TodayPage(): JSX.Element {
         />
       )}
 
+      {activeBrief !== null && !isPlanning && (
+        <GoalBriefPanel
+          brief={activeBrief}
+          pending={refineGoalBrief.isPending || confirmGoalBrief.isPending || cancelGoalBrief.isPending}
+          onRefine={(refinement) => refineGoalBrief.mutate(
+            { briefId: activeBrief.goal_brief_id, version: activeBrief.version, message: refinement },
+            { onSuccess: setLocalBrief },
+          )}
+          onConfirm={() => confirmGoalBrief.mutate(
+            { briefId: activeBrief.goal_brief_id, version: activeBrief.version },
+            { onSuccess: (result) => { setDismissedBriefId(activeBrief.goal_brief_id); setLocalBrief(null); setSubmittedRunId(result.run.run_id); void me.refetch(); } },
+          )}
+          onCancel={() => cancelGoalBrief.mutate(
+            { briefId: activeBrief.goal_brief_id, version: activeBrief.version },
+            { onSuccess: () => { setDismissedBriefId(activeBrief.goal_brief_id); setLocalBrief(null); void me.refetch(); } },
+          )}
+        />
+      )}
+
       {feedback !== null && (
         <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-accent/55 p-4 text-sm leading-6">
           <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -150,17 +180,17 @@ export function TodayPage(): JSX.Element {
         </div>
       )}
 
-      {!isPlanning && activePlan === null && (
+      {!isPlanning && activeBrief === null && activePlan === null && (
         <CreatePlanPanel
           message={message}
           onMessageChange={setMessage}
           onSubmit={submitPlan}
-          pending={createRun.isPending}
-          error={createRun.error}
+          pending={createGoalBrief.isPending}
+          error={createGoalBrief.error}
         />
       )}
 
-      {!isPlanning && activePlan !== null && (
+      {!isPlanning && activeBrief === null && activePlan !== null && (
         <section className="space-y-3" aria-labelledby="week-schedule-heading">
           <div className="flex items-end justify-between gap-3">
             <div>
@@ -175,7 +205,7 @@ export function TodayPage(): JSX.Element {
         </section>
       )}
 
-      {!isPlanning && firstTask !== undefined && (
+      {!isPlanning && activeBrief === null && firstTask !== undefined && (
         <section className="space-y-4" aria-labelledby="first-step-heading">
           <div className="flex items-center justify-between">
             <div>
@@ -204,7 +234,7 @@ export function TodayPage(): JSX.Element {
         </section>
       )}
 
-      {allSettled && !isPlanning && activePlan !== null && (
+      {allSettled && !isPlanning && activeBrief === null && activePlan !== null && (
         <Card className="border-primary/20 bg-gradient-to-br from-card to-accent/40">
           <CardContent className="space-y-4 p-5 sm:p-6">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -221,7 +251,7 @@ export function TodayPage(): JSX.Element {
         </Card>
       )}
 
-      {!isPlanning && activePlan !== null && firstTask === undefined && nextPlannedTask !== undefined && (
+      {!isPlanning && activeBrief === null && activePlan !== null && firstTask === undefined && nextPlannedTask !== undefined && (
         <Card className="border-primary/15">
           <CardHeader>
             <CardDescription>下一项将在 {nextPlannedTask.scheduled_date} 自动开放</CardDescription>
@@ -255,19 +285,86 @@ export function TodayPage(): JSX.Element {
               <Badge variant="secondary">{activePlan.weekly_focus.length} 周路线</Badge>
             </CardContent>
           </Card>
-          {!isPlanning && (
+          {!isPlanning && activeBrief === null && (
             <details className="rounded-xl">
               <summary className="cursor-pointer py-2 text-sm text-muted-foreground hover:text-foreground">需要调整计划内容？</summary>
               <form onSubmit={submitPlan} className="space-y-3 rounded-2xl border bg-card p-4">
                 <p className="text-xs leading-5 text-muted-foreground">如果目标方向或每日可投入时间变了，请先到“目标与时间”保存并重新规划。</p>
                 <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} maxLength={2000} placeholder="例如：保留当前每日时间，但后续优先补 Agent 评测与可观测性" />
-                <Button type="submit" size="sm" disabled={createRun.isPending || message.trim().length === 0}>生成调整方案</Button>
+                <Button type="submit" size="sm" disabled={createGoalBrief.isPending || message.trim().length === 0}>整理调整方案</Button>
               </form>
             </details>
           )}
         </section>
       )}
     </div>
+  );
+}
+
+function GoalBriefPanel({
+  brief,
+  pending,
+  onRefine,
+  onConfirm,
+  onCancel,
+}: {
+  brief: GoalBriefResponse;
+  pending: boolean;
+  onRefine: (message: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [refinement, setRefinement] = useState("");
+  const needsClarification = brief.status === "clarification_required";
+  return (
+    <Card className="border-primary/25 bg-gradient-to-br from-accent/45 to-card">
+      <CardHeader>
+        <CardDescription>{needsClarification ? "再补充一点，避免做错方向" : "执行前请确认目标"}</CardDescription>
+        <CardTitle className="text-xl">{brief.project_goal ?? "待明确的项目目标"}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {needsClarification && (
+          <div className="rounded-xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm">
+            <div className="font-medium">还需要你决定</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              {brief.questions.map((question) => <li key={question}>{question}</li>)}
+            </ul>
+          </div>
+        )}
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">面向岗位</dt><dd className="mt-1 font-medium">{brief.target_role ?? "待补充"}</dd></div>
+          <div><dt className="text-muted-foreground">总体周期</dt><dd className="mt-1 font-medium">{brief.duration_weeks === null ? "待补充" : `${brief.duration_weeks} 周`}</dd></div>
+          <div><dt className="text-muted-foreground">能力重点</dt><dd className="mt-1 leading-6">{brief.capability_focus.join("、")}</dd></div>
+          <div><dt className="text-muted-foreground">技术栈</dt><dd className="mt-1 leading-6">{brief.tech_stack.join("、")}</dd></div>
+        </dl>
+        <div className="text-sm">
+          <div className="text-muted-foreground">预期交付物</div>
+          <p className="mt-1 leading-6">{brief.deliverables.join("、")}</p>
+        </div>
+        {brief.assumptions.length > 0 && (
+          <div className="rounded-xl bg-muted/60 p-3 text-xs leading-5 text-muted-foreground">
+            系统建议：{brief.assumptions.join("；")}。你可以在下方修改。
+          </div>
+        )}
+        <div className="rounded-xl border border-primary/15 bg-background/70 p-3 text-sm leading-6">
+          确认后会生成 {brief.duration_weeks ?? "1–8"} 周总体路线，并固定展开从今天开始滚动未来 7 天的具体任务。
+        </div>
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (refinement.trim()) onRefine(refinement.trim());
+          }}
+        >
+          <Textarea value={refinement} onChange={(event) => setRefinement(event.target.value)} maxLength={2000} rows={3} placeholder="补充或修改，例如：使用 Python + FastAPI，重点展示评测与可观测性" />
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" variant="outline" disabled={pending || refinement.trim().length === 0}>更新目标</Button>
+            {!needsClarification && <Button type="button" disabled={pending} onClick={onConfirm}>确认并开始生成</Button>}
+            <Button type="button" variant="ghost" disabled={pending} onClick={onCancel}>取消草案</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -331,7 +428,10 @@ function RunPanel({
   onRetry: () => void;
 }): JSX.Element | null {
   if (run.status === "pending" || run.status === "running") {
-    const progress = stream.progressMessage ?? (run.status === "pending" ? "正在进入规划队列" : "正在整理适合你的行动路径");
+    const isStopping = run.user_status === "stopping";
+    const progress = isStopping
+      ? run.status_message
+      : stream.progressMessage ?? run.status_message;
     return (
       <Card className="border-primary/25 bg-accent/35">
         <CardContent className="space-y-4 p-5">
@@ -341,11 +441,13 @@ function RunPanel({
                 <RefreshCw className="h-4 w-4 animate-spin" />
               </span>
               <div>
-                <div className="font-medium">正在为你生成路线</div>
+                <div className="font-medium">{isStopping ? "正在停止" : "正在为你生成路线"}</div>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">{progress}</p>
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={onCancel}>取消</Button>
+            <Button variant="ghost" size="sm" disabled={isStopping} onClick={onCancel}>
+              {isStopping ? "正在停止…" : "取消"}
+            </Button>
           </div>
           <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
             <span className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary" />理解目标与限制</span>
@@ -367,8 +469,31 @@ function RunPanel({
       <Card className="border-amber-300/60 bg-amber-50/60">
         <CardContent className="space-y-3 p-5 text-sm">
           <div className="font-medium">还需要补充一点信息</div>
+          <p className="text-muted-foreground">{run.result.message}</p>
           <ul className="list-disc space-y-1 pl-5 text-muted-foreground">{run.result.questions.map((question) => <li key={question}>{question}</li>)}</ul>
-          <Button asChild variant="outline" size="sm"><Link to="/settings/profile">补充画像</Link></Button>
+          <div className="flex flex-wrap gap-2">
+            {run.result.suggested_actions.map((action) => (
+              <Button key={action.action} asChild variant="outline" size="sm">
+                <Link to={action.target_route}>{action.label}</Link>
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (
+    run.result_kind === "navigation"
+    && run.result !== null
+    && "target_route" in run.result
+    && "label" in run.result
+  ) {
+    return (
+      <Card className="border-primary/25 bg-accent/35">
+        <CardContent className="space-y-3 p-5 text-sm">
+          <div className="font-medium">可以直接为你打开</div>
+          <p className="text-muted-foreground">{run.result.message}</p>
+          <Button asChild size="sm"><Link to={run.result.target_route}>{run.result.label}</Link></Button>
         </CardContent>
       </Card>
     );

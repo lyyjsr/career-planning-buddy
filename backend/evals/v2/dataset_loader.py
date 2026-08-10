@@ -30,7 +30,7 @@ class LegacyStage5Case(StrictModel):
     profile: EvalProfile | None
     hint_intent: Literal["create_plan", "replan"] | None = None
     replan_mode: Literal["continue", "adjust"] | None = None
-    expected_result_kind: Literal["plan", "clarification", "safe_response"]
+    expected_result_kind: Literal["plan", "clarification", "safe_response", "navigation"]
     expected_tools: list[Literal["memory_lookup", "rag_retrieve", "web_search"]] = Field(
         default_factory=list
     )

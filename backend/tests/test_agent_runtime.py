@@ -12,12 +12,14 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
-from app.agent.errors import AgentLeaseLostError
+from app.agent.errors import AgentLeaseLostError, RunCancelledError
 from app.agent.executor import AgentRunExecutor
 from app.agent.finalizer import AgentRunFinalizer
+from app.agent.node_runner import NodeOutput, NodeRunner
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.core.security import TokenService
+from app.harness.budget import BudgetGuard, CancellationToken
 from app.models.agent_run import AgentEvent, AgentRun, AgentStep
 from app.models.plan import Plan, Task
 from app.providers.llm import MockPlanningProvider
@@ -130,7 +132,7 @@ async def test_happy_run_persists_plan_tasks_snapshot_and_last_terminal_event(
     assert run.final_plan_id is not None
     assert run.input_snapshot_json is not None
     assert intent_step is not None
-    assert intent_step.trace_data["router_version"] == "intent-rule-v2"
+    assert intent_step.trace_data["router_version"] == "intent-rule-v3"
     assert intent_step.trace_data["intent"] == "create_plan"
     assert intent_step.trace_data["confidence_band"] == "high"
     assert intent_step.trace_data["matched_rule_ids"]
@@ -206,6 +208,34 @@ async def test_database_lease_allows_only_one_worker_to_claim_a_run(
 
 
 @pytest.mark.asyncio
+async def test_query_only_run_returns_navigation_without_generating_a_plan(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(
+        db_session,
+        user_id,
+        message="查看我的计划",
+        key="navigate-current-plan",
+    )
+
+    await AgentRunExecutor(runtime_factory(db_connection)).execute(run.id)
+
+    completed = await refresh_run(db_session, run.id)
+    response = AgentRunService.to_response(completed)
+    assert completed.status == "degraded"
+    assert completed.resolved_intent == "navigate"
+    assert completed.result_kind == "navigation"
+    assert response.user_status == "action_required"
+    assert response.result is not None
+    assert response.result.model_dump(mode="json")["target_route"] == "/journey"
+    assert await db_session.scalar(
+        select(func.count()).select_from(Plan).where(Plan.source_run_id == run.id)
+    ) == 0
+
+
+@pytest.mark.asyncio
 async def test_stale_attempt_cannot_terminalize_a_reassigned_run(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
@@ -264,7 +294,7 @@ async def test_run_latency_never_becomes_negative_when_database_clock_is_ahead(
     [
         ("帮我制定计划", False, "clarification", "profile_incomplete"),
         ("你好", True, "clarification", "intent_uncertain"),
-        ("今天有什么任务", True, "clarification", "unsupported_intent"),
+        ("今天有什么任务", True, "navigation", "resource_navigation"),
         ("我想自杀", True, "safe_response", "high_risk_routed"),
     ],
 )
@@ -428,6 +458,82 @@ async def test_user_cancel_stops_graph_and_writes_one_terminal(
     assert run.status == "cancelled"
     assert run.error_code == "RUN_CANCELLED"
     assert terminal_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_from_another_worker_is_observed_before_the_next_node(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="cross-worker-cancel")
+    owner = AgentRunExecutor(runtime_factory(db_connection))
+    claimed = await owner._claim_by_id(run.id)  # noqa: SLF001
+    assert claimed is not None
+
+    remote_scheduler = ManualExecutor()
+    await AgentRunService(db_session, get_settings(), remote_scheduler).cancel(
+        run_id=run.id,
+        user_id=user_id,
+        payload=AgentRunCancelRequest(),
+        idempotency_key="cross-worker-cancel-key",
+    )
+    claimed_run, config = claimed
+    await owner._execute_claimed(claimed_run, config)  # noqa: SLF001
+
+    cancelled = await refresh_run(db_session, run.id)
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "RUN_CANCELLED"
+    assert AgentRunService.to_response(cancelled).user_status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cross_worker_cancel_closes_the_active_step_before_terminalizing(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="cross-worker-active-step")
+    owner = AgentRunExecutor(runtime_factory(db_connection))
+    claimed = await owner._claim_by_id(run.id)  # noqa: SLF001
+    assert claimed is not None
+    claimed_run, config = claimed
+    assert config is not None
+
+    runner = NodeRunner(
+        runtime_factory(db_connection),
+        BudgetGuard(config, claimed_run.deadline_at, CancellationToken()),
+        config.node_timeouts_seconds,
+        worker_id=claimed_run.worker_id,
+        attempt_count=claimed_run.attempt_count,
+    )
+
+    async def cancel_during_node() -> NodeOutput[str]:
+        await AgentRunService(db_session, get_settings(), ManualExecutor()).cancel(
+            run_id=run.id,
+            user_id=user_id,
+            payload=AgentRunCancelRequest(),
+            idempotency_key="cross-worker-active-step-key",
+        )
+        return NodeOutput("ignored")
+
+    with pytest.raises(RunCancelledError):
+        await runner.run(run.id, "risk_gate", cancel_during_node)
+
+    steps = list(
+        await db_session.scalars(select(AgentStep).where(AgentStep.run_id == run.id))
+    )
+    assert len(steps) == 1
+    assert steps[0].status == "failed"
+    assert steps[0].error_code == "RUN_CANCELLED"
+
+    await AgentRunFinalizer(
+        runtime_factory(db_connection),
+        None,
+        worker_id=claimed_run.worker_id,
+        attempt_count=claimed_run.attempt_count,
+    ).finalize_cancelled(run.id)
+    assert (await refresh_run(db_session, run.id)).status == "cancelled"
 
 
 @pytest.mark.asyncio

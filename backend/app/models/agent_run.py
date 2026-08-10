@@ -36,7 +36,8 @@ class AgentRun(Base):
             name="ck_agent_runs_status",
         ),
         CheckConstraint(
-            "result_kind IS NULL OR result_kind IN ('plan','clarification','safe_response')",
+            "result_kind IS NULL OR "
+            "result_kind IN ('plan','clarification','safe_response','navigation')",
             name="ck_agent_runs_result_kind",
         ),
         CheckConstraint(
@@ -44,7 +45,8 @@ class AgentRun(Base):
             name="ck_agent_runs_hint_intent",
         ),
         CheckConstraint(
-            "resolved_intent IS NULL OR resolved_intent IN ('create_plan','replan','unsupported')",
+            "resolved_intent IS NULL OR "
+            "resolved_intent IN ('create_plan','replan','navigate','unsupported')",
             name="ck_agent_runs_resolved_intent",
         ),
         CheckConstraint(
@@ -78,8 +80,7 @@ class AgentRun(Base):
             name="ck_agent_runs_cancel_idempotency_pair",
         ),
         CheckConstraint(
-            "(status <> 'running') OR "
-            "(worker_id IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            "(status <> 'running') OR (worker_id IS NOT NULL AND lease_expires_at IS NOT NULL)",
             name="ck_agent_runs_running_lease",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_agent_runs_attempt_count"),
@@ -101,6 +102,11 @@ class AgentRun(Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    goal_brief_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("goal_briefs.id", ondelete="SET NULL"),
+        unique=True,
     )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     request_text: Mapped[str] = mapped_column(Text, nullable=False)

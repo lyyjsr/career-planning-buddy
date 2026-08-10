@@ -28,12 +28,16 @@ validation, at most one controlled repair, fallback and terminal-aware persisten
 Each Agent Run persists input/config/output snapshots, steps, tool calls and events.
 Events are committed before SSE delivery, snapshots are redacted/hash-oriented, and a Run
 has exactly one terminal event which is last. Cancellation, deadline and budget are explicit
-runtime states. Plans are versioned, so replanning archives rather than overwrites history.
+runtime states. Query-only messages return typed page navigation instead of being reported as
+unsupported; clarification results carry explicit next actions. Plans are versioned, so
+replanning archives rather than overwrites history.
 
 PostgreSQL 16 with pgvector is the system of record. Alembic owns schema changes. Agent Run
 dispatch is database-backed: workers claim pending rows with `SKIP LOCKED`, renew a lease by
 heartbeat, and requeue expired leases up to a bounded attempt count. The local task registry
-is only an execution handle. Row-locked recovery rechecks lease expiry, while worker id and
+is only an execution handle. Persistent cancellation is observed both by the lease heartbeat
+and at node boundaries, including when the API and owner Task are in different processes.
+Row-locked recovery rechecks lease expiry, while worker id and
 attempt count fence stale writers from node and terminal persistence. Retries are at-least-once and restart the controlled graph; they
 reuse persisted Tool results but may repeat an LLM call. Eval executors remain process-local,
 so the complete application is not yet horizontally scalable without deployment constraints.
@@ -106,6 +110,10 @@ Pydantic strict schemas drive OpenAPI. A checked-in OpenAPI snapshot detects bac
 contract drift. The frontend's shared API client adds the normal bearer token; developer
 clients do not maintain a second JWT. Eval list/status projections include dataset,
 baseline/variant and the full runtime identity required by `/dev/evals`.
+
+Agent Run responses expose stable technical status plus a user-facing `user_status` and
+`status_message`. This keeps reliable backend states (`pending/running/degraded`) separate
+from product language (`queued/generating/recovering/stopping/ready/action_required`).
 
 The Eval browser console intentionally creates only small Mock/fixture runs. Paid live
 evaluation remains an explicit CLI/API developer action. ExperienceAtom approval is a

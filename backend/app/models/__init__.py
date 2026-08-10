@@ -9,6 +9,7 @@ from app.models.evidence import (
     MemoryCandidate,
     SearchSource,
 )
+from app.models.goal_brief import GoalBrief
 from app.models.plan import CompanionMessage, Plan, Task
 from app.models.provider_call import (
     EvalProviderFixtureBundle,
@@ -33,6 +34,7 @@ __all__ = [
     "EvalTrial",
     "Memory",
     "MemoryCandidate",
+    "GoalBrief",
     "Plan",
     "ProviderCall",
     "Review",

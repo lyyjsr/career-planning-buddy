@@ -5,6 +5,7 @@
 | 文档 | 用途 |
 |---|---|
 | [adr.md](./adr.md) | 记录不可轻易变更的架构决策 |
+| [bounded-context-map.md](./bounded-context-map.md) | DDD 子域、模型所有权、Context Map 与依赖规则 |
 | [tdd.md](./tdd.md) | 后端、前端、Agent Runtime 的实施设计 |
 | [api-and-data-contracts.md](./api-and-data-contracts.md) | 通用 API、状态机、SSE 和 Schema 契约 |
 | [technology-decision-matrix.md](./technology-decision-matrix.md) | 当前做、延后做、不做的技术清单 |

@@ -74,7 +74,10 @@
 
 ### RunResultKind
 
-`plan / clarification / safe_response`。failed/cancelled 无结果。
+`plan / clarification / safe_response / navigation`。failed/cancelled 无结果。
+
+Agent Run 同时返回稳定的 `user_status` 和 `status_message`，供普通用户界面展示；内部
+`RunStatus` 仍是状态机与持久化事实源。
 
 ### PlanStatus
 
@@ -198,7 +201,7 @@ PlanDetail 是 Service 拼装视图，不等同数据库单表：
 - pending→running；
 - running→completed/degraded/failed；
 - completed 必须 result_kind=plan；
-- degraded 必须 result_kind=plan/clarification/safe_response；
+- degraded 必须 result_kind=plan/clarification/safe_response/navigation；
 - pending/running→cancelled。
 
 ## 11. 幂等

@@ -254,6 +254,18 @@
       "AgentRunResponse": {
         "additionalProperties": false,
         "properties": {
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -337,6 +349,9 @@
                 "$ref": "#/components/schemas/SafeResponse"
               },
               {
+                "$ref": "#/components/schemas/NavigationResult"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -371,6 +386,12 @@
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
+          "status_message": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Status Message",
+            "type": "string"
+          },
           "total_cost_cny": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Cost Cny",
@@ -390,11 +411,27 @@
             "minimum": 0.0,
             "title": "Total Tokens Out",
             "type": "integer"
+          },
+          "user_status": {
+            "enum": [
+              "queued",
+              "generating",
+              "recovering",
+              "stopping",
+              "ready",
+              "action_required",
+              "failed",
+              "cancelled"
+            ],
+            "title": "User Status",
+            "type": "string"
           }
         },
         "required": [
           "run_id",
           "status",
+          "user_status",
+          "status_message",
           "resolved_intent",
           "replan_mode",
           "result_kind",
@@ -408,7 +445,8 @@
           "total_cost_cny",
           "total_latency_ms",
           "created_at",
-          "finished_at"
+          "finished_at",
+          "cancel_requested_at"
         ],
         "title": "AgentRunResponse",
         "type": "object"
@@ -436,6 +474,13 @@
             "title": "Hint Options",
             "type": "object"
           },
+          "message": {
+            "default": "还需要补充一点信息。",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
           "questions": {
             "items": {
               "type": "string"
@@ -462,6 +507,30 @@
             "minItems": 1,
             "title": "Slot Names",
             "type": "array"
+          },
+          "suggested_actions": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestedAction"
+            },
+            "maxItems": 3,
+            "title": "Suggested Actions",
+            "type": "array"
+          },
+          "target_route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "/settings/profile",
+                  "/journey",
+                  "/today"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Route"
           }
         },
         "required": [
@@ -1891,6 +1960,284 @@
         "title": "EvalStartResponse",
         "type": "object"
       },
+      "GoalBriefConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "goal_brief": {
+            "$ref": "#/components/schemas/GoalBriefResponse"
+          },
+          "run": {
+            "$ref": "#/components/schemas/AgentRunCreatedResponse"
+          }
+        },
+        "required": [
+          "goal_brief",
+          "run"
+        ],
+        "title": "GoalBriefConfirmResponse",
+        "type": "object"
+      },
+      "GoalBriefCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hint_intent": {
+            "enum": [
+              "create_plan",
+              "replan"
+            ],
+            "title": "Hint Intent",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "source_plan_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Plan Id"
+          }
+        },
+        "required": [
+          "message",
+          "hint_intent"
+        ],
+        "title": "GoalBriefCreateRequest",
+        "type": "object"
+      },
+      "GoalBriefRefineRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "message"
+        ],
+        "title": "GoalBriefRefineRequest",
+        "type": "object"
+      },
+      "GoalBriefResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "capability_focus": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capability Focus",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deliverables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "duration_weeks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Weeks"
+          },
+          "extraction_method": {
+            "enum": [
+              "rule",
+              "model",
+              "rule_fallback"
+            ],
+            "title": "Extraction Method",
+            "type": "string"
+          },
+          "goal_brief_id": {
+            "format": "uuid",
+            "title": "Goal Brief Id",
+            "type": "string"
+          },
+          "hint_intent": {
+            "enum": [
+              "create_plan",
+              "replan"
+            ],
+            "title": "Hint Intent",
+            "type": "string"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "project_goal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Goal"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "source_message": {
+            "title": "Source Message",
+            "type": "string"
+          },
+          "source_plan_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Plan Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GoalBriefStatus"
+          },
+          "success_criteria": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Success Criteria",
+            "type": "array"
+          },
+          "target_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Role"
+          },
+          "tech_stack": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tech Stack",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "goal_brief_id",
+          "status",
+          "source_message",
+          "hint_intent",
+          "source_plan_id",
+          "target_role",
+          "project_goal",
+          "capability_focus",
+          "tech_stack",
+          "duration_weeks",
+          "deliverables",
+          "success_criteria",
+          "assumptions",
+          "missing_fields",
+          "questions",
+          "extraction_method",
+          "model_id",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "GoalBriefResponse",
+        "type": "object"
+      },
+      "GoalBriefStatus": {
+        "enum": [
+          "clarification_required",
+          "awaiting_confirmation",
+          "confirmed",
+          "cancelled"
+        ],
+        "title": "GoalBriefStatus",
+        "type": "string"
+      },
+      "GoalBriefVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "GoalBriefVersionRequest",
+        "type": "object"
+      },
       "GoalType": {
         "enum": [
           "ai_backend",
@@ -1994,6 +2341,16 @@
         "additionalProperties": false,
         "description": "Stage 1 home restoration aggregate.",
         "properties": {
+          "active_goal_brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalBriefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "active_plan": {
             "anyOf": [
               {
@@ -2365,6 +2722,47 @@
           "updated_at"
         ],
         "title": "MemoryResponse",
+        "type": "object"
+      },
+      "NavigationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "view_current_plan",
+              "view_today_tasks"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "target_route": {
+            "enum": [
+              "/journey",
+              "/today"
+            ],
+            "title": "Target Route",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "label",
+          "target_route",
+          "message"
+        ],
+        "title": "NavigationResult",
         "type": "object"
       },
       "NextPlanAction": {
@@ -3835,6 +4233,7 @@
         "enum": [
           "create_plan",
           "replan",
+          "navigate",
           "unsupported"
         ],
         "title": "RunIntent",
@@ -3844,7 +4243,8 @@
         "enum": [
           "plan",
           "clarification",
-          "safe_response"
+          "safe_response",
+          "navigation"
         ],
         "title": "RunResultKind",
         "type": "string"
@@ -3927,6 +4327,46 @@
           "events_url"
         ],
         "title": "StartNextPlanResponse",
+        "type": "object"
+      },
+      "SuggestedAction": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "complete_profile",
+              "create_plan",
+              "continue_plan",
+              "adjust_plan",
+              "view_current_plan",
+              "view_today_tasks"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "target_route": {
+            "enum": [
+              "/settings/profile",
+              "/journey",
+              "/today",
+              "/reviews"
+            ],
+            "title": "Target Route",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "label",
+          "target_route"
+        ],
+        "title": "SuggestedAction",
         "type": "object"
       },
       "TaskListResponse": {
@@ -6699,6 +7139,417 @@
         "summary": "Regenerate Eval Run Report",
         "tags": [
           "eval-runs"
+        ]
+      }
+    },
+    "/api/v1/goal-briefs": {
+      "post": {
+        "operationId": "create_goal_brief_api_v1_goal_briefs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalBriefCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Goal Brief",
+        "tags": [
+          "goal-briefs"
+        ]
+      }
+    },
+    "/api/v1/goal-briefs/{brief_id}": {
+      "get": {
+        "operationId": "get_goal_brief_api_v1_goal_briefs__brief_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Goal Brief",
+        "tags": [
+          "goal-briefs"
+        ]
+      }
+    },
+    "/api/v1/goal-briefs/{brief_id}/cancel": {
+      "post": {
+        "operationId": "cancel_goal_brief_api_v1_goal_briefs__brief_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalBriefVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Goal Brief",
+        "tags": [
+          "goal-briefs"
+        ]
+      }
+    },
+    "/api/v1/goal-briefs/{brief_id}/confirm": {
+      "post": {
+        "operationId": "confirm_goal_brief_api_v1_goal_briefs__brief_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalBriefVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalBriefConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Goal Brief",
+        "tags": [
+          "goal-briefs"
+        ]
+      }
+    },
+    "/api/v1/goal-briefs/{brief_id}/refine": {
+      "post": {
+        "operationId": "refine_goal_brief_api_v1_goal_briefs__brief_id__refine_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalBriefRefineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Refine Goal Brief",
+        "tags": [
+          "goal-briefs"
         ]
       }
     },

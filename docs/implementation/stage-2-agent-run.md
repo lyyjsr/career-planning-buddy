@@ -72,15 +72,15 @@ Stage 2 `available_tools=[]`，不实现检索 Tool；但 tool_calls 表和 Regi
 - heartbeat 不落库、不占 sequence；
 - terminal event 只能有一个且是最后一个；
 - `plan.ready` 与 Plan/Run 终态同事务；
-- clarification/safe_response 也必须能通过 GET Run 恢复结果。
+- clarification/navigation/safe_response 也必须能通过 GET Run 恢复结果。
 
-## 单 Worker 约束
+## 可靠 Worker 约束
 
-执行任务可以使用进程内 `asyncio.Task` Registry，但必须：
+执行任务可以使用进程内 `asyncio.Task` Registry 作为本地句柄，但可靠性以数据库状态为准：
 
-- 不声称具备多 Worker 可靠性；
-- 启动时把超过 deadline 的 pending/running Run 标记为 failed(process_interrupted)；
-- 取消接口先写 cancel_requested_at，再取消本进程 Task；
+- dispatcher 通过数据库 lease 抢占 pending Run，attempt fencing 阻止旧执行者写入；
+- lease 过期或优雅停机时有界 requeue，超过 deadline/attempt 才 failed；
+- 取消接口先写 cancel_requested_at，本地 Task 立即取消，远端 owner 由 heartbeat/节点边界观察；
 - finally 通过 Finalizer 保证终态和 terminal event 唯一；
 - 进程重启后不从中间节点续跑。
 

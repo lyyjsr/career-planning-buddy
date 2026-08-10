@@ -54,11 +54,34 @@ class PlanResultSummary(StrictModel):
     task_count: int = Field(ge=1, le=7)
 
 
+class SuggestedAction(StrictModel):
+    action: Literal[
+        "complete_profile",
+        "create_plan",
+        "continue_plan",
+        "adjust_plan",
+        "view_current_plan",
+        "view_today_tasks",
+    ]
+    label: str = Field(min_length=1, max_length=80)
+    target_route: Literal["/settings/profile", "/journey", "/today", "/reviews"]
+
+
 class ClarificationRequest(StrictModel):
     questions: list[str] = Field(min_length=1, max_length=3)
     slot_names: list[str] = Field(min_length=1, max_length=3)
     hint_options: dict[str, list[str]]
     reason: Literal["profile_incomplete", "unsupported_intent", "intent_uncertain"]
+    message: str = Field(default="还需要补充一点信息。", min_length=1, max_length=500)
+    suggested_actions: list[SuggestedAction] = Field(default_factory=list, max_length=3)
+    target_route: Literal["/settings/profile", "/journey", "/today"] | None = None
+
+
+class NavigationResult(StrictModel):
+    action: Literal["view_current_plan", "view_today_tasks"]
+    label: str = Field(min_length=1, max_length=80)
+    target_route: Literal["/journey", "/today"]
+    message: str = Field(min_length=1, max_length=500)
 
 
 class SafeResponse(StrictModel):
@@ -67,12 +90,24 @@ class SafeResponse(StrictModel):
     disclaimer: str = Field(min_length=1, max_length=500)
 
 
-TerminalResult = PlanResultSummary | ClarificationRequest | SafeResponse
+TerminalResult = PlanResultSummary | ClarificationRequest | SafeResponse | NavigationResult
+RunUserStatus = Literal[
+    "queued",
+    "generating",
+    "recovering",
+    "stopping",
+    "ready",
+    "action_required",
+    "failed",
+    "cancelled",
+]
 
 
 class AgentRunResponse(StrictModel):
     run_id: UUID
     status: RunStatus
+    user_status: RunUserStatus
+    status_message: str = Field(min_length=1, max_length=200)
     resolved_intent: RunIntent | None
     replan_mode: ReplanMode | None
     result_kind: RunResultKind | None
@@ -87,6 +122,7 @@ class AgentRunResponse(StrictModel):
     total_latency_ms: int = Field(ge=0)
     created_at: datetime
     finished_at: datetime | None
+    cancel_requested_at: datetime | None
 
 
 class RuntimeConfigSnapshot(StrictModel):
@@ -252,7 +288,7 @@ class IntentResult(StrictModel):
     replan_mode: ReplanMode
     confidence: float = Field(ge=0, le=1)
     confidence_band: Literal["high", "medium", "low"] = "high"
-    router_version: str = Field(default="intent-rule-v2", min_length=1, max_length=64)
+    router_version: str = Field(default="intent-rule-v3", min_length=1, max_length=64)
     matched_rule_ids: list[str] = Field(default_factory=list, max_length=20)
     ambiguity_reasons: list[str] = Field(default_factory=list, max_length=10)
     missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]]
@@ -260,6 +296,8 @@ class IntentResult(StrictModel):
     requested_horizon_weeks: int | None = Field(default=None, ge=1, le=8)
     requires_fresh_information: bool
     method: Literal["rule", "model", "rule_fallback"]
+    navigation_action: Literal["view_current_plan", "view_today_tasks"] | None = None
+    navigation_target: Literal["/journey", "/today"] | None = None
 
 
 class WeeklyFocusCandidate(StrictModel):

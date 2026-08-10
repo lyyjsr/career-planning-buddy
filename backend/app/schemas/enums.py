@@ -38,6 +38,7 @@ class RunResultKind(StrEnum):
     PLAN = "plan"
     CLARIFICATION = "clarification"
     SAFE_RESPONSE = "safe_response"
+    NAVIGATION = "navigation"
 
 
 class PlanStatus(StrEnum):
@@ -81,6 +82,7 @@ class NextPlanAction(StrEnum):
 class RunIntent(StrEnum):
     CREATE_PLAN = "create_plan"
     REPLAN = "replan"
+    NAVIGATE = "navigate"
     UNSUPPORTED = "unsupported"
 
 
@@ -88,3 +90,10 @@ class ReplanMode(StrEnum):
     INITIAL = "initial"
     CONTINUE = "continue"
     ADJUST = "adjust"
+
+
+class GoalBriefStatus(StrEnum):
+    CLARIFICATION_REQUIRED = "clarification_required"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"

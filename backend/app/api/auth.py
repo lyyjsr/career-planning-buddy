@@ -15,6 +15,7 @@ from app.core.database import get_db_session
 from app.core.exceptions import AppError
 from app.core.security import AuthenticatedUser
 from app.repositories.agent_runs import AgentRunRepository
+from app.repositories.goal_briefs import GoalBriefRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.agent_runs import AgentRunResponse
 from app.schemas.auth import (
@@ -29,6 +30,7 @@ from app.schemas.profile import ProfileResponse
 from app.schemas.reviews import ReviewResponse
 from app.services.agent_runs import AgentRunService
 from app.services.auth import AuthService
+from app.services.goal_briefs import GoalBriefService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
 
@@ -95,6 +97,11 @@ async def get_me(
     if active_run_row is not None:
         active_run = AgentRunService.to_response(active_run_row)
 
+    active_goal_brief = None
+    active_brief_row = await GoalBriefRepository(session).get_active_for_user(user_id)
+    if active_brief_row is not None:
+        active_goal_brief = GoalBriefService.to_response(active_brief_row)
+
     latest_review: ReviewResponse | None = None
     review_repo = ReviewRepository(session)
     latest_rows = await review_repo.list_for_user(
@@ -118,5 +125,6 @@ async def get_me(
         active_plan=active_plan,
         today_tasks=today_tasks,
         active_run=active_run,
+        active_goal_brief=active_goal_brief,
         latest_review=latest_review,
     )

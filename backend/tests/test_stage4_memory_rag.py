@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.agent.errors import ProviderConfigurationError
@@ -26,6 +27,7 @@ from app.providers.search import MockSearchProvider
 from app.repositories.memories import MemoryRepository
 from app.schemas.agent_runs import EvidenceCatalogItem
 from app.schemas.enums import GoalType
+from app.services.memories import MemoryService
 from app.services.plans import PlanQueryService
 from app.tools.contracts import ToolContext
 from app.tools.registry import build_tool_registry
@@ -547,3 +549,15 @@ def test_forged_evidence_reference_is_rejected() -> None:
     )
     source_check = next(check for check in report.checks if check.code == "SOURCE_INTEGRITY")
     assert source_check.passed is False
+
+
+def test_memory_idempotency_only_maps_its_named_unique_constraint() -> None:
+    unrelated = IntegrityError("statement", {}, Exception("ck_memories_status"))
+    expected = IntegrityError(
+        "statement",
+        {},
+        Exception("uq_memory_candidates_user_decision_idempotency"),
+    )
+
+    assert MemoryService._is_decision_idempotency_conflict(unrelated) is False  # noqa: SLF001
+    assert MemoryService._is_decision_idempotency_conflict(expected) is True  # noqa: SLF001

@@ -19,9 +19,7 @@ class AgentRunRepository:
     async def get_for_user(
         self, run_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> AgentRun | None:
-        statement = select(AgentRun).where(
-            AgentRun.id == run_id, AgentRun.user_id == user_id
-        )
+        statement = select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id)
         if for_update:
             statement = statement.with_for_update()
         result = await self._session.execute(statement)
@@ -39,6 +37,15 @@ class AgentRunRepository:
             select(AgentRun).where(
                 AgentRun.user_id == user_id,
                 AgentRun.idempotency_key == key,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_goal_brief(self, brief_id: UUID, user_id: UUID) -> AgentRun | None:
+        result = await self._session.execute(
+            select(AgentRun).where(
+                AgentRun.goal_brief_id == brief_id,
+                AgentRun.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()

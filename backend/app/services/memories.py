@@ -26,6 +26,10 @@ from app.schemas.memories import (
 
 
 class MemoryService:
+    _DECISION_IDEMPOTENCY_CONSTRAINT = (
+        "uq_memory_candidates_user_decision_idempotency"
+    )
+
     def __init__(self, session: AsyncSession, embedding_provider: EmbeddingProvider) -> None:
         self._session = session
         self._embedding = embedding_provider
@@ -162,7 +166,9 @@ class MemoryService:
                     memory=self._memory_response(memory),
                 )
         except IntegrityError as exc:
-            raise self._idempotency_conflict() from exc
+            if self._is_decision_idempotency_conflict(exc):
+                raise self._idempotency_conflict() from exc
+            raise
 
     async def reject_candidate(
         self,
@@ -200,7 +206,9 @@ class MemoryService:
                     candidate=self._candidate_response(candidate)
                 )
         except IntegrityError as exc:
-            raise self._idempotency_conflict() from exc
+            if self._is_decision_idempotency_conflict(exc):
+                raise self._idempotency_conflict() from exc
+            raise
 
     async def _candidate_for_idempotent_decision(
         self,
@@ -275,6 +283,25 @@ class MemoryService:
             message="Idempotency-Key was already used with another request",
             status_code=HTTPStatus.CONFLICT,
         )
+
+    @classmethod
+    def _is_decision_idempotency_conflict(cls, exc: IntegrityError) -> bool:
+        current: BaseException | None = exc
+        visited: set[int] = set()
+        while current is not None and id(current) not in visited:
+            visited.add(id(current))
+            constraint_name = getattr(current, "constraint_name", None)
+            diag = getattr(current, "diag", None)
+            if constraint_name == cls._DECISION_IDEMPOTENCY_CONSTRAINT or (
+                diag is not None
+                and getattr(diag, "constraint_name", None)
+                == cls._DECISION_IDEMPOTENCY_CONSTRAINT
+            ):
+                return True
+            if cls._DECISION_IDEMPOTENCY_CONSTRAINT in str(current):
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     async def _candidate_for_decision(self, candidate_id: UUID, user_id: UUID) -> MemoryCandidate:
         candidate = await self._repository.get_candidate(candidate_id, user_id, for_update=True)

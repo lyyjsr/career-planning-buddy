@@ -17,12 +17,14 @@ from app.harness.pairwise_sweep_executor import (
     pairwise_sweep_executor,
 )
 from app.providers.embedding import EmbeddingProvider
+from app.providers.goal_understanding import GoalUnderstandingProvider
 from app.providers.registry import RuntimeProviderRegistry
 from app.repositories.users import UserRepository
 from app.services.agent_runs import AgentRunService
 from app.services.auth import AuthService
 from app.services.dev import DevTraceService
 from app.services.evals import EvalService
+from app.services.goal_briefs import GoalBriefService
 from app.services.memories import MemoryService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
@@ -35,6 +37,11 @@ def get_embedding_provider(request: Request) -> EmbeddingProvider:
     """Reuse the application-scoped Embedding Provider instead of rebuilding it."""
     providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
     return providers.embedding
+
+
+def get_goal_understanding_provider(request: Request) -> GoalUnderstandingProvider:
+    providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
+    return providers.goal_understanding
 
 
 def get_token_service(settings: Annotated[Settings, Depends(get_settings)]) -> TokenService:
@@ -72,6 +79,15 @@ def get_agent_run_service(
     executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> AgentRunService:
     return AgentRunService(session, settings, executor)
+
+
+def get_goal_brief_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    provider: Annotated[GoalUnderstandingProvider, Depends(get_goal_understanding_provider)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
+) -> GoalBriefService:
+    return GoalBriefService(session, provider, AgentRunService(session, settings, executor))
 
 
 def get_eval_service(

@@ -43,7 +43,7 @@ api → services → repositories
 
 - LLM/Tool 调用统一设置 timeout；
 - 使用 `asyncio.TaskGroup` 或明确取消传播，不创建无人管理的任务；
-- MVP 进程内 Task Registry 只能用于单 Worker；
+- 进程内 Task Registry 只作为本地执行句柄；可靠调度、取消和接管必须以数据库 lease 状态为准；
 - 取消、超时和异常都要在 finally 中释放资源并持久终态。
 
 ## 6. 错误和日志

@@ -23,10 +23,10 @@
 
 1. 校验 Run 属于当前用户且非终态；
 2. 条件更新 `cancel_requested_at`；
-3. 找到本进程 Task 时调用 `cancel()`；
-4. Task 在取消检查点停止，不进入下一节点；
+3. 找到本进程 Task 时立即调用 `cancel()`；持有 lease 的其他进程由 heartbeat 读取取消标记并取消 owner Task；
+4. NodeRunner 在每个节点边界再次读取 `cancel_requested_at`，Task 在取消检查点停止，不进入下一节点；
 5. Finalizer 条件写 cancelled 和唯一 `run.cancelled`；
-6. Task 不存在时由 Service/Finalizer 根据数据库状态收敛，不能重复写 terminal event。
+6. 本地 Task 不存在也不影响传播：数据库取消标记是事实源，lease owner 负责收敛且不能重复写 terminal event。
 
 ## 2. 恢复语义
 

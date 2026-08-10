@@ -61,7 +61,7 @@ class EvalScenario(StrictModel):
 
 
 class ExpectedOutcome(StrictModel):
-    result_kind: Literal["plan", "clarification", "safe_response"]
+    result_kind: Literal["plan", "clarification", "safe_response", "navigation"]
     allowed_run_statuses: list[Literal["completed", "degraded", "failed", "cancelled"]]
 
 

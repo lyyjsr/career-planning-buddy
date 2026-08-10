@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.schemas.agent_runs import AgentRunResponse
 from app.schemas.base import StrictModel
+from app.schemas.goal_briefs import GoalBriefResponse
 from app.schemas.plans import ActivePlanResponse, TaskResponse
 from app.schemas.profile import ProfileResponse
 from app.schemas.reviews import ReviewResponse
@@ -45,3 +46,4 @@ class MeResponse(StrictModel):
     today_tasks: list[TaskResponse] = Field(default_factory=list)
     latest_review: ReviewResponse | None = None
     active_run: AgentRunResponse | None = None
+    active_goal_brief: GoalBriefResponse | None = None

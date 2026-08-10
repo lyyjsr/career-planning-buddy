@@ -190,7 +190,7 @@ def test_explicit_goal_override_wins_when_replanning() -> None:
         ),
         ("不要调整，继续按原计划", "replan", True, RunIntent.REPLAN, ReplanMode.CONTINUE),
         ("Continue the current direction", None, True, RunIntent.REPLAN, ReplanMode.CONTINUE),
-        ("今天有什么任务", "create_plan", False, RunIntent.UNSUPPORTED, ReplanMode.INITIAL),
+        ("今天有什么任务", "create_plan", False, RunIntent.NAVIGATE, ReplanMode.INITIAL),
     ],
 )
 def test_intent_router_uses_message_and_server_context(
@@ -209,7 +209,7 @@ def test_intent_router_uses_message_and_server_context(
 
     assert intent.intent == expected_intent
     assert intent.replan_mode == expected_mode
-    assert intent.router_version == "intent-rule-v2"
+    assert intent.router_version == "intent-rule-v3"
     assert intent.matched_rule_ids
 
 
@@ -240,7 +240,7 @@ def test_replan_language_without_source_does_not_create_a_plan() -> None:
     assert "replan_source_missing" in intent.ambiguity_reasons
 
 
-def test_query_intent_uses_resource_guidance_not_ambiguity_prompt() -> None:
+def test_query_intent_returns_a_navigation_action() -> None:
     intent = route_intent(
         message="查看我的计划",
         hint_intent="create_plan",
@@ -248,8 +248,9 @@ def test_query_intent_uses_resource_guidance_not_ambiguity_prompt() -> None:
         source_plan_exists=False,
     )
 
-    clarification = build_clarification(intent)
-    assert clarification.reason == "unsupported_intent"
+    assert intent.intent == RunIntent.NAVIGATE
+    assert intent.navigation_action == "view_current_plan"
+    assert intent.navigation_target == "/journey"
     assert intent.confidence_band == "high"
 
 
@@ -266,6 +267,20 @@ def test_forced_replan_mode_is_authoritative_and_traceable() -> None:
     assert intent.replan_mode == ReplanMode.ADJUST
     assert "server_forced_replan_mode" in intent.matched_rule_ids
     assert "hint_conflicts_with_message_or_context" in intent.ambiguity_reasons
+
+
+def test_forced_replan_mode_wins_over_query_words() -> None:
+    intent = route_intent(
+        message="查看计划并调整下一版",
+        hint_intent="replan",
+        profile=profile(),
+        source_plan_exists=True,
+        forced_replan_mode=ReplanMode.ADJUST,
+    )
+
+    assert intent.intent == RunIntent.REPLAN
+    assert intent.replan_mode == ReplanMode.ADJUST
+    assert intent.navigation_target is None
 
 
 def test_fallback_has_progressive_weeks_and_seven_dated_tasks() -> None:

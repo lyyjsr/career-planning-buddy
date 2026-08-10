@@ -44,8 +44,17 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
-export type RunResultKind = "plan" | "clarification" | "safe_response";
-export type RunIntent = "create_plan" | "replan" | "unsupported";
+export type RunResultKind = "plan" | "clarification" | "safe_response" | "navigation";
+export type RunIntent = "create_plan" | "replan" | "navigate" | "unsupported";
+export type RunUserStatus =
+  | "queued"
+  | "generating"
+  | "recovering"
+  | "stopping"
+  | "ready"
+  | "action_required"
+  | "failed"
+  | "cancelled";
 export type ReplanMode = "initial" | "continue" | "adjust";
 export type NextPlanAction = "continue" | "adjust";
 export type PlanStatus = "generated" | "active" | "completed" | "archived";
@@ -161,6 +170,22 @@ export interface ClarificationRequestPayload {
   slot_names: string[];
   hint_options: Record<string, string[]>;
   reason: string;
+  message: string;
+  suggested_actions: SuggestedAction[];
+  target_route: "/settings/profile" | "/journey" | "/today" | null;
+}
+
+export interface SuggestedAction {
+  action: "complete_profile" | "create_plan" | "continue_plan" | "adjust_plan" | "view_current_plan" | "view_today_tasks";
+  label: string;
+  target_route: "/settings/profile" | "/journey" | "/today" | "/reviews";
+}
+
+export interface NavigationResultPayload {
+  action: "view_current_plan" | "view_today_tasks";
+  label: string;
+  target_route: "/journey" | "/today";
+  message: string;
 }
 
 export interface SafeResponsePayload {
@@ -172,10 +197,12 @@ export interface SafeResponsePayload {
 export interface AgentRunResponse {
   run_id: string;
   status: RunStatus;
+  user_status: RunUserStatus;
+  status_message: string;
   resolved_intent: RunIntent | null;
   replan_mode: ReplanMode | null;
   result_kind: RunResultKind | null;
-  result: PlanResultSummary | ClarificationRequestPayload | SafeResponsePayload | null;
+  result: PlanResultSummary | ClarificationRequestPayload | SafeResponsePayload | NavigationResultPayload | null;
   final_plan_id: string | null;
   fallback_reason: string | null;
   error_code: string | null;
@@ -186,6 +213,7 @@ export interface AgentRunResponse {
   total_latency_ms: number;
   created_at: string;
   finished_at: string | null;
+  cancel_requested_at: string | null;
 }
 
 export interface AgentRunCreatedResponse {
@@ -199,6 +227,42 @@ export interface AgentRunCreateRequest {
   hint_intent?: "create_plan" | "replan" | null;
   goal_type_override?: GoalType | null;
   source_plan_id?: string | null;
+}
+
+export type GoalBriefStatus = "clarification_required" | "awaiting_confirmation" | "confirmed" | "cancelled";
+
+export interface GoalBriefResponse {
+  goal_brief_id: string;
+  status: GoalBriefStatus;
+  source_message: string;
+  hint_intent: "create_plan" | "replan";
+  source_plan_id: string | null;
+  target_role: string | null;
+  project_goal: string | null;
+  capability_focus: string[];
+  tech_stack: string[];
+  duration_weeks: number | null;
+  deliverables: string[];
+  success_criteria: string[];
+  assumptions: string[];
+  missing_fields: string[];
+  questions: string[];
+  extraction_method: "rule" | "model" | "rule_fallback";
+  model_id: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalBriefCreateRequest {
+  message: string;
+  hint_intent: "create_plan" | "replan";
+  source_plan_id?: string | null;
+}
+
+export interface GoalBriefConfirmResponse {
+  goal_brief: GoalBriefResponse;
+  run: AgentRunCreatedResponse;
 }
 
 export interface UserSummary {
@@ -215,6 +279,7 @@ export interface MeResponse {
   today_tasks: TaskResponse[];
   latest_review: ReviewResponse | null;
   active_run: AgentRunResponse | null;
+  active_goal_brief: GoalBriefResponse | null;
 }
 
 export interface GuestLoginResponse {

@@ -11,6 +11,7 @@ from app.schemas.agent_runs import (
     CompanionMessageCandidate,
     EvidenceVisibility,
     IntentResult,
+    NavigationResult,
     PlanCandidate,
     PlanContext,
     PlanningContext,
@@ -32,7 +33,7 @@ HIGH_RISK_PATTERNS = (
     ("risk_self_harm_en", re.compile(r"\b(suicide|kill myself|self[- ]harm)\b", re.I)),
 )
 
-INTENT_ROUTER_VERSION = "intent-rule-v2"
+INTENT_ROUTER_VERSION = "intent-rule-v3"
 
 INTENT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "query_only": (
@@ -72,9 +73,13 @@ INTENT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"\b(start over|new direction|change direction|switch direction)\b", re.I),
     ),
     "create_plan": (
-        re.compile(r"(制定|创建|生成|规划|安排|设计|做|准备).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"),
+        re.compile(
+            r"(制定|创建|生成|规划|安排|设计|做|准备).{0,18}(求职|职业|岗位|面试|申请|技能|学习|转型|项目|计划|任务)"
+        ),
         re.compile(r"(求职|职业|面试|申请|技能|学习|转型|项目).{0,24}(计划|准备|规划|安排)"),
-        re.compile(r"(我想|我需要|请帮我|帮我).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"),
+        re.compile(
+            r"(我想|我需要|请帮我|帮我).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"
+        ),
         re.compile(
             r"\b(create|build|make|design|generate|plan|prepare|help me|"
             r"i need|i want|give me)\b.{0,50}"
@@ -125,16 +130,19 @@ def route_intent(
     ambiguity_reasons: list[str] = []
     requested_weeks = parse_horizon_weeks(message)
     method: Literal["rule", "model", "rule_fallback"] = "rule"
+    navigation_action: Literal["view_current_plan", "view_today_tasks"] | None = None
+    navigation_target: Literal["/journey", "/today"] | None = None
 
-    if matches["query_only"]:
-        intent = RunIntent.UNSUPPORTED
-        mode = ReplanMode.INITIAL
-        confidence = 0.99
-    elif forced_replan_mode is not None and source_plan_exists:
+    if forced_replan_mode is not None and source_plan_exists:
         intent = RunIntent.REPLAN
         mode = forced_replan_mode
         confidence = 1.0
         matched_rule_ids.append("server_forced_replan_mode")
+    elif matches["query_only"]:
+        intent = RunIntent.NAVIGATE
+        mode = ReplanMode.INITIAL
+        confidence = 0.99
+        navigation_action, navigation_target = _query_navigation(message)
     elif source_plan_exists:
         intent, mode, confidence = _route_with_source(matches)
         if intent == RunIntent.UNSUPPORTED:
@@ -164,9 +172,7 @@ def route_intent(
     if hint_intent is not None:
         hint_conflicts = (
             hint_intent == RunIntent.CREATE_PLAN.value and intent == RunIntent.REPLAN
-        ) or (
-            hint_intent == RunIntent.REPLAN.value and intent == RunIntent.CREATE_PLAN
-        )
+        ) or (hint_intent == RunIntent.REPLAN.value and intent == RunIntent.CREATE_PLAN)
         if hint_conflicts:
             ambiguity_reasons.append("hint_conflicts_with_message_or_context")
             confidence = min(confidence, 0.79)
@@ -182,7 +188,7 @@ def route_intent(
         confidence_band = "low"
 
     missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]] = []
-    if profile is None and intent != RunIntent.UNSUPPORTED:
+    if profile is None and intent in {RunIntent.CREATE_PLAN, RunIntent.REPLAN}:
         missing_slots = ["goal_type", "stage", "time_budget_minutes", "skill_level"]
     requires_fresh_information = any(
         marker in message
@@ -201,7 +207,20 @@ def route_intent(
         requested_horizon_weeks=requested_weeks,
         requires_fresh_information=requires_fresh_information,
         method=method,
+        navigation_action=navigation_action,
+        navigation_target=navigation_target,
     )
+
+
+def _query_navigation(
+    message: str,
+) -> tuple[
+    Literal["view_current_plan", "view_today_tasks"],
+    Literal["/journey", "/today"],
+]:
+    if re.search(r"任务|安排|task|tasks|schedule", message, re.I):
+        return "view_today_tasks", "/today"
+    return "view_current_plan", "/journey"
 
 
 def _route_with_source(matches: dict[str, bool]) -> tuple[RunIntent, ReplanMode, float]:
@@ -281,18 +300,45 @@ def build_clarification(intent: IntentResult) -> ClarificationRequest:
     if intent.intent == RunIntent.UNSUPPORTED:
         if intent.method == "rule_fallback" or intent.confidence_band == "low":
             return ClarificationRequest(
-                questions=["我还不能确定你的目标。你希望创建新计划、继续现有计划，还是调整当前计划？"],
+                questions=[
+                    "我还不能确定你的目标。你希望创建新计划、继续现有计划，还是调整当前计划？"
+                ],
                 slot_names=["intent"],
-                hint_options={
-                    "intent": ["create_plan", "replan_continue", "replan_adjust"]
-                },
+                hint_options={"intent": ["create_plan", "replan_continue", "replan_adjust"]},
                 reason="intent_uncertain",
+                message="我还不能确定你希望如何推进职业计划。",
+                suggested_actions=[
+                    {
+                        "action": "create_plan",
+                        "label": "创建新计划",
+                        "target_route": "/today",
+                    },
+                    {
+                        "action": "continue_plan",
+                        "label": "继续当前计划",
+                        "target_route": "/journey",
+                    },
+                    {
+                        "action": "adjust_plan",
+                        "label": "调整当前计划",
+                        "target_route": "/reviews",
+                    },
+                ],
             )
         return ClarificationRequest(
             questions=["这个请求不需要生成新计划，请前往计划或任务页面查看。"],
             slot_names=["intent"],
             hint_options={"intent": ["create_plan", "replan"]},
             reason="unsupported_intent",
+            message="当前助手专注于创建、继续和调整职业计划。",
+            suggested_actions=[
+                {
+                    "action": "create_plan",
+                    "label": "创建职业计划",
+                    "target_route": "/today",
+                }
+            ],
+            target_route="/today",
         )
     labels = {
         "goal_type": "你希望重点准备哪类岗位？",
@@ -311,6 +357,31 @@ def build_clarification(intent: IntentResult) -> ClarificationRequest:
             "skill_level": ["beginner", "intermediate", "advanced"],
         },
         reason="profile_incomplete",
+        message="完善职业画像后，我才能生成更适合你的行动计划。",
+        suggested_actions=[
+            {
+                "action": "complete_profile",
+                "label": "完善职业资料",
+                "target_route": "/settings/profile",
+            }
+        ],
+        target_route="/settings/profile",
+    )
+
+
+def build_navigation(intent: IntentResult) -> NavigationResult:
+    if intent.navigation_action == "view_today_tasks":
+        return NavigationResult(
+            action="view_today_tasks",
+            label="查看今日任务",
+            target_route="/today",
+            message="这个请求不需要重新生成计划，可以直接查看今天的任务。",
+        )
+    return NavigationResult(
+        action="view_current_plan",
+        label="查看当前计划",
+        target_route="/journey",
+        message="这个请求不需要重新生成计划，可以直接查看当前计划。",
     )
 
 
@@ -413,8 +484,7 @@ def validate_candidate(
             len(candidate.weekly_focus) == window.horizon_weeks
             and [item.week_index for item in candidate.weekly_focus]
             == list(range(1, len(candidate.weekly_focus) + 1))
-            and len({item.focus for item in candidate.weekly_focus})
-            == len(candidate.weekly_focus)
+            and len({item.focus for item in candidate.weekly_focus}) == len(candidate.weekly_focus)
             and len({item.success_signal for item in candidate.weekly_focus})
             == len(candidate.weekly_focus)
         ),

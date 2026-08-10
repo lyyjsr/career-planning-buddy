@@ -8,7 +8,7 @@
 | 004 | PostgreSQL 16 + pgvector 作为唯一权威数据源 | Accepted |
 | 005 | 运行时模型使用 OpenAI-compatible Provider，不绑定编码助手 | Accepted |
 | 006 | Provider 只保留 LLM / Search / Embedding 三类 | Accepted |
-| 007 | Agent Run 单 Worker 进程内执行，事件持久化后 SSE | Accepted with limitation |
+| 007 | Agent Run 使用 PostgreSQL lease 执行，事件持久化后 SSE | Accepted with limitation |
 | 008 | LangGraph 负责编排，确定性规则不交给 LLM | Accepted |
 | 009 | Spec 驱动但以可运行纵切优先，禁止无限补文档 | Accepted |
 | 010 | Agent Run 冻结输入/配置快照并使用唯一终态 Finalizer | Accepted |

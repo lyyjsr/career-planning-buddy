@@ -44,6 +44,10 @@ class BudgetGuard:
         self.tokens_in = 0
         self.tokens_out = 0
 
+    @property
+    def cancelled(self) -> bool:
+        return self._cancellation.cancelled
+
     def check(self) -> None:
         self._cancellation.raise_if_cancelled()
         if datetime.now(UTC) >= self._deadline_at:
