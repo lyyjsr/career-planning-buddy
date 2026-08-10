@@ -4,6 +4,7 @@
 
 | 资源 | spec |
 |---|---|
+| 健康与就绪探针 | [health.md](./health.md) |
 | Guest 登录与当前用户 | [auth.md](./auth.md) |
 | 用户画像 | [profile.md](./profile.md) |
 | Agent Run 与 SSE | [agent-runs.md](./agent-runs.md) |
@@ -16,4 +17,4 @@
 | 开发者 Trace | [dev-runs.md](./dev-runs.md) |
 | Eval | [dev-evals.md](./dev-evals.md) |
 
-所有资源路径都在 `/api/v1` 下。身份只从 JWT 获取，不接受请求体 user_id。
+除根级健康探针外，所有资源路径都在 `/api/v1` 下。身份只从 JWT 获取，不接受请求体 user_id。

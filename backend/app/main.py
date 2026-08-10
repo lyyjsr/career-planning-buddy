@@ -14,11 +14,7 @@ from app.core.database import AsyncSessionFactory
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.harness.pairwise_sweep_executor import pairwise_sweep_executor
-from app.providers.embedding import build_embedding_provider
-from app.providers.evidence_distillation import build_evidence_distillation_provider
-from app.providers.llm import build_planning_provider
-from app.providers.search import build_search_provider
-from app.tools.registry import build_tool_registry
+from app.providers.registry import build_runtime_provider_registry
 
 
 @asynccontextmanager
@@ -39,26 +35,21 @@ def create_app() -> FastAPI:
     """Create and configure one FastAPI application instance."""
     settings = get_settings()
     configure_logging()
-    agent_run_executor.set_provider(build_planning_provider(settings))
-    embedding_provider = build_embedding_provider(settings)
-    agent_run_executor.set_embedding_provider(embedding_provider)
-    agent_run_executor.set_evidence_distillation_provider(
-        build_evidence_distillation_provider(settings)
+    providers = build_runtime_provider_registry(
+        settings=settings,
+        session_factory=AsyncSessionFactory,
     )
-    agent_run_executor.set_tool_registry(
-        build_tool_registry(
-            settings=settings,
-            session_factory=AsyncSessionFactory,
-            embedding_provider=embedding_provider,
-            search_provider=build_search_provider(settings),
-        )
-    )
+    agent_run_executor.set_provider(providers.planning)
+    agent_run_executor.set_embedding_provider(providers.embedding)
+    agent_run_executor.set_evidence_distillation_provider(providers.evidence_distillation)
+    agent_run_executor.set_tool_registry(providers.tools)
 
     application = FastAPI(
         title=settings.app_name,
         version="0.1.0",
         lifespan=lifespan,
     )
+    application.state.runtime_providers = providers
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

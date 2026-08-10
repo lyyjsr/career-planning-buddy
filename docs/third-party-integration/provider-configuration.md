@@ -12,7 +12,7 @@
 .env / deployment secrets
   → Docker environment or local process environment
   → Pydantic Settings validation
-  → explicit Provider builders
+  → application-scoped Provider Registry
   → Agent executor and Tool Registry
 ```
 
@@ -64,7 +64,9 @@ python -m scripts.provider_status
 
 命令只返回 Provider 名称、是否配置完成、是否真实模式、缺失字段名和警告；不返回密钥、Base URL 或模型名。`ready=true` 表示配置契约完整，不代表外部 Provider 的网络可达性。
 
-基础 `/health` 只用于容器存活检查，不调用计费 API。外部连通性应通过受限的 smoke test 验证，避免健康探针产生费用或触发限流。
+`/health/live` 只用于进程存活检查；`/health/ready` 检查数据库连通性、Alembic
+版本和上述脱敏配置契约。两者都不调用计费 API。旧 `/health` 保留兼容性。
+外部连通性应通过受限的 smoke test 验证，避免健康探针产生费用或触发限流。
 
 ## 完整性审查
 

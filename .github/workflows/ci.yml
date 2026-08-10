@@ -53,6 +53,12 @@ jobs:
       - name: Mypy
         run: python -m mypy app tests scripts evals
 
+      - name: Audit deployable configuration
+        run: python -m scripts.audit_config
+
+      - name: Evaluate intent routing contract
+        run: python -m scripts.evaluate_intent_router
+
       - name: Upgrade database
         env:
           APP_ENV: test
@@ -68,7 +74,16 @@ jobs:
           python -m alembic check
 
       - name: Validate Compose configuration
-        run: docker compose --file ../compose.yaml config --quiet
+        env:
+          EMBEDDING_MODEL_HOST_PATH: /tmp
+        run: |
+          docker compose --file ../compose.yaml config --quiet
+          docker compose --file ../compose.yaml --file ../compose.embedding.yaml config --quiet
+
+      - name: Build non-root backend image
+        run: |
+          docker build --tag career-planning-buddy-backend:ci .
+          test "$(docker image inspect --format '{{.Config.User}}' career-planning-buddy-backend:ci)" = app
 
       - name: Pytest
         env:

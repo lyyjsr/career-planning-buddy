@@ -12,9 +12,12 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY evals ./evals
-COPY tests ./tests
 COPY scripts ./scripts
 RUN python -m pip install --no-cache-dir --no-deps .
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
+USER app
 
 EXPOSE 8000
 

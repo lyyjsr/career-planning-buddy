@@ -133,36 +133,19 @@ Eval 第一版使用仓库内 JSONL 数据集；实验结果可写 `eval_experim
 
 ## 7. 环境变量
 
-```env
-APP_ENV=local
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/career_buddy
-JWT_SECRET=change-me
-JWT_EXPIRE_MINUTES=1440
+环境字段、默认值和组合校验以根目录 `.env.example` 与后端 `Settings` 为唯一事实源，
+不得在文档中维护第二份易漂移的变量清单。配置变更后必须执行
+`cd backend && python -m scripts.audit_config`。Provider 模式、必填字段和部署方法见
+[Provider 配置与部署](../third-party-integration/provider-configuration.md)。
 
-LLM_PROVIDER=openai_compatible
-LLM_BASE_URL=
-LLM_API_KEY=
-LLM_MODEL=
-LLM_ROUTER_MODEL=
+运行时 Provider 由应用级 Registry 统一构建，HTTP 服务与 Agent Tool 复用同一组实例；
+禁止在路由依赖中临时读取环境变量或重复创建 Provider。
 
-SEARCH_PROVIDER=mock
-SEARCH_API_KEY=
-EMBEDDING_PROVIDER=mock
-EMBEDDING_MODEL=
-EMBEDDING_DIM=1024
+基础设施探针约定：
 
-AGENT_GRAPH_VERSION=v1
-AGENT_MAX_LLM_CALLS=7
-AGENT_STAGE23_MAX_LLM_CALLS=5
-AGENT_ONLINE_REVIEW_MAX_LLM_CALLS=8
-AGENT_MAX_TOOL_ROUNDS=2
-AGENT_MAX_TOOL_CALLS=4
-AGENT_MAX_TOTAL_TOKENS=16000
-AGENT_MAX_INPUT_TOKENS_PER_CALL=6000
-AGENT_MAX_OUTPUT_TOKENS_PER_CALL=1500
-QUALITY_REVIEW_ENFORCE=false
-AGENT_DEADLINE_SECONDS=45
-```
+- `/health`：兼容旧客户端的浅层存活检查；
+- `/health/live`：只检查进程是否存活；
+- `/health/ready`：检查 PostgreSQL、Alembic head 和脱敏 Provider 配置，不调用计费 API。
 
 ## 8. 明确不做
 
@@ -177,3 +160,7 @@ MVP 不做：
 - 复杂 OAuth；
 - 主动消息推送；
 - 生产级心理健康服务。
+
+多 Worker 可靠调度、集中式 Secret 管理、真实 Search/Embedding 上线等生产增强项，
+必须按[生产就绪审查](../review/production-readiness-audit-2026-08-10.md)逐项验收，
+不得仅通过配置开关宣称完成。

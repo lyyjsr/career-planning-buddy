@@ -1,5 +1,7 @@
 """Settings validation and environment precedence tests."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 from pytest import MonkeyPatch
@@ -138,7 +140,7 @@ def test_configuration_template_matches_settings_and_compose_contract() -> None:
     assert audit_configuration() == []
 
 
-def test_configuration_audit_detects_a_compose_mapping_omission(tmp_path) -> None:
+def test_configuration_audit_detects_a_compose_mapping_omission(tmp_path: Path) -> None:
     (tmp_path / ".env.example").write_text(
         (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8"),
         encoding="utf-8",

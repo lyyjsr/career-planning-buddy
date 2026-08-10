@@ -73,11 +73,13 @@ INTENT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
     "create_plan": (
         re.compile(r"(制定|创建|生成|规划|安排|设计|做|准备).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"),
-        re.compile(r"(求职|职业|面试|申请|技能|学习|转型).{0,18}(计划|准备|规划|安排)"),
+        re.compile(r"(求职|职业|面试|申请|技能|学习|转型|项目).{0,24}(计划|准备|规划|安排)"),
+        re.compile(r"(我想|我需要|请帮我|帮我).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"),
         re.compile(
-            r"\b(create|build|make|design|generate|plan|prepare|help me)\b.{0,50}"
+            r"\b(create|build|make|design|generate|plan|prepare|help me|"
+            r"i need|i want|give me)\b.{0,50}"
             r"\b(plan|career|job search|interview|application|applications|skill|"
-            r"transition|direction|tasks?|deliverables?)\b",
+            r"transition|direction|practice|tasks?|deliverables?)\b",
             re.I,
         ),
     ),
@@ -138,16 +140,16 @@ def route_intent(
         if intent == RunIntent.UNSUPPORTED:
             method = "rule_fallback"
             ambiguity_reasons.append("no_supported_intent_signal")
+    elif matches["create_plan"]:
+        intent = RunIntent.CREATE_PLAN
+        mode = ReplanMode.INITIAL
+        confidence = 0.96
     elif matches["adjust"] or matches["continue"]:
         intent = RunIntent.UNSUPPORTED
         mode = ReplanMode.INITIAL
         confidence = 0.3
         method = "rule_fallback"
         ambiguity_reasons.append("replan_source_missing")
-    elif matches["create_plan"]:
-        intent = RunIntent.CREATE_PLAN
-        mode = ReplanMode.INITIAL
-        confidence = 0.96
     elif matches["greeting"] and hint_intent is None:
         intent = RunIntent.UNSUPPORTED
         mode = ReplanMode.INITIAL
@@ -205,7 +207,7 @@ def route_intent(
 def _route_with_source(matches: dict[str, bool]) -> tuple[RunIntent, ReplanMode, float]:
     if matches["negated_adjust"]:
         return RunIntent.REPLAN, ReplanMode.CONTINUE, 0.98
-    if matches["adjust"]:
+    if matches["adjust"] or matches["reset_direction"]:
         return RunIntent.REPLAN, ReplanMode.ADJUST, 0.98
     if matches["continue"]:
         return RunIntent.REPLAN, ReplanMode.CONTINUE, 0.98

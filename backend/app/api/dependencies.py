@@ -1,9 +1,8 @@
 """HTTP dependency composition for authentication and services."""
 
-from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +16,8 @@ from app.harness.pairwise_sweep_executor import (
     PairwiseSweepExecutor,
     pairwise_sweep_executor,
 )
-from app.providers.embedding import EmbeddingProvider, build_embedding_provider
+from app.providers.embedding import EmbeddingProvider
+from app.providers.registry import RuntimeProviderRegistry
 from app.repositories.users import UserRepository
 from app.services.agent_runs import AgentRunService
 from app.services.auth import AuthService
@@ -31,9 +31,10 @@ from app.services.reviews import ReviewService
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-@lru_cache
-def get_embedding_provider() -> EmbeddingProvider:
-    return build_embedding_provider(get_settings())
+def get_embedding_provider(request: Request) -> EmbeddingProvider:
+    """Reuse the application-scoped Embedding Provider instead of rebuilding it."""
+    providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
+    return providers.embedding
 
 
 def get_token_service(settings: Annotated[Settings, Depends(get_settings)]) -> TokenService:
