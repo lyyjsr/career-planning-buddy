@@ -19,8 +19,9 @@ from app.providers.registry import build_runtime_provider_registry
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Recover expired single-worker Runs and cancel local tasks on shutdown."""
+    """Start durable dispatchers and release local leases on shutdown."""
     await agent_run_executor.recover_interrupted()
+    await agent_run_executor.start()
     await eval_runner_executor.recover_interrupted()
     await pairwise_sweep_executor.recover_interrupted()
     try:
@@ -43,6 +44,13 @@ def create_app() -> FastAPI:
     agent_run_executor.set_embedding_provider(providers.embedding)
     agent_run_executor.set_evidence_distillation_provider(providers.evidence_distillation)
     agent_run_executor.set_tool_registry(providers.tools)
+    agent_run_executor.configure_dispatcher(
+        poll_interval_seconds=settings.agent_poll_interval_seconds,
+        heartbeat_seconds=settings.agent_heartbeat_seconds,
+        lease_seconds=settings.agent_lease_seconds,
+        max_attempts=settings.agent_max_run_attempts,
+        worker_concurrency=settings.agent_worker_concurrency,
+    )
 
     application = FastAPI(
         title=settings.app_name,

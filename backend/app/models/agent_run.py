@@ -77,6 +77,13 @@ class AgentRun(Base):
             "cancel_request_hash ~ '^[0-9a-f]{64}$')",
             name="ck_agent_runs_cancel_idempotency_pair",
         ),
+        CheckConstraint(
+            "(status <> 'running') OR "
+            "(worker_id IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_agent_runs_running_lease",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_agent_runs_attempt_count"),
+        Index("ix_agent_runs_claim", "status", "lease_expires_at", "created_at"),
         Index(
             "uq_agent_runs_one_active_per_user",
             "user_id",
@@ -151,6 +158,10 @@ class AgentRun(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_idempotency_key: Mapped[str | None] = mapped_column(String(64))
     cancel_request_hash: Mapped[str | None] = mapped_column(String(64))
+    worker_id: Mapped[str | None] = mapped_column(String(64))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     next_event_sequence: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     next_step_sequence: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(

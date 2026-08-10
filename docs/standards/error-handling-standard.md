@@ -39,7 +39,8 @@ Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-
 | BUDGET_EXCEEDED | 停止外部调用，模板或 failed |
 | AGENT_DEADLINE_EXCEEDED | failed |
 | RUN_CANCELLED | cancelled |
-| PROCESS_INTERRUPTED | failed |
+| PROCESS_INTERRUPTED | 当前 attempt 中止；有 lease 预算则 requeue |
+| AGENT_RETRY_EXHAUSTED | failed |
 | PERSISTENCE_FAILED | 回滚并 failed |
 
 ## 4. 重试与修复
@@ -60,7 +61,9 @@ Agent Run 通过异步 API 创建，执行期错误通常不改变 `POST /agent-
 
 ## 6. 取消
 
-取消接口先持久化 `cancel_requested_at`，再取消进程内 Task。节点、模型和 Tool 调用前后检查取消。取消后禁止继续下一个节点；最终通过 Finalizer 写 cancelled 和唯一 `run.cancelled`。
+取消接口先持久化 `cancel_requested_at`，再取消持有 lease 的本地 Task。节点、模型和 Tool
+调用前后检查取消。用户取消通过 Finalizer 写 cancelled；进程优雅停机释放 lease 并 requeue，
+不得伪装成用户取消或业务失败。
 
 ## 7. 日志与 Trace
 

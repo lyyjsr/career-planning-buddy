@@ -35,7 +35,8 @@
 | PROVIDER_UNAVAILABLE | 503/内部降级 | 外部模型不可用 |
 | AGENT_DEADLINE_EXCEEDED | 504/内部状态 | Run 总截止时间 |
 | RUN_CANCELLED | 内部 | 用户取消 |
-| PROCESS_INTERRUPTED | 内部 | 单 Worker 进程重启中断 |
+| PROCESS_INTERRUPTED | 内部 | 当前 attempt 中断，Run 可重新入队 |
+| AGENT_RETRY_EXHAUSTED | 内部 | lease 重试次数耗尽 |
 | PERSISTENCE_FAILED | 内部 | 事务回滚，无可用结果 |
 | REPLAY_FIXTURE_MISSING | 422 | deterministic Replay 缺 Tool fixture |
 | PROMPT_VERSION_NOT_FOUND | 422 | Replay 所需 Prompt 版本缺失 |

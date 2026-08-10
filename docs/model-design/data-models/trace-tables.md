@@ -34,6 +34,10 @@
 | risk_category | varchar(32) | YES | |
 | deadline_at | timestamptz | NO | |
 | cancel_requested_at | timestamptz | YES | 用户发起取消时间 |
+| worker_id | varchar(64) | YES | 当前 lease 持有者；仅 running 必填 |
+| lease_expires_at | timestamptz | YES | worker 未续租后的接管时间 |
+| heartbeat_at | timestamptz | YES | 最近一次 worker 心跳 |
+| attempt_count | integer | NO | default 0；每次成功 claim 加一 |
 | next_event_sequence | integer | NO | default 1；EventRecorder 原子分配 |
 | next_step_sequence | integer | NO | default 1；NodeRunner 原子分配 |
 | created_at | timestamptz | NO | |
@@ -44,6 +48,8 @@
 
 - UNIQUE `(user_id, idempotency_key)`；
 - partial unique：同用户最多一个 `status IN ('pending','running')`；
+- running 必须同时具有 worker_id 和 lease_expires_at；
+- claim 使用 `(status, lease_expires_at, created_at)` 索引和 `SKIP LOCKED`；
 - completed 必须 `result_kind=plan` 且 `final_plan_id IS NOT NULL`；
 - degraded 必须有 result_kind；
 - failed/cancelled 不得有 result_kind/final_plan_id，且 error_code 非空；

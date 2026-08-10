@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import PersistTransactionError
+from app.agent.errors import AgentLeaseLostError, PersistTransactionError
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.events import EventRecorder
@@ -32,9 +32,14 @@ class AgentRunFinalizer:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         budget: BudgetGuard | None,
+        *,
+        worker_id: str | None = None,
+        attempt_count: int | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._budget = budget
+        self._worker_id = worker_id
+        self._attempt_count = attempt_count
 
     async def finalize_plan(
         self,
@@ -183,6 +188,7 @@ class AgentRunFinalizer:
                     )
                     status = "degraded" if degraded else "completed"
                     run.status = status
+                    self._clear_lease(run)
                     run.result_kind = "plan"
                     run.result_payload_json = result.model_dump(mode="json")
                     run.final_plan_id = plan.id
@@ -211,6 +217,8 @@ class AgentRunFinalizer:
                         terminal_payload,
                         allow_terminal_run=True,
                     )
+        except AgentLeaseLostError:
+            raise
         except Exception:
             await self.finalize_failed(
                 run_id,
@@ -238,6 +246,7 @@ class AgentRunFinalizer:
                         result.model_dump(mode="json"),
                     )
                 run.status = "degraded"
+                self._clear_lease(run)
                 run.result_kind = result_kind
                 run.result_payload_json = result.model_dump(mode="json")
                 run.final_plan_id = None
@@ -299,6 +308,7 @@ class AgentRunFinalizer:
                 )
                 if run is None or run.status in TERMINAL_STATUSES:
                     return False
+                self._assert_lease_owner(run)
                 recorder = EventRecorder(session)
                 if persist_step_id is not None:
                     step = await session.get(AgentStep, persist_step_id)
@@ -322,6 +332,7 @@ class AgentRunFinalizer:
                             },
                         )
                 run.status = status
+                self._clear_lease(run)
                 run.result_kind = None
                 run.result_payload_json = None
                 run.final_plan_id = None
@@ -342,11 +353,32 @@ class AgentRunFinalizer:
                 return True
 
     @staticmethod
-    async def _lock_active_run(session: AsyncSession, run_id: UUID) -> AgentRun:
+    def _clear_lease(run: AgentRun) -> None:
+        run.worker_id = None
+        run.lease_expires_at = None
+        run.heartbeat_at = None
+
+    async def _lock_active_run(self, session: AsyncSession, run_id: UUID) -> AgentRun:
         run = await session.scalar(select(AgentRun).where(AgentRun.id == run_id).with_for_update())
         if run is None or run.status in TERMINAL_STATUSES:
             raise RuntimeError("Run is already terminal")
+        self._assert_lease_owner(run)
         return run
+
+    def _assert_lease_owner(self, run: AgentRun) -> None:
+        if self._worker_id is None:
+            return
+        if (
+            run.status != "running"
+            or run.worker_id != self._worker_id
+            or (
+                self._attempt_count is not None
+                and run.attempt_count != self._attempt_count
+            )
+            or run.lease_expires_at is None
+            or run.lease_expires_at <= datetime.now(UTC)
+        ):
+            raise AgentLeaseLostError("Agent Run lease ownership was lost")
 
     @staticmethod
     def _ensure_can_persist(run: AgentRun) -> None:

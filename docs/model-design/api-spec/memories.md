@@ -22,11 +22,13 @@ Query：status，默认 pending。
 
 ## POST /api/v1/memory-candidates/{candidate_id}/confirm
 
-需要 Idempotency-Key。事务内：candidate→confirmed + 创建 memory。返回 Memory。
+需要 Idempotency-Key。事务内持久化 key、request hash 和 action，然后
+candidate→confirmed + 创建 memory。相同 key/request 返回原 Memory；复用 key 执行其他
+候选或动作返回 409 `STATE_IDEMPOTENCY_KEY_REUSED`。
 
 ## POST /api/v1/memory-candidates/{candidate_id}/reject
 
-需要 Idempotency-Key。candidate→rejected。
+需要 Idempotency-Key。candidate→rejected，并遵守与 confirm 相同的持久幂等契约。
 
 ## 安全
 

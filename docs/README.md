@@ -34,7 +34,7 @@
 - Provider 只保留 LLM、Search、Embedding 三类；
 - Codex 用于阅读规范、修改代码和执行测试；项目运行时模型由 Provider 配置决定；
 - Agent Run 使用数据库持久化事件 + SSE；
-- MVP 单机单 Worker，重启恢复策略明确标注为有限能力；
+- Agent Run 使用 PostgreSQL lease 接管；Eval/Pairwise 仍是单 Worker 有限能力；
 - 先跑通 Mock 纵切，再接真实模型。
 
 ## 关键入口

@@ -108,19 +108,22 @@ EmbeddingProvider.embed(...)
 
 Cache 和 ObjectStorage 不设空壳 Protocol。需要时再通过 ADR 增加。
 
-## ADR-007：单 Worker 执行与 SSE
+## ADR-007：PostgreSQL Lease 执行与 SSE
 
 ### 决策
 
 - POST 创建 `agent_runs`；
-- 进程内 `asyncio.Task` 执行 Graph；
+- PostgreSQL pending Run 是队列事实源；
+- Worker 使用 `SKIP LOCKED` claim，并以 lease/heartbeat 维持执行权；
+- 进程内 `asyncio.Task` 只执行已 claim 的 Graph；
 - 每个事件先写 `agent_events`，再推送 SSE；
 - `Last-Event-ID` 按 sequence 恢复；
-- 启动时将超时的 pending/running Run 标记为 failed。
+- lease 过期或优雅停机时 requeue；deadline/attempt 耗尽才 failed。
 
 ### 限制
 
-该方案不提供跨进程任务接管。Docker 部署必须使用单 Uvicorn Worker。引入多 Worker 前，必须迁移到可靠队列或数据库抢占调度。
+Agent Run 支持跨进程接管，但重试从 Graph 起点开始，属于 at-least-once，不保证 LLM
+调用 exactly-once。Eval/Pairwise 尚未采用 lease，因此完整应用的多副本部署仍需限制其执行入口。
 
 ## ADR-008：LangGraph 编排
 

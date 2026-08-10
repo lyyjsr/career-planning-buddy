@@ -1,9 +1,12 @@
 """User-owned memory lifecycle and consent use cases."""
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from http import HTTPStatus
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.errors import AgentError
@@ -120,41 +123,46 @@ class MemoryService:
         user_id: UUID,
         idempotency_key: str,
     ) -> MemoryCandidateDecisionResponse:
-        del idempotency_key
-        async with session_transaction(self._session):
-            candidate = await self._candidate_for_decision(candidate_id, user_id)
-            if candidate.status == "confirmed" and candidate.activated_memory_id is not None:
-                memory = await self._repository.get_memory(candidate.activated_memory_id, user_id)
-                if memory is None:
-                    raise AppError(
-                        code="STATE_MEMORY_ACTIVATION_MISSING",
-                        message="Confirmed candidate has no active Memory",
-                        status_code=HTTPStatus.CONFLICT,
-                    )
+        request_hash = self._decision_hash(candidate_id, "confirm")
+        try:
+            async with session_transaction(self._session):
+                candidate = await self._candidate_for_idempotent_decision(
+                    candidate_id=candidate_id,
+                    user_id=user_id,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    action="confirm",
+                )
+                if candidate.status == "confirmed":
+                    return await self._confirmed_response(candidate, user_id)
+                if candidate.status != "pending":
+                    raise self._candidate_conflict(candidate.status)
+                vector = await self._best_effort_embedding(candidate.summary)
+                memory = await self._repository.create_memory(
+                    user_id=user_id,
+                    memory_type=candidate.memory_type,
+                    summary=candidate.summary,
+                    content_json=candidate.content_json,
+                    sensitivity="sensitive",
+                    embedding=vector,
+                    source_run_id=candidate.proposed_by_run_id,
+                )
+                self._bind_decision(
+                    candidate,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    action="confirm",
+                )
+                candidate.status = "confirmed"
+                candidate.activated_memory_id = memory.id
+                candidate.decided_at = datetime.now(UTC)
+                await self._session.flush()
                 return MemoryCandidateDecisionResponse(
                     candidate=self._candidate_response(candidate),
                     memory=self._memory_response(memory),
                 )
-            if candidate.status != "pending":
-                raise self._candidate_conflict(candidate.status)
-            vector = await self._best_effort_embedding(candidate.summary)
-            memory = await self._repository.create_memory(
-                user_id=user_id,
-                memory_type=candidate.memory_type,
-                summary=candidate.summary,
-                content_json=candidate.content_json,
-                sensitivity="sensitive",
-                embedding=vector,
-                source_run_id=candidate.proposed_by_run_id,
-            )
-            candidate.status = "confirmed"
-            candidate.activated_memory_id = memory.id
-            candidate.decided_at = datetime.now(UTC)
-            await self._session.flush()
-            return MemoryCandidateDecisionResponse(
-                candidate=self._candidate_response(candidate),
-                memory=self._memory_response(memory),
-            )
+        except IntegrityError as exc:
+            raise self._idempotency_conflict() from exc
 
     async def reject_candidate(
         self,
@@ -163,19 +171,110 @@ class MemoryService:
         user_id: UUID,
         idempotency_key: str,
     ) -> MemoryCandidateDecisionResponse:
-        del idempotency_key
-        async with session_transaction(self._session):
-            candidate = await self._candidate_for_decision(candidate_id, user_id)
-            if candidate.status == "rejected":
+        request_hash = self._decision_hash(candidate_id, "reject")
+        try:
+            async with session_transaction(self._session):
+                candidate = await self._candidate_for_idempotent_decision(
+                    candidate_id=candidate_id,
+                    user_id=user_id,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    action="reject",
+                )
+                if candidate.status == "rejected":
+                    return MemoryCandidateDecisionResponse(
+                        candidate=self._candidate_response(candidate)
+                    )
+                if candidate.status != "pending":
+                    raise self._candidate_conflict(candidate.status)
+                self._bind_decision(
+                    candidate,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    action="reject",
+                )
+                candidate.status = "rejected"
+                candidate.decided_at = datetime.now(UTC)
+                await self._session.flush()
                 return MemoryCandidateDecisionResponse(
                     candidate=self._candidate_response(candidate)
                 )
-            if candidate.status != "pending":
-                raise self._candidate_conflict(candidate.status)
-            candidate.status = "rejected"
-            candidate.decided_at = datetime.now(UTC)
-            await self._session.flush()
-            return MemoryCandidateDecisionResponse(candidate=self._candidate_response(candidate))
+        except IntegrityError as exc:
+            raise self._idempotency_conflict() from exc
+
+    async def _candidate_for_idempotent_decision(
+        self,
+        *,
+        candidate_id: UUID,
+        user_id: UUID,
+        idempotency_key: str,
+        request_hash: str,
+        action: str,
+    ) -> MemoryCandidate:
+        existing = await self._repository.get_candidate_by_decision_key(
+            user_id, idempotency_key
+        )
+        if existing is not None and existing.id != candidate_id:
+            raise self._idempotency_conflict()
+        candidate = await self._candidate_for_decision(candidate_id, user_id)
+        if candidate.decision_idempotency_key is not None:
+            if (
+                candidate.decision_idempotency_key != idempotency_key
+                or candidate.decision_request_hash != request_hash
+                or candidate.decision_action != action
+            ):
+                raise self._idempotency_conflict()
+        return candidate
+
+    async def _confirmed_response(
+        self, candidate: MemoryCandidate, user_id: UUID
+    ) -> MemoryCandidateDecisionResponse:
+        if candidate.activated_memory_id is None:
+            raise AppError(
+                code="STATE_MEMORY_ACTIVATION_MISSING",
+                message="Confirmed candidate has no active Memory",
+                status_code=HTTPStatus.CONFLICT,
+            )
+        memory = await self._repository.get_memory(candidate.activated_memory_id, user_id)
+        if memory is None:
+            raise AppError(
+                code="STATE_MEMORY_ACTIVATION_MISSING",
+                message="Confirmed candidate has no active Memory",
+                status_code=HTTPStatus.CONFLICT,
+            )
+        return MemoryCandidateDecisionResponse(
+            candidate=self._candidate_response(candidate),
+            memory=self._memory_response(memory),
+        )
+
+    @staticmethod
+    def _bind_decision(
+        candidate: MemoryCandidate,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        action: str,
+    ) -> None:
+        candidate.decision_idempotency_key = idempotency_key
+        candidate.decision_request_hash = request_hash
+        candidate.decision_action = action
+
+    @staticmethod
+    def _decision_hash(candidate_id: UUID, action: str) -> str:
+        payload = json.dumps(
+            {"action": action, "candidate_id": str(candidate_id)},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _idempotency_conflict() -> AppError:
+        return AppError(
+            code="STATE_IDEMPOTENCY_KEY_REUSED",
+            message="Idempotency-Key was already used with another request",
+            status_code=HTTPStatus.CONFLICT,
+        )
 
     async def _candidate_for_decision(self, candidate_id: UUID, user_id: UUID) -> MemoryCandidate:
         candidate = await self._repository.get_candidate(candidate_id, user_id, for_update=True)

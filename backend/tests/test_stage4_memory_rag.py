@@ -204,12 +204,32 @@ async def test_memory_api_consent_lifecycle_optimistic_lock_and_user_isolation(
     )
     assert repeated.status_code == 200
     assert repeated.json()["memory"]["memory_id"] == activated_id
+    changed_key = await api_client.post(
+        confirm_url,
+        headers={**bearer(token), "Idempotency-Key": "confirm-memory-other"},
+    )
+    assert changed_key.status_code == 409
+    assert changed_key.json()["error"]["code"] == "STATE_IDEMPOTENCY_KEY_REUSED"
     rejected = await api_client.post(
         f"/api/v1/memory-candidates/{rejected_candidate.id}/reject",
         headers={**bearer(token), "Idempotency-Key": "reject-memory"},
     )
     assert rejected.status_code == 200
     assert rejected.json()["candidate"]["status"] == "rejected"
+    repeated_reject = await api_client.post(
+        f"/api/v1/memory-candidates/{rejected_candidate.id}/reject",
+        headers={**bearer(token), "Idempotency-Key": "reject-memory"},
+    )
+    assert repeated_reject.status_code == 200
+    reused_for_other_request = await api_client.post(
+        confirm_url,
+        headers={**bearer(token), "Idempotency-Key": "reject-memory"},
+    )
+    assert reused_for_other_request.status_code == 409
+    assert (
+        reused_for_other_request.json()["error"]["code"]
+        == "STATE_IDEMPOTENCY_KEY_REUSED"
+    )
     deleted = await api_client.delete(f"/api/v1/memories/{normal.id}", headers=bearer(token))
     assert deleted.status_code == 204
 
@@ -222,6 +242,8 @@ async def test_search_tool_deduplicates_persists_and_reuses_fixture(
     user_id = await create_user(db_session)
     run = await create_run(db_session, user_id, key="stage4-search-tool")
     run.status = "running"
+    run.worker_id = "test-worker"
+    run.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
     step = AgentStep(
         run_id=run.id,
         sequence=1,
@@ -285,6 +307,8 @@ async def test_tool_argument_timeout_and_availability_guards(
     user_id = await create_user(db_session)
     run = await create_run(db_session, user_id, key="stage4-tool-guards")
     run.status = "running"
+    run.worker_id = "test-worker"
+    run.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
     step = AgentStep(
         run_id=run.id,
         sequence=1,

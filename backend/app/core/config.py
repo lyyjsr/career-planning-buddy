@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     agent_deadline_seconds: int = Field(default=45, ge=1, le=300)
     agent_poll_interval_seconds: float = Field(default=0.05, gt=0, le=5)
     agent_heartbeat_seconds: float = Field(default=15, gt=0, le=60)
+    agent_lease_seconds: float = Field(default=45, ge=5, le=300)
+    agent_max_run_attempts: int = Field(default=3, ge=1, le=10)
+    agent_worker_concurrency: int = Field(default=2, ge=1, le=16)
 
     # Pairwise Judge credentials are intentionally independent from the
     # agent-under-test. Live Judge mode fails closed when any field is absent.
@@ -223,6 +226,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 "EVAL_LIVE_RETRY_MAX_SECONDS must be >= "
                 "EVAL_LIVE_RETRY_BASE_SECONDS"
+            )
+        if self.agent_lease_seconds <= self.agent_heartbeat_seconds:
+            raise ValueError(
+                "AGENT_LEASE_SECONDS must be greater than "
+                "AGENT_HEARTBEAT_SECONDS"
             )
         return self
 

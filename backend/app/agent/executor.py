@@ -1,22 +1,25 @@
-"""Single-worker in-process Agent Run scheduling and execution."""
+"""PostgreSQL-leased Agent Run scheduling and execution."""
 
 import asyncio
 import logging
+import os
+import socket
 from collections.abc import Callable
-from datetime import UTC, datetime
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import AgentDeadlineExceededError, AgentError
+from app.agent.errors import AgentDeadlineExceededError, AgentError, AgentLeaseLostError
 from app.agent.finalizer import AgentRunFinalizer
 from app.agent.graph import GraphFactory, load_profile
 from app.agent.node_runner import NodeRunner
 from app.core.database import AsyncSessionFactory, session_transaction
 from app.harness.budget import BudgetGuard, CancellationToken
-from app.models.agent_run import AgentRun
+from app.harness.events import EventRecorder
+from app.models.agent_run import AgentRun, AgentStep
 from app.providers.embedding import EmbeddingProvider, MockEmbeddingProvider
 from app.providers.evidence_distillation import (
     EvidenceDistillationProvider,
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRunExecutor:
-    """Executes one Run per asyncio Task; no multi-worker reliability is claimed."""
+    """Claims durable Runs with leases and executes them with bounded concurrency."""
 
     def __init__(
         self,
@@ -46,6 +49,11 @@ class AgentRunExecutor:
         embedding_provider: EmbeddingProvider | None = None,
         evidence_distillation_provider: EvidenceDistillationProvider | None = None,
         managed_resources: list[object] | None = None,
+        poll_interval_seconds: float = 0.25,
+        heartbeat_seconds: float = 10,
+        lease_seconds: float = 30,
+        max_attempts: int = 3,
+        worker_concurrency: int = 2,
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider or MockPlanningProvider()
@@ -57,14 +65,53 @@ class AgentRunExecutor:
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._shutdown_run_ids: set[UUID] = set()
         self._managed_resources = list(managed_resources or [])
+        self._poll_interval_seconds = poll_interval_seconds
+        self._heartbeat_seconds = heartbeat_seconds
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._worker_concurrency = worker_concurrency
+        self._worker_id = (
+            f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}"
+        )
+        self._wakeup = asyncio.Event()
+        self._dispatcher_task: asyncio.Task[None] | None = None
+        self._closing = False
 
     def submit(self, run_id: UUID) -> None:
-        current = self._tasks.get(run_id)
-        if current is not None and not current.done():
+        """Wake the durable dispatcher; PostgreSQL remains the queue of record."""
+        del run_id
+        self._wakeup.set()
+
+    async def start(self) -> None:
+        """Start one process-local consumer of the PostgreSQL lease queue."""
+        if self._dispatcher_task is not None and not self._dispatcher_task.done():
             return
-        task = asyncio.create_task(self.execute(run_id), name=f"agent-run-{run_id}")
-        self._tasks[run_id] = task
-        task.add_done_callback(self._done_callback(run_id))
+        self._closing = False
+        self._wakeup = asyncio.Event()
+        self._dispatcher_task = asyncio.create_task(
+            self._dispatch_loop(),
+            name=f"agent-dispatcher-{self._worker_id}",
+        )
+        self._wakeup.set()
+
+    def configure_dispatcher(
+        self,
+        *,
+        poll_interval_seconds: float,
+        heartbeat_seconds: float,
+        lease_seconds: float,
+        max_attempts: int,
+        worker_concurrency: int,
+    ) -> None:
+        if self._dispatcher_task is not None and not self._dispatcher_task.done():
+            raise RuntimeError("cannot reconfigure a running Agent dispatcher")
+        if lease_seconds <= heartbeat_seconds:
+            raise ValueError("Agent lease must be longer than its heartbeat interval")
+        self._poll_interval_seconds = poll_interval_seconds
+        self._heartbeat_seconds = heartbeat_seconds
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._worker_concurrency = worker_concurrency
 
     def set_provider(self, provider: PlanningProvider) -> None:
         """Configure the process-wide Provider before accepting new Runs."""
@@ -88,25 +135,47 @@ class AgentRunExecutor:
         self._evidence_distillation_provider = provider
 
     async def execute(self, run_id: UUID) -> None:
-        loaded = await self._start_and_load(run_id)
+        """Claim and execute one Run; retained as a deterministic test/CLI entrypoint."""
+        loaded = await self._claim_by_id(run_id)
         if loaded is None:
             return
         run, config = loaded
+        await self._execute_claimed(run, config)
+
+    async def _execute_claimed(
+        self,
+        run: AgentRun,
+        config: RuntimeConfigSnapshot | None,
+    ) -> None:
+        run_id = run.id
         if config is None:
-            await AgentRunFinalizer(self._session_factory, None).finalize_failed(
+            await AgentRunFinalizer(
+                self._session_factory,
+                None,
+                worker_id=self._worker_id,
+                attempt_count=run.attempt_count,
+            ).finalize_failed(
                 run_id, error_code="CONFIG_SNAPSHOT_INVALID"
             )
             return
+        heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(run_id, run.attempt_count),
+            name=f"agent-heartbeat-{run_id}",
+        )
         cancellation = CancellationToken()
         budget = BudgetGuard(config, run.deadline_at, cancellation)
-        finalizer = AgentRunFinalizer(self._session_factory, budget)
-        if run.cancel_requested_at is not None:
-            await finalizer.finalize_cancelled(run_id)
-            return
+        finalizer = AgentRunFinalizer(
+            self._session_factory,
+            budget,
+            worker_id=self._worker_id,
+            attempt_count=run.attempt_count,
+        )
         runner = NodeRunner(
             self._session_factory,
             budget,
             config.node_timeouts_seconds,
+            worker_id=self._worker_id,
+            attempt_count=run.attempt_count,
         )
         graph = GraphFactory(
             self._session_factory,
@@ -119,6 +188,9 @@ class AgentRunExecutor:
             budget=budget,
         )
         try:
+            if run.cancel_requested_at is not None:
+                await finalizer.finalize_cancelled(run_id)
+                return
             profile = await load_profile(self._session_factory, run.user_id)
             state: PlanningState = {
                 "run_id": run.id,
@@ -156,20 +228,30 @@ class AgentRunExecutor:
         except asyncio.CancelledError:
             cancellation.cancel()
             if run_id in self._shutdown_run_ids:
-                await finalizer.finalize_failed(
-                    run_id, error_code="PROCESS_INTERRUPTED"
+                await self._release_for_retry(
+                    run_id,
+                    attempt_count=run.attempt_count,
+                    reason="graceful_shutdown",
                 )
             else:
                 await finalizer.finalize_cancelled(run_id)
         except AgentDeadlineExceededError:
             await finalizer.finalize_failed(run_id, error_code="AGENT_DEADLINE_EXCEEDED")
+        except AgentLeaseLostError:
+            logger.info("agent run %s stopped after losing its lease", run_id)
         except AgentError as exc:
             await finalizer.finalize_failed(run_id, error_code=exc.code)
         except Exception:
             logger.exception("agent run %s failed unexpectedly", run_id)
             await finalizer.finalize_failed(run_id, error_code="AGENT_EXECUTION_FAILED")
         finally:
-            await self._ensure_terminal(run_id, finalizer)
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            if run_id not in self._shutdown_run_ids:
+                try:
+                    await self._ensure_terminal(run_id, finalizer)
+                except AgentLeaseLostError:
+                    pass
 
     async def request_cancel(self, run_id: UUID) -> None:
         task = self._tasks.get(run_id)
@@ -177,35 +259,42 @@ class AgentRunExecutor:
             task.cancel()
 
     async def recover_interrupted(self) -> int:
+        """Requeue expired leases and terminalize work that cannot be retried."""
         now = datetime.now(UTC)
         async with self._session_factory() as session:
             async with session_transaction(session):
                 run_ids = list(
                     await session.scalars(
                         select(AgentRun.id).where(
+                            or_(
+                                AgentRun.deadline_at <= now,
+                                (
+                                    (AgentRun.status == "running")
+                                    & or_(
+                                        AgentRun.lease_expires_at.is_(None),
+                                        AgentRun.lease_expires_at <= now,
+                                    )
+                                ),
+                            ),
                             AgentRun.status.in_(("pending", "running")),
                         )
                     )
                 )
+        processed = 0
         for run_id in run_ids:
-            loaded = await self._load(run_id)
-            if loaded is None:
-                continue
-            run, config = loaded
-            guard = (
-                BudgetGuard(config, now, CancellationToken())
-                if config is not None
-                else None
-            )
-            error_code = (
-                "PROCESS_INTERRUPTED" if config is not None else "CONFIG_SNAPSHOT_INVALID"
-            )
-            await AgentRunFinalizer(self._session_factory, guard).finalize_failed(
-                run.id, error_code=error_code
-            )
-        return len(run_ids)
+            if await self._recover_candidate(run_id, observed_at=now):
+                processed += 1
+        if processed:
+            self._wakeup.set()
+        return processed
 
     async def shutdown(self) -> None:
+        self._closing = True
+        self._wakeup.set()
+        dispatcher = self._dispatcher_task
+        if dispatcher is not None and dispatcher is not asyncio.current_task():
+            await asyncio.gather(dispatcher, return_exceptions=True)
+        self._dispatcher_task = None
         active = [
             (run_id, task)
             for run_id, task in self._tasks.items()
@@ -238,7 +327,7 @@ class AgentRunExecutor:
                 await close()
         self._managed_resources.clear()
 
-    async def _start_and_load(
+    async def _claim_by_id(
         self, run_id: UUID
     ) -> tuple[AgentRun, RuntimeConfigSnapshot | None] | None:
         async with self._session_factory() as session:
@@ -246,30 +335,210 @@ class AgentRunExecutor:
                 run = await session.scalar(
                     select(AgentRun).where(AgentRun.id == run_id).with_for_update()
                 )
-                if run is None or run.status != "pending":
+                if (
+                    run is None
+                    or run.status != "pending"
+                    or run.deadline_at <= datetime.now(UTC)
+                ):
                     return None
-                try:
-                    config = RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
-                except ValidationError:
-                    return run, None
-                run.status = "running"
-                run.started_at = datetime.now(UTC)
-                await session.flush()
-                return run, config
+                return await self._claim_locked(session, run)
 
-    async def _load(
-        self, run_id: UUID
+    async def _claim_next(
+        self,
     ) -> tuple[AgentRun, RuntimeConfigSnapshot | None] | None:
         async with self._session_factory() as session:
             async with session_transaction(session):
-                run = await session.get(AgentRun, run_id)
+                run = await session.scalar(
+                    select(AgentRun)
+                    .where(AgentRun.status == "pending")
+                    .where(AgentRun.deadline_at > datetime.now(UTC))
+                    .order_by(AgentRun.created_at, AgentRun.id)
+                    .with_for_update(skip_locked=True)
+                    .limit(1)
+                )
                 if run is None:
                     return None
-                try:
-                    config = RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
-                except ValidationError:
-                    config = None
-                return run, config
+                return await self._claim_locked(session, run)
+
+    async def _claim_locked(
+        self,
+        session: AsyncSession,
+        run: AgentRun,
+    ) -> tuple[AgentRun, RuntimeConfigSnapshot | None]:
+        now = datetime.now(UTC)
+        run.status = "running"
+        run.worker_id = self._worker_id
+        run.heartbeat_at = now
+        run.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
+        run.attempt_count += 1
+        if run.started_at is None:
+            run.started_at = now
+        try:
+            config = RuntimeConfigSnapshot.model_validate(run.config_snapshot_json)
+        except ValidationError:
+            config = None
+        await session.flush()
+        return run, config
+
+    async def _dispatch_loop(self) -> None:
+        last_recovery = 0.0
+        loop = asyncio.get_running_loop()
+        while not self._closing:
+            try:
+                now = loop.time()
+                if now - last_recovery >= max(1.0, self._poll_interval_seconds):
+                    await self.recover_interrupted()
+                    last_recovery = now
+                while (
+                    not self._closing
+                    and sum(not task.done() for task in self._tasks.values())
+                    < self._worker_concurrency
+                ):
+                    loaded = await self._claim_next()
+                    if loaded is None:
+                        break
+                    run, config = loaded
+                    task = asyncio.create_task(
+                        self._execute_claimed(run, config),
+                        name=f"agent-run-{run.id}",
+                    )
+                    self._tasks[run.id] = task
+                    task.add_done_callback(self._done_callback(run.id))
+            except Exception:
+                logger.exception("Agent Run dispatcher iteration failed")
+            self._wakeup.clear()
+            try:
+                await asyncio.wait_for(
+                    self._wakeup.wait(),
+                    timeout=self._poll_interval_seconds,
+                )
+            except TimeoutError:
+                pass
+
+    async def _heartbeat_loop(self, run_id: UUID, attempt_count: int) -> None:
+        while True:
+            await asyncio.sleep(self._heartbeat_seconds)
+            now = datetime.now(UTC)
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    result = await session.execute(
+                        update(AgentRun)
+                        .where(
+                            AgentRun.id == run_id,
+                            AgentRun.status == "running",
+                            AgentRun.worker_id == self._worker_id,
+                            AgentRun.attempt_count == attempt_count,
+                        )
+                        .values(
+                            heartbeat_at=now,
+                            lease_expires_at=now
+                            + timedelta(seconds=self._lease_seconds),
+                        )
+                        .returning(AgentRun.id)
+                    )
+                    if result.scalar_one_or_none() is None:
+                        return
+
+    async def _release_for_retry(
+        self,
+        run_id: UUID,
+        *,
+        attempt_count: int,
+        reason: str,
+    ) -> bool:
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                run = await session.scalar(
+                    select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+                )
+                if (
+                    run is None
+                    or run.status != "running"
+                    or run.worker_id != self._worker_id
+                    or run.attempt_count != attempt_count
+                ):
+                    return False
+                await session.execute(
+                    update(AgentStep)
+                    .where(AgentStep.run_id == run_id, AgentStep.status == "running")
+                    .values(
+                        status="failed",
+                        error_code="PROCESS_INTERRUPTED",
+                        error_message="PROCESS_INTERRUPTED",
+                        finished_at=datetime.now(UTC),
+                    )
+                )
+                run.status = "pending"
+                run.worker_id = None
+                run.lease_expires_at = None
+                run.heartbeat_at = None
+                await EventRecorder(session).record(
+                    run_id,
+                    "run.requeued",
+                    {
+                        "reason": reason,
+                        "attempt": run.attempt_count,
+                    },
+                )
+                return True
+
+    async def _recover_candidate(self, run_id: UUID, *, observed_at: datetime) -> bool:
+        """Recover one candidate after rechecking its lease under a row lock."""
+        terminal_error: str | None = None
+        async with self._session_factory() as session:
+            async with session_transaction(session):
+                run = await session.scalar(
+                    select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+                )
+                if run is None or run.status not in {"pending", "running"}:
+                    return False
+                now = datetime.now(UTC)
+                if run.deadline_at <= now:
+                    terminal_error = "AGENT_DEADLINE_EXCEEDED"
+                elif (
+                    run.status != "running"
+                    or run.lease_expires_at is None
+                    or run.lease_expires_at > observed_at
+                ):
+                    return False
+                elif run.attempt_count >= self._max_attempts:
+                    terminal_error = "AGENT_RETRY_EXHAUSTED"
+                else:
+                    await session.execute(
+                        update(AgentStep)
+                        .where(AgentStep.run_id == run_id, AgentStep.status == "running")
+                        .values(
+                            status="failed",
+                            error_code="PROCESS_INTERRUPTED",
+                            error_message="PROCESS_INTERRUPTED",
+                            finished_at=now,
+                        )
+                    )
+                    run.status = "pending"
+                    run.worker_id = None
+                    run.lease_expires_at = None
+                    run.heartbeat_at = None
+                    await EventRecorder(session).record(
+                        run_id,
+                        "run.requeued",
+                        {"reason": "lease_expired", "attempt": run.attempt_count},
+                    )
+                    return True
+
+                # Fence the expired owner before terminalization in a new transaction.
+                run.status = "running"
+                run.worker_id = self._worker_id
+                run.heartbeat_at = now
+                run.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
+
+        if terminal_error is None:
+            return False
+        return await AgentRunFinalizer(
+            self._session_factory,
+            None,
+            worker_id=self._worker_id,
+            attempt_count=None,
+        ).finalize_failed(run_id, error_code=terminal_error)
 
     async def _ensure_terminal(self, run_id: UUID, finalizer: AgentRunFinalizer) -> None:
         async with self._session_factory() as session:
@@ -298,6 +567,7 @@ class AgentRunExecutor:
     def _done_callback(self, run_id: UUID) -> Callable[[asyncio.Task[None]], None]:
         def discard(task: asyncio.Task[None]) -> None:
             self._discard(run_id, task)
+            self._wakeup.set()
 
         return discard
 

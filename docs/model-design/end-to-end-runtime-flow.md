@@ -146,7 +146,8 @@ Stage 4：context_builder 加载少量 pinned memories；Agent 按需调用 Memo
 | Provider/Tool 超时 | 按剩余上下文决定继续、degraded 或 failed |
 | Run 截止时间 | failed + AGENT_DEADLINE_EXCEEDED |
 | 用户取消 | cancel_requested_at + cancelled |
-| 进程重启 | stale pending/running → failed(PROCESS_INTERRUPTED) |
+| 进程重启/lease 过期 | running → run.requeued → pending → 新 worker claim |
+| 重试耗尽 | failed + AGENT_RETRY_EXHAUSTED |
 | SSE 断线 | 依据 agent_events 重放 |
 
 ## 11. 权威恢复

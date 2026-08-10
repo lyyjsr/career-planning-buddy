@@ -6,12 +6,12 @@
 | 与 ClawAgent 关系 | 无代码依赖、无运行时依赖、无数据库依赖 |
 | Agent | 1 个 `CareerPlanningAgent` + 受控节点 + 统一 Runtime/Harness |
 | 数据库 | PostgreSQL 16 + pgvector |
-| 异步执行 | MVP 单 Worker 进程内任务；状态和事件持久化到 PostgreSQL |
+| 异步执行 | Agent Run 使用 PostgreSQL claim/lease/heartbeat；本地 Task 只做执行句柄 |
 | SSE | `agent_events` 作为断线续传事实源；heartbeat 不持久化 |
 | Provider | LLM / Search / Embedding 三类 Protocol |
 | 运行时模型 | OpenAI-compatible，完全由环境变量配置 |
 | 编码助手 | 使用 Codex；只参与开发，不写入运行时架构依赖 |
-| 任务队列 | MVP 不引入 Redis/Celery；多 Worker 前必须升级 |
+| 任务队列 | 不引入 Redis/Celery；Agent Run 由 PostgreSQL lease 队列调度，Eval 仍限制单 Worker |
 | 部署 | Docker Compose 单机 |
 
 ## 1. 核心用例

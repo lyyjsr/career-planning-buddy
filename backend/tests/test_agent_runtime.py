@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from app.agent.errors import AgentLeaseLostError
 from app.agent.executor import AgentRunExecutor
+from app.agent.finalizer import AgentRunFinalizer
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.core.security import TokenService
@@ -171,6 +173,72 @@ async def test_happy_run_persists_plan_tasks_snapshot_and_last_terminal_event(
     run = await refresh_run(db_session, run.id)
     assert run.input_snapshot_json == input_snapshot
     assert run.config_snapshot_json == config_snapshot
+
+
+@pytest.mark.asyncio
+async def test_database_lease_allows_only_one_worker_to_claim_a_run(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="lease-exclusive")
+    first = AgentRunExecutor(runtime_factory(db_connection))
+    second = AgentRunExecutor(runtime_factory(db_connection))
+
+    claimed = await first._claim_by_id(run.id)  # noqa: SLF001
+    assert claimed is not None
+    assert await second._claim_by_id(run.id) is None  # noqa: SLF001
+
+    running = await refresh_run(db_session, run.id)
+    assert running.status == "running"
+    assert running.worker_id is not None
+    assert running.heartbeat_at is not None
+    assert running.lease_expires_at is not None
+    assert running.attempt_count == 1
+
+    claimed_run, config = claimed
+    await first._execute_claimed(claimed_run, config)  # noqa: SLF001
+    completed = await refresh_run(db_session, run.id)
+    assert completed.status == "completed"
+    assert completed.worker_id is None
+    assert completed.heartbeat_at is None
+    assert completed.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_stale_attempt_cannot_terminalize_a_reassigned_run(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="lease-fencing")
+    executor = AgentRunExecutor(runtime_factory(db_connection))
+    claimed = await executor._claim_by_id(run.id)  # noqa: SLF001
+    assert claimed is not None
+    stale_run, _ = claimed
+
+    current = await refresh_run(db_session, run.id)
+    current.worker_id = "replacement-worker"
+    current.attempt_count = stale_run.attempt_count + 1
+    current.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+    await db_session.flush()
+
+    stale_finalizer = AgentRunFinalizer(
+        runtime_factory(db_connection),
+        None,
+        worker_id=stale_run.worker_id,
+        attempt_count=stale_run.attempt_count,
+    )
+    with pytest.raises(AgentLeaseLostError):
+        await stale_finalizer.finalize_failed(
+            run.id,
+            error_code="AGENT_EXECUTION_FAILED",
+        )
+
+    current = await refresh_run(db_session, run.id)
+    assert current.status == "running"
+    assert current.worker_id == "replacement-worker"
+    assert current.error_code is None
 
 
 @pytest.mark.asyncio
@@ -363,7 +431,7 @@ async def test_user_cancel_stops_graph_and_writes_one_terminal(
 
 
 @pytest.mark.asyncio
-async def test_process_shutdown_marks_active_run_interrupted(
+async def test_process_shutdown_requeues_active_run_without_terminal_event(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -392,8 +460,16 @@ async def test_process_shutdown_marks_active_run_interrupted(
     await executor.execute(run.id)
 
     interrupted = await refresh_run(db_session, run.id)
-    assert interrupted.status == "failed"
-    assert interrupted.error_code == "PROCESS_INTERRUPTED"
+    assert interrupted.status == "pending"
+    assert interrupted.error_code is None
+    assert interrupted.worker_id is None
+    assert interrupted.lease_expires_at is None
+    requeued = await db_session.scalar(
+        select(func.count())
+        .select_from(AgentEvent)
+        .where(AgentEvent.run_id == run.id, AgentEvent.event_type == "run.requeued")
+    )
+    assert requeued == 1
 
 
 @pytest.mark.asyncio
@@ -457,33 +533,60 @@ async def test_idempotency_active_conflict_sse_resume_and_user_isolation(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["pending", "running"])
-async def test_startup_recovery_fails_every_orphaned_active_run_once(
+async def test_startup_recovery_requeues_an_expired_lease(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
-    status: str,
 ) -> None:
     user_id = await create_user(db_session)
     run = await create_run(db_session, user_id, key="interrupted")
     run_id = run.id
-    run.status = status
+    run.status = "running"
+    run.worker_id = "dead-worker"
+    run.heartbeat_at = datetime.now(UTC) - timedelta(minutes=2)
+    run.lease_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    run.attempt_count = 1
     run.deadline_at = datetime.now(UTC) + timedelta(minutes=5)
     await db_session.flush()
     executor = AgentRunExecutor(runtime_factory(db_connection))
 
     assert await executor.recover_interrupted() == 1
     recovered = await refresh_run(db_session, run_id)
-    terminal_count = await db_session.scalar(
+    requeue_count = await db_session.scalar(
         select(func.count())
         .select_from(AgentEvent)
         .where(
             AgentEvent.run_id == run_id,
-            AgentEvent.event_type == "run.failed",
+            AgentEvent.event_type == "run.requeued",
         )
     )
+    assert recovered.status == "pending"
+    assert recovered.error_code is None
+    assert recovered.worker_id is None
+    assert recovered.lease_expires_at is None
+    assert requeue_count == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_fails_an_exhausted_lease_once(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(db_session, user_id, key="retry-exhausted")
+    run_id = run.id
+    run.status = "running"
+    run.worker_id = "dead-worker"
+    run.lease_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    run.attempt_count = 3
+    run.deadline_at = datetime.now(UTC) + timedelta(minutes=5)
+    await db_session.flush()
+
+    executor = AgentRunExecutor(runtime_factory(db_connection), max_attempts=3)
+    assert await executor.recover_interrupted() == 1
+
+    recovered = await refresh_run(db_session, run_id)
     assert recovered.status == "failed"
-    assert recovered.error_code == "PROCESS_INTERRUPTED"
-    assert terminal_count == 1
+    assert recovered.error_code == "AGENT_RETRY_EXHAUSTED"
 
 
 @pytest.mark.asyncio

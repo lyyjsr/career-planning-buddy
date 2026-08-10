@@ -29,6 +29,12 @@ class AgentDeadlineExceededError(AgentError):
     code = "AGENT_DEADLINE_EXCEEDED"
 
 
+class AgentLeaseLostError(AgentError):
+    """The current execution attempt no longer owns the durable Run lease."""
+
+    code = "AGENT_LEASE_LOST"
+
+
 class BudgetExceededError(AgentError):
     code = "AGENT_BUDGET_EXCEEDED"
 

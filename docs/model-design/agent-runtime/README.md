@@ -355,8 +355,11 @@ run.completed
 - 每个节点、模型调用和 Tool 调用前后都检查取消；
 - 如果正在执行不可立即取消的 Provider 请求，等待其超时后收敛，但不得继续下一节点；
 - Executor 在 finally 中只允许通过 `AgentRunFinalizer` 写一次终态；
-- 单 Worker 启动时，恢复器把数据库中遗留的全部 pending/running Run 标记为 failed：配置快照合法时 error_code=`PROCESS_INTERRUPTED`，快照损坏时 error_code=`CONFIG_SNAPSHOT_INVALID`；因为进程内任务不会跨重启保留，不能等待未来 deadline 后再恢复；
-- MVP 不承诺进程重启后从中间节点续跑。
+- Worker 通过数据库 lease/heartbeat 持有 running Run；优雅停机或 lease 过期时写
+  `run.requeued` 并回到 pending；
+- deadline 到期写 `AGENT_DEADLINE_EXCEEDED`，attempt 耗尽写 `AGENT_RETRY_EXHAUSTED`；
+- 重试从 Graph 起点开始并复用相同 Run 的成功 ToolCall，不承诺 LLM exactly-once 或
+  中间节点续跑。
 
 ## 14. 必测场景
 
@@ -373,6 +376,7 @@ run.completed
 11. SSE Last-Event-ID 回放；
 12. 用户 A 无法读取用户 B 的 Run、Event、Plan 和 Tool Trace；
 13. input/config snapshot 在用户画像变化后仍可用于 Replay。
+14. 两个 Worker 不能同时 claim 同一 Run，lease 过期可接管，attempt 耗尽唯一失败。
 
 ## 15. 建议实现文件
 

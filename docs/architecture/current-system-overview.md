@@ -30,9 +30,13 @@ Events are committed before SSE delivery, snapshots are redacted/hash-oriented, 
 has exactly one terminal event which is last. Cancellation, deadline and budget are explicit
 runtime states. Plans are versioned, so replanning archives rather than overwrites history.
 
-PostgreSQL 16 with pgvector is the system of record. Alembic owns schema changes. The
-application currently uses one Uvicorn worker because Agent and Eval background executors
-are process-local; horizontal scheduling is intentionally outside v1.
+PostgreSQL 16 with pgvector is the system of record. Alembic owns schema changes. Agent Run
+dispatch is database-backed: workers claim pending rows with `SKIP LOCKED`, renew a lease by
+heartbeat, and requeue expired leases up to a bounded attempt count. The local task registry
+is only an execution handle. Row-locked recovery rechecks lease expiry, while worker id and
+attempt count fence stale writers from node and terminal persistence. Retries are at-least-once and restart the controlled graph; they
+reuse persisted Tool results but may repeat an LLM call. Eval executors remain process-local,
+so the complete application is not yet horizontally scalable without deployment constraints.
 
 ## Three-layer memory
 
@@ -122,7 +126,9 @@ developer-only CLI/use case rather than an automatic or guest-accessible promoti
 
 ## Current known limits
 
-- One worker and process-local background scheduling; no multi-replica failover.
+- Agent Run supports PostgreSQL lease takeover and stale-attempt fencing, but has no node-level durable checkpoint and
+  therefore does not claim exactly-once LLM execution.
+- Eval and Pairwise executors remain process-local; multi-replica Eval is not supported.
 - No Redis, Celery, Kubernetes, microservices, MCP or multi-agent framework.
 - No arbitrary webpage crawler, hybrid BM25/vector RAG, reranker or online drift platform.
 - Local BGE deployment has host/model-path cost and is not packaged as GPU Compose.

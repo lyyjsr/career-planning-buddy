@@ -84,6 +84,11 @@ class MemoryCandidate(Base):
 
     __tablename__ = "memory_candidates"
     __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "decision_idempotency_key",
+            name="uq_memory_candidates_user_decision_idempotency",
+        ),
         CheckConstraint(
             "memory_type IN ('profile_fact','stable_preference','execution_pattern')",
             name="ck_memory_candidates_type",
@@ -95,6 +100,14 @@ class MemoryCandidate(Base):
         CheckConstraint(
             "status IN ('pending','confirmed','rejected','expired')",
             name="ck_memory_candidates_status",
+        ),
+        CheckConstraint(
+            "(decision_idempotency_key IS NULL AND decision_request_hash IS NULL "
+            "AND decision_action IS NULL) OR "
+            "(decision_idempotency_key IS NOT NULL AND "
+            "decision_request_hash ~ '^[0-9a-f]{64}$' AND "
+            "decision_action IN ('confirm','reject'))",
+            name="ck_memory_candidates_decision_idempotency",
         ),
         Index("ix_memory_candidates_user_status", "user_id", "status", "created_at"),
     )
@@ -123,6 +136,9 @@ class MemoryCandidate(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_idempotency_key: Mapped[str | None] = mapped_column(String(64))
+    decision_request_hash: Mapped[str | None] = mapped_column(String(64))
+    decision_action: Mapped[str | None] = mapped_column(String(16))
 
 
 class SearchSource(Base):

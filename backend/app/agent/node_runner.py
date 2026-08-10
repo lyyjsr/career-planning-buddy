@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
 from typing import TypeVar
@@ -11,7 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.errors import AgentDeadlineExceededError, AgentError
+from app.agent.errors import AgentDeadlineExceededError, AgentError, AgentLeaseLostError
 from app.core.database import session_transaction
 from app.harness.budget import BudgetGuard
 from app.harness.events import EventRecorder
@@ -43,10 +44,15 @@ class NodeRunner:
         session_factory: async_sessionmaker[AsyncSession],
         budget: BudgetGuard,
         node_timeouts: dict[str, float],
+        *,
+        worker_id: str | None = None,
+        attempt_count: int | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._budget = budget
         self._node_timeouts = node_timeouts
+        self._worker_id = worker_id
+        self._attempt_count = attempt_count
 
     async def run(
         self,
@@ -156,6 +162,7 @@ class NodeRunner:
                 )
                 if run is None or run.status not in {"pending", "running"}:
                     raise RuntimeError("Run is not active")
+                self._assert_lease_owner(run)
                 step = await TraceRecorder(session).start_step(run_id, node_name, attempt)
                 await EventRecorder(session).record(
                     run_id,
@@ -178,6 +185,12 @@ class NodeRunner:
     ) -> None:
         async with self._session_factory() as session:
             async with session_transaction(session):
+                run = await session.scalar(
+                    select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+                )
+                if run is None:
+                    raise RuntimeError("Run disappeared")
+                self._assert_lease_owner(run)
                 step = await session.get(AgentStep, step_id)
                 if step is None:
                     raise RuntimeError("step disappeared")
@@ -214,6 +227,12 @@ class NodeRunner:
     ) -> None:
         async with self._session_factory() as session:
             async with session_transaction(session):
+                run = await session.scalar(
+                    select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+                )
+                if run is None:
+                    return
+                self._assert_lease_owner(run)
                 step = await session.get(AgentStep, step_id)
                 if step is None or step.status != "running":
                     return
@@ -235,3 +254,15 @@ class NodeRunner:
                         "latency_ms": latency_ms,
                     },
                 )
+
+    def _assert_lease_owner(self, run: AgentRun) -> None:
+        if self._worker_id is None:
+            return
+        if (
+            run.status != "running"
+            or run.worker_id != self._worker_id
+            or run.attempt_count != self._attempt_count
+            or run.lease_expires_at is None
+            or run.lease_expires_at <= datetime.now(UTC)
+        ):
+            raise AgentLeaseLostError("Agent Run lease ownership was lost")

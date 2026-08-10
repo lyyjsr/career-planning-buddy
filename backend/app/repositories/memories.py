@@ -78,6 +78,17 @@ class MemoryRepository:
         candidate = await self._session.scalar(statement)
         return candidate if isinstance(candidate, MemoryCandidate) else None
 
+    async def get_candidate_by_decision_key(
+        self, user_id: UUID, idempotency_key: str
+    ) -> MemoryCandidate | None:
+        candidate = await self._session.scalar(
+            select(MemoryCandidate).where(
+                MemoryCandidate.user_id == user_id,
+                MemoryCandidate.decision_idempotency_key == idempotency_key,
+            )
+        )
+        return candidate if isinstance(candidate, MemoryCandidate) else None
+
     async def create_memory(
         self,
         *,
