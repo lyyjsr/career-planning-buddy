@@ -40,8 +40,10 @@ from app.repositories.plans import PlanRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.agent_runs import (
     AgentTurnResponse,
+    ClarificationRequest,
     EvidenceCatalogItem,
     EvidenceVisibility,
+    IntentResult,
     MemoryContext,
     PlanCandidate,
     PlanContext,
@@ -55,7 +57,7 @@ from app.schemas.agent_runs import (
     RunInputSnapshot,
     TaskContext,
 )
-from app.schemas.enums import PlanStatus, RunIntent, TaskStatus
+from app.schemas.enums import GoalType, PlanStatus, ReplanMode, RunIntent, TaskStatus
 from app.tools.contracts import ToolContext
 from app.tools.registry import ToolRegistry
 
@@ -162,16 +164,13 @@ class FixedPlanningGraph:
         intent = await self._nodes.run(
             run_id,
             "intent_router",
-            lambda: self._immediate(
-                route_intent(
-                    message=request.message,
-                    hint_intent=request.hint_intent,
-                    profile=state["profile"],
-                    source_plan_exists=source_plan_exists,
-                    goal_type_override=request.goal_type_override,
-                    forced_replan_mode=state.get("server_replan_mode"),
-                ),
-                {"method": "rule"},
+            lambda: self._route_intent(
+                message=request.message,
+                hint_intent=request.hint_intent,
+                profile=state["profile"],
+                source_plan_exists=source_plan_exists,
+                goal_type_override=request.goal_type_override,
+                forced_replan_mode=state.get("server_replan_mode"),
             ),
         )
         await self._update_run(
@@ -182,15 +181,49 @@ class FixedPlanningGraph:
         )
         return {"intent": intent}
 
+    @staticmethod
+    async def _route_intent(
+        *,
+        message: str,
+        hint_intent: str | None,
+        profile: ProfileContext | None,
+        source_plan_exists: bool,
+        goal_type_override: GoalType | None,
+        forced_replan_mode: ReplanMode | None,
+    ) -> NodeOutput[IntentResult]:
+        intent = route_intent(
+            message=message,
+            hint_intent=hint_intent,
+            profile=profile,
+            source_plan_exists=source_plan_exists,
+            goal_type_override=goal_type_override,
+            forced_replan_mode=forced_replan_mode,
+        )
+        return NodeOutput(
+            intent,
+            NodeTelemetry(
+                trace_data={
+                    "router_version": intent.router_version,
+                    "method": intent.method,
+                    "intent": intent.intent.value,
+                    "replan_mode": intent.replan_mode.value,
+                    "confidence": intent.confidence,
+                    "confidence_band": intent.confidence_band,
+                    "matched_rule_ids": intent.matched_rule_ids,
+                    "ambiguity_reasons": intent.ambiguity_reasons,
+                    "requested_horizon_weeks": intent.requested_horizon_weeks,
+                    "missing_slots": intent.missing_slots,
+                    "requires_fresh_information": intent.requires_fresh_information,
+                }
+            ),
+        )
+
     async def _clarification_node(self, state: PlanningState) -> dict[str, object]:
         intent = state["intent"]
         clarification = await self._nodes.run(
             state["run_id"],
             "clarification",
-            lambda: self._immediate(
-                build_clarification(intent),
-                {"reason": "profile_incomplete" if intent.missing_slots else "unsupported"},
-            ),
+            lambda: self._clarification_output(intent),
         )
         await self._finalizer.finalize_degraded(
             run_id=state["run_id"],
@@ -199,6 +232,16 @@ class FixedPlanningGraph:
             fallback_reason=clarification.reason,
         )
         return {}
+
+    @staticmethod
+    async def _clarification_output(
+        intent: IntentResult,
+    ) -> NodeOutput[ClarificationRequest]:
+        clarification = build_clarification(intent)
+        return NodeOutput(
+            clarification,
+            NodeTelemetry(trace_data={"reason": clarification.reason}),
+        )
 
     async def _context_node(self, state: PlanningState) -> dict[str, object]:
         context, evidence_catalog = await self._nodes.run(

@@ -20,11 +20,13 @@
 | 字段 | 类型 | 约束 |
 |---|---|---|
 | message | string | 1~2000 |
-| hint_intent | create_plan/replan/null | 只是提示，服务端仍校验 |
+| hint_intent | create_plan/replan/null | 弱提示；不能覆盖消息语义、来源计划或服务端 Review 决策 |
 | goal_type_override | GoalType/null | 仅用户明确表达目标变化时使用 |
 | source_plan_id | UUID/null | replan 可显式指定；省略时优先当前 generated/active，否则最近 completed Plan |
 
 已有计划查询使用 `/plans` 与 `/tasks`，不通过 Agent Run。
+
+意图路由不依赖 LLM。只有消息包含受支持的规划语义并满足来源约束时才进入生成 Graph；仅有 `hint_intent`、问候或含糊文本会返回 `intent_uncertain`，查询类文本返回 `unsupported_intent`。这两类结果都不会调用规划模型。
 
 ### 创建前校验
 
@@ -98,6 +100,12 @@
   "fallback_reason": "profile_incomplete"
 }
 ```
+
+`reason` 的稳定取值：
+
+- `profile_incomplete`：意图已确定，但生成所需 Profile 字段缺失；
+- `intent_uncertain`：消息语义不足、hint 冲突或重规划缺少来源；
+- `unsupported_intent`：明确属于已有计划/任务查询等非生成请求。
 
 ### Safe Response 结果
 

@@ -114,12 +114,8 @@ class Settings(BaseSettings):
     agent_poll_interval_seconds: float = Field(default=0.05, gt=0, le=5)
     agent_heartbeat_seconds: float = Field(default=15, gt=0, le=60)
 
-    # PR-9c.1: Pairwise Judge LLM credentials. The Judge is a separate
-    # model from the agent-under-test by default (``judge_llm_*`` are
-    # distinct from ``llm_*``) so a system cannot self-judge. Blank values
-    # mean "fall back to the agent LLM" --- callers that explicitly need a
-    # distinct judge must populate these. PR-9c.1 ships NO calibration
-    # thresholds here; threshold gating lives in PR-9c.2.
+    # Pairwise Judge credentials are intentionally independent from the
+    # agent-under-test. Live Judge mode fails closed when any field is absent.
     judge_llm_provider: Literal["mock", "fixture", "openai_compatible"] = "fixture"
     judge_llm_api_key: SecretStr | None = Field(default=None, min_length=1)
     judge_llm_base_url: AnyHttpUrl | None = None
@@ -155,14 +151,18 @@ class Settings(BaseSettings):
         "llm_api_key",
         "llm_base_url",
         "llm_model",
+        "judge_llm_api_key",
+        "judge_llm_base_url",
+        "judge_llm_model",
         "embedding_model_path",
         "embedding_model_name",
         "baidu_search_api_key",
         "app_git_commit",
+        "eval_pair_smoke_planning_profile",
         mode="before",
     )
     @classmethod
-    def empty_llm_values_are_unset(cls, value: object) -> object:
+    def empty_optional_values_are_unset(cls, value: object) -> object:
         """Allow empty template values while retaining strict real-provider checks."""
         if isinstance(value, str) and not value.strip():
             return None
@@ -183,6 +183,19 @@ class Settings(BaseSettings):
                 missing.append("LLM_MODEL")
             if missing:
                 raise ValueError("openai_compatible requires configured " + ", ".join(missing))
+        if self.judge_llm_provider == "openai_compatible":
+            judge_missing: list[str] = []
+            if self.judge_llm_api_key is None:
+                judge_missing.append("JUDGE_LLM_API_KEY")
+            if self.judge_llm_base_url is None:
+                judge_missing.append("JUDGE_LLM_BASE_URL")
+            if self.judge_llm_model is None:
+                judge_missing.append("JUDGE_LLM_MODEL")
+            if judge_missing:
+                raise ValueError(
+                    "openai_compatible judge requires configured "
+                    + ", ".join(judge_missing)
+                )
         if self.embedding_provider == "local":
             if self.embedding_model_path is None:
                 raise ValueError("local embedding requires EMBEDDING_MODEL_PATH")
@@ -190,6 +203,22 @@ class Settings(BaseSettings):
                 raise ValueError("EMBEDDING_MODEL_PATH must be an existing local directory")
         if self.search_provider == "baidu" and self.baidu_search_api_key is None:
             raise ValueError("baidu search requires BAIDU_SEARCH_API_KEY")
+        if self.eval_provider_mode == "live" and self.llm_provider == "mock":
+            raise ValueError("EVAL_PROVIDER_MODE=live requires a real LLM_PROVIDER")
+        if self.app_env == "production":
+            mock_providers = [
+                name
+                for name, is_mock in (
+                    ("LLM_PROVIDER", self.llm_provider == "mock"),
+                    ("SEARCH_PROVIDER", self.search_provider == "mock"),
+                    ("EMBEDDING_PROVIDER", self.embedding_provider == "mock"),
+                )
+                if is_mock
+            ]
+            if mock_providers:
+                raise ValueError(
+                    "production cannot use mock providers: " + ", ".join(mock_providers)
+                )
         if self.eval_live_retry_max_seconds < self.eval_live_retry_base_seconds:
             raise ValueError(
                 "EVAL_LIVE_RETRY_MAX_SECONDS must be >= "

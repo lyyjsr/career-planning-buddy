@@ -87,6 +87,15 @@
 
 UNIQUE `(run_id, sequence)`。修复节点使用新的 sequence，`attempt` 仅表示同一节点逻辑尝试次数。
 
+`intent_router` 的 `trace_data` 使用稳定结构：
+
+- `router_version/method/intent/replan_mode`：决策版本、路径与结果；
+- `confidence/confidence_band`：版本内决策强度；
+- `matched_rule_ids/ambiguity_reasons`：可审计依据和冲突原因；
+- `requested_horizon_weeks/missing_slots/requires_fresh_information`：后续 Graph 所需派生量。
+
+Trace 不重复保存用户完整原文。以上均写入既有 JSONB 字段，不新增表或列，因此不需要数据库迁移。
+
 ## tool_calls
 
 | 字段 | 类型 | 说明 |

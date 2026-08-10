@@ -251,6 +251,10 @@ class IntentResult(StrictModel):
     intent: RunIntent
     replan_mode: ReplanMode
     confidence: float = Field(ge=0, le=1)
+    confidence_band: Literal["high", "medium", "low"] = "high"
+    router_version: str = Field(default="intent-rule-v2", min_length=1, max_length=64)
+    matched_rule_ids: list[str] = Field(default_factory=list, max_length=20)
+    ambiguity_reasons: list[str] = Field(default_factory=list, max_length=10)
     missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]]
     effective_goal_type: GoalType | None
     requested_horizon_weeks: int | None = Field(default=None, ge=1, le=8)

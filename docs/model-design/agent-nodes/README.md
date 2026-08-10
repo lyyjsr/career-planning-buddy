@@ -10,7 +10,7 @@
 |---|---|---|---:|
 | [risk_gate](./risk_gate.spec.md) | 程序规则 + 可选分类模型 | Trace/Event | 2 |
 | [safe_response](./safe_response.spec.md) | 固定安全响应 | 返回终态候选 | 2 |
-| [intent_router](./intent_router.spec.md) | 规则 + 可选结构化分类 | Trace/Event | 2 |
+| [intent_router](./intent_router.spec.md) | 版本化规则 + 歧义澄清；预留结构化分类扩展 | Trace/Event | 2 |
 | [clarification](./clarification.spec.md) | 程序节点 | 返回终态候选 | 2 |
 | [context_builder](./context_builder.spec.md) | 只读程序节点 | input snapshot | 2 |
 | [career_planning_agent](./career_planning_agent.spec.md) | 唯一真 Agent | 模型/Tool Trace | 2/3/4 |

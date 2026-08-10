@@ -4,7 +4,10 @@ import pytest
 from pydantic import ValidationError
 from pytest import MonkeyPatch
 
-from app.core.config import Settings, get_settings
+from app.core.config import PROJECT_ROOT, Settings, get_settings
+from app.core.provider_status import build_provider_configuration_status
+from scripts.audit_config import audit_configuration
+from scripts.migrate_legacy_env import migrate_lines
 
 
 def test_settings_load_safe_defaults(monkeypatch: MonkeyPatch) -> None:
@@ -88,6 +91,87 @@ def test_openai_compatible_configuration_is_validated_without_exposing_key() -> 
     assert settings.llm_api_key is not None
     assert settings.llm_api_key.get_secret_value() == "unit-test-secret"
     assert "unit-test-secret" not in repr(settings)
+
+
+def test_openai_compatible_judge_requires_dedicated_configuration() -> None:
+    with pytest.raises(ValidationError, match="JUDGE_LLM_API_KEY"):
+        Settings(
+            _env_file=None,
+            judge_llm_provider="openai_compatible",
+            judge_llm_api_key="",
+            judge_llm_base_url="",
+            judge_llm_model="",
+        )
+
+
+def test_live_eval_requires_real_planning_provider() -> None:
+    with pytest.raises(ValidationError, match="live requires a real LLM_PROVIDER"):
+        Settings(_env_file=None, eval_provider_mode="live", llm_provider="mock")
+
+
+def test_blank_optional_eval_profile_is_treated_as_unset() -> None:
+    settings = Settings(_env_file=None, eval_pair_smoke_planning_profile="")
+
+    assert settings.eval_pair_smoke_planning_profile is None
+
+
+def test_production_rejects_mock_providers() -> None:
+    with pytest.raises(ValidationError, match="production cannot use mock providers"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            jwt_secret="production-secret-that-is-long-enough",
+        )
+
+
+def test_provider_status_is_secret_free_and_reports_mock_warnings() -> None:
+    status = build_provider_configuration_status(Settings(_env_file=None))
+
+    assert status.ready is True
+    assert status.providers["planning_llm"].provider == "mock"
+    assert status.providers["planning_llm"].real is False
+    assert status.warnings
+    assert "API_KEY" not in status.model_dump_json()
+
+
+def test_configuration_template_matches_settings_and_compose_contract() -> None:
+    assert audit_configuration() == []
+
+
+def test_configuration_audit_detects_a_compose_mapping_omission(tmp_path) -> None:
+    (tmp_path / ".env.example").write_text(
+        (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    compose = (PROJECT_ROOT / "compose.yaml").read_text(encoding="utf-8")
+    compose = "\n".join(
+        line for line in compose.splitlines() if "TOOL_TIMEOUT_SECONDS:" not in line
+    )
+    (tmp_path / "compose.yaml").write_text(compose, encoding="utf-8")
+    (tmp_path / "compose.embedding.yaml").write_text(
+        (PROJECT_ROOT / "compose.embedding.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    assert "compose backend environment is missing Settings field TOOL_TIMEOUT_SECONDS" in (
+        audit_configuration(tmp_path)
+    )
+
+
+def test_legacy_environment_migration_preserves_canonical_secret() -> None:
+    migrated, changed = migrate_lines(
+        [
+            "LLM_API_KEY=canonical-secret\n",
+            "COMPOSE_LLM_API_KEY=legacy-secret\n",
+            "COMPOSE_SEARCH_PROVIDER=baidu\n",
+        ]
+    )
+
+    assert "COMPOSE_LLM_API_KEY" in changed
+    assert "COMPOSE_SEARCH_PROVIDER" in changed
+    assert "LLM_API_KEY=canonical-secret\n" in migrated
+    assert "SEARCH_PROVIDER=baidu\n" in migrated
+    assert all("legacy-secret" not in line for line in migrated)
 
 
 def test_embedding_dimension_must_match_pgvector_migration() -> None:

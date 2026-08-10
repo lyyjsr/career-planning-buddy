@@ -116,11 +116,22 @@ async def test_happy_run_persists_plan_tasks_snapshot_and_last_terminal_event(
     )
     plan = await db_session.scalar(select(Plan).where(Plan.source_run_id == run.id))
     tasks = list(await db_session.scalars(select(Task).where(Task.user_id == user_id)))
+    intent_step = await db_session.scalar(
+        select(AgentStep).where(
+            AgentStep.run_id == run.id,
+            AgentStep.node_name == "intent_router",
+        )
+    )
 
     assert run.status == "completed"
     assert run.result_kind == "plan"
     assert run.final_plan_id is not None
     assert run.input_snapshot_json is not None
+    assert intent_step is not None
+    assert intent_step.trace_data["router_version"] == "intent-rule-v2"
+    assert intent_step.trace_data["intent"] == "create_plan"
+    assert intent_step.trace_data["confidence_band"] == "high"
+    assert intent_step.trace_data["matched_rule_ids"]
     assert plan is not None
     assert len(plan.weekly_focus_json) == 5
     assert len(tasks) == 7
@@ -184,6 +195,8 @@ async def test_run_latency_never_becomes_negative_when_database_clock_is_ahead(
     ("message", "with_profile", "kind", "reason"),
     [
         ("帮我制定计划", False, "clarification", "profile_incomplete"),
+        ("你好", True, "clarification", "intent_uncertain"),
+        ("今天有什么任务", True, "clarification", "unsupported_intent"),
         ("我想自杀", True, "safe_response", "high_risk_routed"),
     ],
 )

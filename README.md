@@ -60,7 +60,7 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 
 Open `http://localhost:5173`. Compose defaults to Mock providers, uses a named PostgreSQL volume, applies Alembic migrations, and starts exactly one Uvicorn worker.
 
-Docker search has a real but explicit opt-in through `COMPOSE_SEARCH_PROVIDER` and the `COMPOSE_BAIDU_SEARCH_*` settings documented in `.env.example`. Host real-provider settings are not implicitly copied into the container. Local backend mode is recommended for a host-mounted BGE model; this release does not add GPU/CUDA container deployment.
+Docker 与本机后端使用同一套 `LLM_*`、`SEARCH_*` 和 `EMBEDDING_*` 配置，不再维护 `COMPOSE_*` 副本。真实搜索通过 `SEARCH_PROVIDER=baidu` 显式启用。本地 Embedding 模型使用 `compose.embedding.yaml` 只读挂载；完整说明见 [`docs/third-party-integration/provider-configuration.md`](docs/third-party-integration/provider-configuration.md)。
 
 ## Local development and real providers
 
@@ -85,6 +85,8 @@ npm run dev
 ```
 
 Copy `.env.example` to the ignored root `.env` and select real providers there. Supply the LLM endpoint/model, a pre-downloaded local BGE path, and Baidu configuration only when using those modes. The application does not download model weights automatically. Never commit `.env` or credentials.
+
+修改配置后运行 `cd backend && python -m scripts.audit_config`，检查 Settings、模板与 Compose 是否遗漏或漂移；运行 `python -m scripts.provider_status` 查看不包含密钥、端点和模型名的 Provider 配置状态。
 
 ## Developer surfaces
 

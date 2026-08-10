@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.agent.errors import BudgetExceededError
 from app.agent.graph import FixedPlanningGraph
 from app.agent.nodes import (
+    build_clarification,
     build_planning_context,
     fallback_candidate,
     risk_gate,
@@ -27,7 +28,7 @@ from app.schemas.agent_runs import (
     TaskCandidate,
     WeeklyFocusCandidate,
 )
-from app.schemas.enums import CareerStage, GoalType, ReplanMode, SkillLevel, TaskType
+from app.schemas.enums import CareerStage, GoalType, ReplanMode, RunIntent, SkillLevel, TaskType
 from app.tools.registry import ToolRegistry
 
 
@@ -160,6 +161,111 @@ def test_explicit_goal_override_wins_when_replanning() -> None:
 
     assert intent.effective_goal_type == GoalType.AI_BACKEND
     assert intent.replan_mode == ReplanMode.ADJUST
+
+
+@pytest.mark.parametrize(
+    ("message", "hint", "source_exists", "expected_intent", "expected_mode"),
+    [
+        (
+            "帮我制定未来五周求职计划",
+            "create_plan",
+            False,
+            RunIntent.CREATE_PLAN,
+            ReplanMode.INITIAL,
+        ),
+        (
+            "Create a focused four week job search plan",
+            None,
+            False,
+            RunIntent.CREATE_PLAN,
+            ReplanMode.INITIAL,
+        ),
+        ("任务太多，后面每天减到半小时", "replan", True, RunIntent.REPLAN, ReplanMode.ADJUST),
+        (
+            "Reduce the workload and retain completed progress",
+            None,
+            True,
+            RunIntent.REPLAN,
+            ReplanMode.ADJUST,
+        ),
+        ("不要调整，继续按原计划", "replan", True, RunIntent.REPLAN, ReplanMode.CONTINUE),
+        ("Continue the current direction", None, True, RunIntent.REPLAN, ReplanMode.CONTINUE),
+        ("今天有什么任务", "create_plan", False, RunIntent.UNSUPPORTED, ReplanMode.INITIAL),
+    ],
+)
+def test_intent_router_uses_message_and_server_context(
+    message: str,
+    hint: str | None,
+    source_exists: bool,
+    expected_intent: RunIntent,
+    expected_mode: ReplanMode,
+) -> None:
+    intent = route_intent(
+        message=message,
+        hint_intent=hint,
+        profile=profile(),
+        source_plan_exists=source_exists,
+    )
+
+    assert intent.intent == expected_intent
+    assert intent.replan_mode == expected_mode
+    assert intent.router_version == "intent-rule-v2"
+    assert intent.matched_rule_ids
+
+
+def test_hint_without_semantic_evidence_requires_intent_clarification() -> None:
+    intent = route_intent(
+        message="你好",
+        hint_intent="create_plan",
+        profile=profile(),
+        source_plan_exists=False,
+    )
+
+    assert intent.intent == RunIntent.UNSUPPORTED
+    assert intent.confidence_band == "low"
+    assert intent.method == "rule_fallback"
+    assert "hint_without_message_evidence" in intent.ambiguity_reasons
+    assert build_clarification(intent).reason == "intent_uncertain"
+
+
+def test_replan_language_without_source_does_not_create_a_plan() -> None:
+    intent = route_intent(
+        message="调整后续计划",
+        hint_intent=None,
+        profile=profile(),
+        source_plan_exists=False,
+    )
+
+    assert intent.intent == RunIntent.UNSUPPORTED
+    assert "replan_source_missing" in intent.ambiguity_reasons
+
+
+def test_query_intent_uses_resource_guidance_not_ambiguity_prompt() -> None:
+    intent = route_intent(
+        message="查看我的计划",
+        hint_intent="create_plan",
+        profile=profile(),
+        source_plan_exists=False,
+    )
+
+    clarification = build_clarification(intent)
+    assert clarification.reason == "unsupported_intent"
+    assert intent.confidence_band == "high"
+
+
+def test_forced_replan_mode_is_authoritative_and_traceable() -> None:
+    intent = route_intent(
+        message="继续现有计划",
+        hint_intent="create_plan",
+        profile=profile(),
+        source_plan_exists=True,
+        forced_replan_mode=ReplanMode.ADJUST,
+    )
+
+    assert intent.intent == RunIntent.REPLAN
+    assert intent.replan_mode == ReplanMode.ADJUST
+    assert "server_forced_replan_mode" in intent.matched_rule_ids
+    assert "hint_conflicts_with_message_or_context" in intent.ambiguity_reasons
 
 
 def test_fallback_has_progressive_weeks_and_seven_dated_tasks() -> None:

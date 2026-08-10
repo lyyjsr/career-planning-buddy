@@ -2,14 +2,25 @@
 
 ```mermaid
 flowchart TD
-    A[User message] --> R[risk_gate]
-    R -->|high risk| S[safe_response + degraded]
-    R -->|safe| I[intent_router]
-    I -->|profile incomplete| C[clarification + degraded]
-    I -->|create_plan| P[planning graph: initial]
-    I -->|replan + continue| N[planning graph: continue]
-    I -->|replan + adjust| J[planning graph: adjust]
-    I -->|unsupported or query-only| U[clarification with resource-page guidance]
+    A["User message"] --> R["risk_gate"]
+    R -->|"high risk"| S["safe_response + degraded"]
+    R -->|"safe"| Q{"Query-only rule?"}
+    Q -->|"yes"| U["Resource-page guidance<br/>unsupported_intent"]
+    Q -->|"no"| F{"Server-forced replan<br/>with source plan?"}
+    F -->|"yes"| FR["replan + forced mode"]
+    F -->|"no"| D["Versioned bilingual rules<br/>message + source context + weak hint"]
+    D --> C{"Decision strength"}
+    C -->|"create"| CP["create_plan + initial"]
+    C -->|"continue"| RC["replan + continue"]
+    C -->|"adjust"| RA["replan + adjust"]
+    C -->|"ambiguous / source missing"| IC["Intent clarification<br/>intent_uncertain"]
+    CP --> P{"Profile complete?"}
+    RC --> P
+    RA --> P
+    P -->|"no"| PC["Profile clarification<br/>profile_incomplete"]
+    P -->|"yes"| G["Planning graph"]
 ```
 
-`hint_intent` 只允许 create_plan/replan，是前端提示。`replan_mode` 由服务端结合用户措辞、source plan 和 source review 推导为 continue/adjust；`start-next-plan` 创建的 mode 不能被客户端伪造。已有计划查询使用 `/plans`、`/tasks` 资源接口，不进入生成 Graph。最终路由写入 `resolved_intent/replan_mode`。
+当前运行路径不调用 LLM。`hint_intent` 只允许 `create_plan/replan` 且仅作为弱提示；服务端来源计划和 Review 决策优先。查询、低置信度和缺失来源都在进入规划模型前终止，因此不会为不明确请求生成计划。
+
+图中已经覆盖当前实现所需的活动分支；节点间没有复杂异步协作，因此不额外维护一张重复的时序图。未来如引入结构化模型路由器，它应放在“规则无法决定”与“意图澄清”之间，并复用同一输出契约和评测门槛。

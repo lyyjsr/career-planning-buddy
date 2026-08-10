@@ -32,6 +32,68 @@ HIGH_RISK_PATTERNS = (
     ("risk_self_harm_en", re.compile(r"\b(suicide|kill myself|self[- ]harm)\b", re.I)),
 )
 
+INTENT_ROUTER_VERSION = "intent-rule-v2"
+
+INTENT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "query_only": (
+        re.compile(r"查看.{0,6}(计划|任务)|查询.{0,6}(计划|任务)|我的(计划|任务)"),
+        re.compile(r"(今天|今日|明天|本周).{0,5}(有|是)?什么(任务|安排)"),
+        re.compile(
+            r"\b(show|view|list|check|what(?:'s| is))\b"
+            r".{0,30}\b(plan|plans|task|tasks|schedule)\b",
+            re.I,
+        ),
+    ),
+    "adjust": (
+        re.compile(
+            r"调整|减量|减少.{0,5}(任务|工作量|时长)|换(个)?重点|改变方向|"
+            r"更换方向|解决.{0,5}阻碍|每天.{0,8}(半小时|分钟)"
+        ),
+        re.compile(
+            r"\b(adjust|reduce|change|switch|rebalance|cut)\b"
+            r".{0,40}\b(scope|workload|time|focus|direction|plan|tasks?)\b",
+            re.I,
+        ),
+    ),
+    "continue": (
+        re.compile(r"继续|接着|续接|沿用|按原计划|下一(个)?计划|后续计划"),
+        re.compile(
+            r"\b(continue|carry on|keep|next)\b.{0,35}"
+            r"\b(plan|direction|tasks?|steps?)\b",
+            re.I,
+        ),
+    ),
+    "negated_adjust": (
+        re.compile(r"(不要|不用|无需|不需要).{0,6}(调整|改|改变)|保持.{0,5}(方向|计划)"),
+        re.compile(r"\b(without|do not|don't|no need to)\b.{0,30}\b(change|adjust|switch)\b", re.I),
+    ),
+    "reset_direction": (
+        re.compile(r"重新规划|从头开始|新方向|改变方向|更换方向"),
+        re.compile(r"\b(start over|new direction|change direction|switch direction)\b", re.I),
+    ),
+    "create_plan": (
+        re.compile(r"(制定|创建|生成|规划|安排|设计|做|准备).{0,18}(求职|职业|面试|申请|技能|学习|转型|计划|任务)"),
+        re.compile(r"(求职|职业|面试|申请|技能|学习|转型).{0,18}(计划|准备|规划|安排)"),
+        re.compile(
+            r"\b(create|build|make|design|generate|plan|prepare|help me)\b.{0,50}"
+            r"\b(plan|career|job search|interview|application|applications|skill|"
+            r"transition|direction|tasks?|deliverables?)\b",
+            re.I,
+        ),
+    ),
+    "career_context": (
+        re.compile(r"求职|职业|岗位|面试|简历|申请|技能|学习|转型|秋招|春招|实习"),
+        re.compile(
+            r"\b(career|job|role|interview|resume|application|skill|internship|transition)\b",
+            re.I,
+        ),
+    ),
+    "greeting": (
+        re.compile(r"^\s*(你好|您好|嗨|哈喽|在吗)[！!。.，,\s]*$"),
+        re.compile(r"^\s*(hi|hello|hey)[!.?,\s]*$", re.I),
+    ),
+}
+
 
 def risk_gate(message: str) -> RiskResult:
     matched = [rule_id for rule_id, pattern in HIGH_RISK_PATTERNS if pattern.search(message)]
@@ -53,24 +115,73 @@ def route_intent(
     goal_type_override: GoalType | None = None,
     forced_replan_mode: ReplanMode | None = None,
 ) -> IntentResult:
-    query_only = any(term in message for term in ("查看计划", "查询任务", "我的计划"))
-    missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]] = []
-    if profile is None:
-        missing_slots = ["goal_type", "stage", "time_budget_minutes", "skill_level"]
+    matches = {
+        rule_id: any(pattern.search(message) for pattern in patterns)
+        for rule_id, patterns in INTENT_PATTERNS.items()
+    }
+    matched_rule_ids = [rule_id for rule_id, matched in matches.items() if matched]
+    ambiguity_reasons: list[str] = []
     requested_weeks = parse_horizon_weeks(message)
-    if query_only:
+    method: Literal["rule", "model", "rule_fallback"] = "rule"
+
+    if matches["query_only"]:
         intent = RunIntent.UNSUPPORTED
         mode = ReplanMode.INITIAL
-    elif hint_intent == RunIntent.REPLAN.value or source_plan_exists:
+        confidence = 0.99
+    elif forced_replan_mode is not None and source_plan_exists:
         intent = RunIntent.REPLAN
-        mode = forced_replan_mode or (
-            ReplanMode.ADJUST
-            if any(term in message for term in ("调整", "减量", "换重点", "阻碍"))
-            else ReplanMode.CONTINUE
-        )
-    else:
+        mode = forced_replan_mode
+        confidence = 1.0
+        matched_rule_ids.append("server_forced_replan_mode")
+    elif source_plan_exists:
+        intent, mode, confidence = _route_with_source(matches)
+        if intent == RunIntent.UNSUPPORTED:
+            method = "rule_fallback"
+            ambiguity_reasons.append("no_supported_intent_signal")
+    elif matches["adjust"] or matches["continue"]:
+        intent = RunIntent.UNSUPPORTED
+        mode = ReplanMode.INITIAL
+        confidence = 0.3
+        method = "rule_fallback"
+        ambiguity_reasons.append("replan_source_missing")
+    elif matches["create_plan"]:
         intent = RunIntent.CREATE_PLAN
         mode = ReplanMode.INITIAL
+        confidence = 0.96
+    elif matches["greeting"] and hint_intent is None:
+        intent = RunIntent.UNSUPPORTED
+        mode = ReplanMode.INITIAL
+        confidence = 0.98
+    else:
+        intent = RunIntent.UNSUPPORTED
+        mode = ReplanMode.INITIAL
+        confidence = 0.25
+        method = "rule_fallback"
+        ambiguity_reasons.append("no_supported_intent_signal")
+
+    if hint_intent is not None:
+        hint_conflicts = (
+            hint_intent == RunIntent.CREATE_PLAN.value and intent == RunIntent.REPLAN
+        ) or (
+            hint_intent == RunIntent.REPLAN.value and intent == RunIntent.CREATE_PLAN
+        )
+        if hint_conflicts:
+            ambiguity_reasons.append("hint_conflicts_with_message_or_context")
+            confidence = min(confidence, 0.79)
+        elif intent == RunIntent.UNSUPPORTED and method == "rule_fallback":
+            ambiguity_reasons.append("hint_without_message_evidence")
+
+    confidence_band: Literal["high", "medium", "low"]
+    if confidence >= 0.85:
+        confidence_band = "high"
+    elif confidence >= 0.6:
+        confidence_band = "medium"
+    else:
+        confidence_band = "low"
+
+    missing_slots: list[Literal["goal_type", "stage", "time_budget_minutes", "skill_level"]] = []
+    if profile is None and intent != RunIntent.UNSUPPORTED:
+        missing_slots = ["goal_type", "stage", "time_budget_minutes", "skill_level"]
     requires_fresh_information = any(
         marker in message
         for marker in ("最新", "当前岗位", "市场信息", "搜索", "[mock:tool-search]")
@@ -78,19 +189,57 @@ def route_intent(
     return IntentResult(
         intent=intent,
         replan_mode=mode,
-        confidence=1,
+        confidence=confidence,
+        confidence_band=confidence_band,
+        router_version=INTENT_ROUTER_VERSION,
+        matched_rule_ids=list(dict.fromkeys(matched_rule_ids)),
+        ambiguity_reasons=ambiguity_reasons,
         missing_slots=missing_slots,
         effective_goal_type=goal_type_override or (profile.goal_type if profile else None),
         requested_horizon_weeks=requested_weeks,
         requires_fresh_information=requires_fresh_information,
-        method="rule",
+        method=method,
     )
+
+
+def _route_with_source(matches: dict[str, bool]) -> tuple[RunIntent, ReplanMode, float]:
+    if matches["negated_adjust"]:
+        return RunIntent.REPLAN, ReplanMode.CONTINUE, 0.98
+    if matches["adjust"]:
+        return RunIntent.REPLAN, ReplanMode.ADJUST, 0.98
+    if matches["continue"]:
+        return RunIntent.REPLAN, ReplanMode.CONTINUE, 0.98
+    if matches["create_plan"]:
+        mode = ReplanMode.ADJUST if matches["reset_direction"] else ReplanMode.CONTINUE
+        return RunIntent.REPLAN, mode, 0.91
+    return RunIntent.UNSUPPORTED, ReplanMode.INITIAL, 0.25
 
 
 def parse_horizon_weeks(message: str) -> int | None:
     match = re.search(r"(?:未来|接下来)?\s*(\d+)\s*周", message)
     if match:
         return max(1, min(8, int(match.group(1))))
+    english_match = re.search(r"\b(\d+)\s*(?:week|weeks)\b", message, re.I)
+    if english_match:
+        return _clamp_horizon_weeks(int(english_match.group(1)))
+    english_word_match = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight)\s+(?:week|weeks)\b",
+        message,
+        re.I,
+    )
+    if english_word_match:
+        return _clamp_horizon_weeks(
+            {
+                "one": 1,
+                "two": 2,
+                "three": 3,
+                "four": 4,
+                "five": 5,
+                "six": 6,
+                "seven": 7,
+                "eight": 8,
+            }[english_word_match.group(1).lower()]
+        )
     chinese_match = re.search(r"(?:未来|接下来)?\s*([一二两三四五六七八])\s*周", message)
     if chinese_match:
         return _clamp_horizon_weeks(_chinese_number(chinese_match.group(1)))
@@ -128,6 +277,15 @@ def _clamp_horizon_weeks(value: int) -> int:
 
 def build_clarification(intent: IntentResult) -> ClarificationRequest:
     if intent.intent == RunIntent.UNSUPPORTED:
+        if intent.method == "rule_fallback" or intent.confidence_band == "low":
+            return ClarificationRequest(
+                questions=["我还不能确定你的目标。你希望创建新计划、继续现有计划，还是调整当前计划？"],
+                slot_names=["intent"],
+                hint_options={
+                    "intent": ["create_plan", "replan_continue", "replan_adjust"]
+                },
+                reason="intent_uncertain",
+            )
         return ClarificationRequest(
             questions=["这个请求不需要生成新计划，请前往计划或任务页面查看。"],
             slot_names=["intent"],
