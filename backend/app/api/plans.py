@@ -21,12 +21,14 @@ from app.schemas.plans import (
     TaskAdjustmentCreateRequest,
     TaskAdjustmentDecisionRequest,
     TaskAdjustmentProposalResponse,
+    TaskChecklistUpdateRequest,
     TaskDetailResponse,
     TaskEditRequest,
     TaskEditResponse,
     TaskListResponse,
     TaskUpdateRequest,
     TaskUpdateResponse,
+    TaskVerificationRequest,
 )
 from app.services.plans import PlanQueryService
 from app.services.task_adjustments import TaskAdjustmentService
@@ -139,6 +141,52 @@ async def update_task(
     service: Annotated[PlanQueryService, Depends(get_plan_query_service)],
 ) -> TaskUpdateResponse:
     return await service.update_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        payload=payload,
+    )
+
+
+@tasks_router.patch(
+    "/{task_id}/checklist",
+    response_model=TaskUpdateResponse,
+    responses={
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def update_task_checklist(
+    task_id: UUID,
+    payload: TaskChecklistUpdateRequest,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    service: Annotated[PlanQueryService, Depends(get_plan_query_service)],
+) -> TaskUpdateResponse:
+    return await service.update_task_checklist(
+        task_id=task_id,
+        user_id=current_user.id,
+        payload=payload,
+    )
+
+
+@tasks_router.patch(
+    "/{task_id}/verification",
+    response_model=TaskUpdateResponse,
+    responses={
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def verify_task(
+    task_id: UUID,
+    payload: TaskVerificationRequest,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    service: Annotated[PlanQueryService, Depends(get_plan_query_service)],
+) -> TaskUpdateResponse:
+    return await service.verify_task(
         task_id=task_id,
         user_id=current_user.id,
         payload=payload,

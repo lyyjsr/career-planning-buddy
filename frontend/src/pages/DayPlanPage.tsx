@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Bot, Check, Clock3, PencilLine, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, Clock3, LockKeyhole, PencilLine, Undo2, X } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import {
@@ -9,6 +9,7 @@ import {
   usePlan,
   useRejectTaskAdjustment,
   useTaskDetail,
+  useUpdateTask,
 } from "@/api/plans";
 import type { TaskAdjustmentProposalResponse } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ export function DayPlanPage(): JSX.Element {
   const createProposal = useCreateTaskAdjustmentProposal();
   const confirmProposal = useConfirmTaskAdjustment();
   const rejectProposal = useRejectTaskAdjustment();
+  const updateTask = useUpdateTask();
   const [title, setTitle] = useState("");
   const [starterAction, setStarterAction] = useState("");
   const [deliverable, setDeliverable] = useState("");
@@ -62,9 +64,10 @@ export function DayPlanPage(): JSX.Element {
 
   const detail = detailQuery.data;
   const currentTask = task;
-  const error = editTask.error ?? createProposal.error ?? confirmProposal.error ?? rejectProposal.error;
+  const error = updateTask.error ?? editTask.error ?? createProposal.error ?? confirmProposal.error ?? rejectProposal.error;
   const displayError = error === null ? null : toUserFacingError(error);
-  const pending = editTask.isPending || createProposal.isPending || confirmProposal.isPending || rejectProposal.isPending;
+  const pending = updateTask.isPending || editTask.isPending || createProposal.isPending || confirmProposal.isPending || rejectProposal.isPending;
+  const completedLocked = currentTask.state === "completed";
 
   function saveManual(): void {
     editTask.mutate({
@@ -95,6 +98,13 @@ export function DayPlanPage(): JSX.Element {
     );
   }
 
+  function reopenTask(): void {
+    updateTask.mutate({
+      taskId: currentTask.task_id,
+      payload: { state: "in_progress", version: currentTask.version },
+    });
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link to={`/journey/${planId}`} className="inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
@@ -110,6 +120,18 @@ export function DayPlanPage(): JSX.Element {
         <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{task.title}</h1>
       </header>
 
+      {completedLocked && (
+        <Card className="border-amber-300/70 bg-amber-50/70">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-amber-800" />
+              <div><div className="font-medium text-amber-950">已完成任务暂时锁定</div><p className="mt-1 text-sm leading-6 text-amber-900/80">为避免改写已完成事实，手动修改和 AI 修改已停用。若确实需要调整，请先撤销完成。</p></div>
+            </div>
+            <Button variant="outline" className="shrink-0 border-amber-400 bg-background font-medium text-amber-950 shadow-sm hover:bg-amber-100" disabled={pending} onClick={reopenTask}><Undo2 className="h-4 w-4" />撤销完成后修改</Button>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-primary/15 bg-accent/30">
         <CardContent className="space-y-2 p-5 text-sm leading-6">
           <div><span className="font-medium">本周重点：</span>{detail.week_focus}</div>
@@ -122,7 +144,7 @@ export function DayPlanPage(): JSX.Element {
         <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><PencilLine className="h-4 w-4 text-primary" />手动调整</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {!detail.editable ? (
-            <p className="text-sm text-muted-foreground">{detail.edit_reason ?? "当前任务不可修改。"}</p>
+            <p className="text-sm text-muted-foreground">{completedLocked ? "任务已完成，请先使用上方“撤销完成后修改”。" : detail.edit_reason ?? "当前任务不可修改。"}</p>
           ) : (
             <>
               <div className="space-y-2"><Label htmlFor="day-title">任务标题</Label><Input id="day-title" value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></div>
@@ -140,6 +162,7 @@ export function DayPlanPage(): JSX.Element {
         <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><Bot className="h-4 w-4 text-primary" />和 AI 商量怎么改</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm leading-6 text-muted-foreground">描述哪里不合理。AI 只会生成修改提案，确认前不会改变任务。</p>
+          {!detail.editable && <div className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">{completedLocked ? "任务已完成，撤销完成后才能生成 AI 修改提案。" : "当前任务状态不支持 AI 修改。"}</div>}
           <Textarea value={aiMessage} onChange={(event) => setAiMessage(event.target.value)} maxLength={1000} rows={3} placeholder="例如：这个任务太难了，我今天只有 30 分钟，请拆成一个可验证的小步骤" disabled={!detail.editable} />
           <Button variant="outline" disabled={pending || !detail.editable || !aiMessage.trim()} onClick={askAi}>{createProposal.isPending ? "AI 正在整理…" : "生成调整提案"}</Button>
 

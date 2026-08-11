@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type {
   ActivePlanResponse,
+  MeResponse,
   TaskAdjustmentProposalResponse,
+  TaskChecklistUpdateRequest,
   TaskDetailResponse,
   TaskEditRequest,
   TaskEditResponse,
   TaskUpdateRequest,
   TaskUpdateResponse,
+  TaskVerificationRequest,
 } from "./types";
 
 export interface PlanListResponse {
@@ -48,10 +51,51 @@ export function useUpdateTask() {
         method: "PATCH",
         body: payload,
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      updateMeTaskCache(qc, result.task);
       qc.invalidateQueries({ queryKey: ["plans"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+}
+
+export function useUpdateTaskChecklist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      payload,
+    }: {
+      taskId: string;
+      payload: TaskChecklistUpdateRequest;
+    }) => apiRequest<TaskUpdateResponse>(`/api/v1/tasks/${taskId}/checklist`, {
+      method: "PATCH",
+      body: payload,
+    }),
+    onSuccess: (result) => {
+      updateMeTaskCache(qc, result.task);
+      invalidateTaskData(qc, result.task.task_id);
+    },
+  });
+}
+
+export function useVerifyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      payload,
+    }: {
+      taskId: string;
+      payload: TaskVerificationRequest;
+    }) => apiRequest<TaskUpdateResponse>(`/api/v1/tasks/${taskId}/verification`, {
+      method: "PATCH",
+      body: payload,
+    }),
+    onSuccess: (result) => {
+      updateMeTaskCache(qc, result.task);
+      invalidateTaskData(qc, result.task.task_id);
     },
   });
 }
@@ -69,6 +113,29 @@ function invalidateTaskData(qc: ReturnType<typeof useQueryClient>, taskId: strin
   qc.invalidateQueries({ queryKey: ["tasks", taskId, "detail"] });
   qc.invalidateQueries({ queryKey: ["plans"] });
   qc.invalidateQueries({ queryKey: ["me"] });
+}
+
+function updateMeTaskCache(
+  qc: ReturnType<typeof useQueryClient>,
+  task: TaskUpdateResponse["task"],
+): void {
+  qc.setQueryData<MeResponse>(["me"], (current) => {
+    if (current === undefined) return current;
+    return {
+      ...current,
+      today_tasks: current.today_tasks.map((item) =>
+        item.task_id === task.task_id ? task : item
+      ),
+      active_plan: current.active_plan === null
+        ? null
+        : {
+            ...current.active_plan,
+            tasks: current.active_plan.tasks.map((item) =>
+              item.task_id === task.task_id ? task : item
+            ),
+          },
+    };
+  });
 }
 
 export function useEditTaskDetails() {

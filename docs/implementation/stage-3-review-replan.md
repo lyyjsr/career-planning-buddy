@@ -26,7 +26,8 @@
 10. 新计划成功时归档被替代计划；
 11. 首个任务开始时 generated → active；
 12. 所有任务进入 completed/abandoned/expired 后 active → completed；
-13. 本周 pending Task 支持人工编辑和 AI 提案，经用户确认后应用，完成事实不可覆盖。
+13. 本周 pending/in_progress Task 支持人工编辑和 AI 提案，经用户确认后应用；completed Task 必须先由用户撤销完成才可修改，完成事实不得被静默覆盖。
+14. Task 执行步骤支持逐项、可逆、持久化勾选；全部步骤完成后才允许验收，验收通过与实际用时、Task 完成在同一事务结算。
 
 ## 模型预算
 
@@ -60,6 +61,7 @@ Review 请求只提交用户复盘内容，完成/放弃数量由 Service 从 ta
 - 至少 3 个 replan 场景保持连续性；
 - Prompt/model/budget 写入 config snapshot 和 Trace；
 - 任务非法状态转移返回 409；
+- 步骤勾选与验收使用版本锁；验收未通过保持进行中，完成任务后取消步骤会恢复进行中并使验收失效；
 - Review 能给出 suggested_replan 和 next_plan_action；
 - 用户确认后创建 continue/adjust 新 Run；
 - 来源计划只在归档与创建新计划的事务成功提交后归档；

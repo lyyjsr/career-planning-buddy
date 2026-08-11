@@ -22,6 +22,7 @@ from app.schemas.plans import (
     TaskEditResponse,
 )
 from app.services.plans import PlanQueryService
+from app.services.task_progress import fixed_cycle_contains
 
 
 class TaskAdjustmentService:
@@ -292,6 +293,11 @@ class TaskAdjustmentService:
 
     @staticmethod
     def _apply_patch(task: Task, plan: Plan, patch: dict[str, object]) -> None:
+        if "starter_action" in patch:
+            task.completed_step_indexes_json = []
+        if "starter_action" in patch or "deliverable" in patch:
+            task.deliverable_verified = False
+            task.verification_status = "not_ready"
         for field, value in patch.items():
             setattr(task, field, value)
         now = datetime.now(UTC)
@@ -325,10 +331,15 @@ class TaskAdjustmentService:
 
     @staticmethod
     def _editability(task: Task, plan: Plan) -> tuple[bool, str | None]:
-        if plan.status not in {"generated", "active"}:
+        legacy_current_cycle = plan.status == "archived" and fixed_cycle_contains(
+            plan_date=plan.plan_date,
+            horizon_end=plan.horizon_end,
+            target=datetime.now(UTC).date(),
+        )
+        if plan.status not in {"generated", "active"} and not legacy_current_cycle:
             return False, "Only the current weekly cycle can be edited"
-        if task.state != "pending":
-            return False, "Only a pending Task can be edited"
+        if task.state not in {"pending", "in_progress"}:
+            return False, "Only an unfinished Task can be edited"
         return True, None
 
     @staticmethod

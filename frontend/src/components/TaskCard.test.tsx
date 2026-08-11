@@ -15,7 +15,11 @@ const task: TaskResponse = {
   order_index: 0,
   state: "pending",
   starter_action: "打开简历",
+  execution_steps: [{ index: 0, text: "打开简历", completed: false }],
   deliverable: "一段 STAR 描述",
+  deliverable_verified: false,
+  verification_status: "not_ready",
+  completion_ready: false,
   rationale: null,
   estimated_minutes: 30,
   actual_minutes: null,
@@ -80,22 +84,31 @@ describe("TaskCard", () => {
     await waitFor(() => expect(feedback).toHaveBeenCalledWith("已经开始，先完成第一步。"));
   });
 
-  it("uses the same status circle to open completion for an in-progress task", () => {
+  it("starts verification only after every execution step is complete", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <TaskCard task={{ ...task, state: "in_progress", version: 2 }} />
+          <TaskCard task={{
+            ...task,
+            state: "in_progress",
+            version: 2,
+            execution_steps: [{ index: 0, text: "打开简历", completed: true }],
+            deliverable_verified: false,
+            verification_status: "ready",
+            completion_ready: true,
+          }} />
         </MemoryRouter>
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "完成：整理项目经历" }));
+    fireEvent.click(screen.getByRole("button", { name: "验收：整理项目经历" }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "确认完成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "还未达到" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已达到，继续" })).toBeInTheDocument();
   });
 
   it("keeps a completed task visible and lets the user mark it incomplete", async () => {
@@ -126,6 +139,14 @@ describe("TaskCard", () => {
             task={{
               ...task,
               state: "completed",
+              starter_action: "1. 选择文档类型与向量数据库 2. 确定 LLM 与检索策略",
+              execution_steps: [
+                { index: 0, text: "选择文档类型与向量数据库", completed: true },
+                { index: 1, text: "确定 LLM 与检索策略", completed: true },
+              ],
+              deliverable_verified: true,
+              verification_status: "passed",
+              completion_ready: false,
               version: 3,
               actual_minutes: 25,
               completed_at: "2026-08-04T01:00:00Z",
@@ -136,11 +157,91 @@ describe("TaskCard", () => {
     );
 
     expect(screen.getByRole("button", { name: "已完成：整理项目经历" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "标记为未完成" }));
+    expect(screen.getByText("选择文档类型与向量数据库")).toBeInTheDocument();
+    expect(screen.getByText("确定 LLM 与检索策略")).toBeInTheDocument();
+    expect(screen.getByText("验收标准")).toBeInTheDocument();
+    expect(screen.getByText("已通过")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "撤销完成" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(init?.method).toBe("PATCH");
     expect(JSON.parse(String(init?.body))).toEqual({ state: "in_progress", version: 3 });
+  });
+
+  it("persists a reversible execution-step check", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          task: {
+            ...task,
+            state: "in_progress",
+            version: 2,
+            execution_steps: [{ index: 0, text: "打开简历", completed: true }],
+          },
+          plan_status: "active",
+          companion_message: "执行进度已更新。",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><TaskCard task={task} /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "完成步骤：打开简历" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/v1/tasks/task-1/checklist");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      version: 1,
+      step_index: 0,
+      step_completed: true,
+    });
+  });
+
+  it("records failed verification without completing the task", async () => {
+    const readyTask: TaskResponse = {
+      ...task,
+      state: "in_progress",
+      version: 2,
+      execution_steps: [{ index: 0, text: "打开简历", completed: true }],
+      verification_status: "ready",
+      completion_ready: true,
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          task: { ...readyTask, version: 3, verification_status: "failed" },
+          plan_status: "active",
+          companion_message: "已记录验收未通过。",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><TaskCard task={readyTask} /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /开始验收/ }));
+    fireEvent.click(screen.getByRole("button", { name: "还未达到" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/v1/tasks/task-1/verification");
+    expect(JSON.parse(String(init?.body))).toEqual({ passed: false, version: 2 });
   });
 });

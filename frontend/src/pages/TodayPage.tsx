@@ -215,7 +215,7 @@ export function TodayPage(): JSX.Element {
               <Badge variant="outline" className="gap-1 py-1"><Clock3 className="h-3.5 w-3.5" />共 {totalMinutes} 分钟</Badge>
             </div>
           </div>
-          <p className="text-sm leading-6 text-muted-foreground">点击圆圈开始或完成；点击任务标题可查看细节并调整。</p>
+          <p className="text-sm leading-6 text-muted-foreground">逐项完成执行步骤，达到验收标准后再完成任务；点击任务标题可查看细节并调整。</p>
           <div className="space-y-3">
             {orderedTasks.map((task) => (
               <TaskCard key={task.task_id} task={task} featured={task.task_id === firstTask?.task_id} onFeedback={setFeedback} />

@@ -18,11 +18,14 @@ from app.schemas.plans import (
     PlanListResponse,
     PlanSourceResponse,
     PlanSourcesResponse,
+    TaskChecklistUpdateRequest,
     TaskListResponse,
     TaskResponse,
     TaskUpdateRequest,
     TaskUpdateResponse,
+    TaskVerificationRequest,
 )
+from app.services.task_progress import fixed_cycle_contains, parse_execution_steps
 
 
 class PlanQueryService:
@@ -169,7 +172,12 @@ class PlanQueryService:
                 task.state == "completed" and payload.state == TaskStatus.IN_PROGRESS
             )
             reopening_plan = plan.status == "completed" and reopening_task
-            if plan.status not in {"generated", "active"} and not reopening_plan:
+            legacy_current_cycle = self._is_current_archived_cycle(plan)
+            if (
+                plan.status not in {"generated", "active"}
+                and not reopening_plan
+                and not legacy_current_cycle
+            ):
                 raise AppError(
                     code="STATE_PLAN_NOT_MUTABLE",
                     message="Tasks can only be updated for a generated or active Plan",
@@ -201,6 +209,11 @@ class PlanQueryService:
                 task.completed_at = None
                 task.actual_minutes = None
                 task.started_at = task.started_at or now
+                if reopening_task:
+                    task.deliverable_verified = False
+                    task.verification_status = (
+                        "ready" if self._all_execution_steps_completed(task) else "not_ready"
+                    )
                 if plan.status in {"generated", "completed"}:
                     plan.status = "active"
                     plan.completed_at = None
@@ -213,6 +226,11 @@ class PlanQueryService:
                     else f"已经开始「{task.title}」，先完成第一个可验证动作。"
                 )
             elif target == "completed":
+                task.completed_step_indexes_json = list(
+                    range(len(parse_execution_steps(task.starter_action)))
+                )
+                task.deliverable_verified = True
+                task.verification_status = "passed"
                 task.completed_at = now
                 companion_message = "你已经完成了这一步，今天的推进已经成为可验证的成果。"
                 await self._plans.create_companion(
@@ -224,6 +242,8 @@ class PlanQueryService:
                     template_version="task_completed_v1",
                 )
             else:
+                task.deliverable_verified = False
+                task.verification_status = "not_ready"
                 task.abandoned_at = now
                 companion_message = self._abandoned_companion(payload.abandoned_reason)
                 await self._plans.create_companion(
@@ -258,6 +278,235 @@ class PlanQueryService:
                 plan_status=PlanStatus(plan.status),
                 companion_message=companion_message,
             )
+
+    async def update_task_checklist(
+        self,
+        *,
+        task_id: UUID,
+        user_id: UUID,
+        payload: TaskChecklistUpdateRequest,
+    ) -> TaskUpdateResponse:
+        async with session_transaction(self._session):
+            task = await self._plans.get_task_for_user(task_id, user_id, for_update=True)
+            if task is None:
+                raise AppError(
+                    code="NOT_FOUND_TASK",
+                    message="Task was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if task.version != payload.version:
+                raise AppError(
+                    code="STATE_TASK_VERSION_CONFLICT",
+                    message="Task version does not match the current version",
+                    status_code=HTTPStatus.CONFLICT,
+                    details={"current_version": task.version},
+                )
+            plan = await self._plans.get_for_user(task.plan_id, user_id, for_update=True)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            reopening = task.state == "completed"
+            if (
+                plan.status not in {"generated", "active"}
+                and not (reopening and plan.status == "completed")
+                and not self._is_current_archived_cycle(plan)
+            ):
+                raise AppError(
+                    code="STATE_PLAN_NOT_MUTABLE",
+                    message="Checklist can only be updated for the current Plan",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if task.state in {"abandoned", "expired"}:
+                raise AppError(
+                    code="STATE_TASK_CHECKLIST_NOT_MUTABLE",
+                    message="Checklist cannot be updated for this Task state",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+
+            steps = parse_execution_steps(task.starter_action)
+            completed = (
+                set(range(len(steps)))
+                if task.state == "completed"
+                else {
+                    index
+                    for index in task.completed_step_indexes_json
+                    if isinstance(index, int) and 0 <= index < len(steps)
+                }
+            )
+            if payload.step_index >= len(steps):
+                raise AppError(
+                    code="VALIDATION_TASK_STEP_INDEX",
+                    message="Execution step does not exist",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            before = payload.step_index in completed
+            if payload.step_completed:
+                completed.add(payload.step_index)
+            else:
+                completed.discard(payload.step_index)
+            changed = before != payload.step_completed
+
+            now = datetime.now(UTC)
+            task.completed_step_indexes_json = sorted(completed)
+            all_steps_completed = len(completed) == len(steps)
+            if changed:
+                task.deliverable_verified = False
+                task.verification_status = "ready" if all_steps_completed else "not_ready"
+            task.version += 1
+            task.updated_at = now
+            if task.state == "pending" and completed:
+                task.state = "in_progress"
+                task.started_at = now
+            if reopening and changed:
+                task.state = "in_progress"
+                task.completed_at = None
+                task.actual_minutes = None
+            if task.state == "in_progress" and plan.status in {"generated", "completed"}:
+                plan.status = "active"
+                plan.completed_at = None
+                plan.adopted_at = plan.adopted_at or now
+                plan.updated_at = now
+                plan.version += 1
+            await self._session.flush()
+
+            message = (
+                "执行步骤已完成，可以按照验收标准确认成果。"
+                if all_steps_completed and task.state != "completed"
+                else "执行进度已更新。"
+            )
+            return TaskUpdateResponse(
+                task=self.to_task_response(task),
+                plan_status=PlanStatus(plan.status),
+                companion_message=message,
+            )
+
+    async def verify_task(
+        self,
+        *,
+        task_id: UUID,
+        user_id: UUID,
+        payload: TaskVerificationRequest,
+    ) -> TaskUpdateResponse:
+        async with session_transaction(self._session):
+            task = await self._plans.get_task_for_user(task_id, user_id, for_update=True)
+            if task is None:
+                raise AppError(
+                    code="NOT_FOUND_TASK",
+                    message="Task was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if task.version != payload.version:
+                raise AppError(
+                    code="STATE_TASK_VERSION_CONFLICT",
+                    message="Task version does not match the current version",
+                    status_code=HTTPStatus.CONFLICT,
+                    details={"current_version": task.version},
+                )
+            plan = await self._plans.get_for_user(task.plan_id, user_id, for_update=True)
+            if plan is None:
+                raise AppError(
+                    code="NOT_FOUND_PLAN",
+                    message="Plan was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            if plan.status not in {"generated", "active"} and not self._is_current_archived_cycle(
+                plan
+            ):
+                raise AppError(
+                    code="STATE_PLAN_NOT_MUTABLE",
+                    message="Verification is only available for the current Plan cycle",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if task.state not in {"pending", "in_progress"}:
+                raise AppError(
+                    code="STATE_TASK_NOT_VERIFIABLE",
+                    message="Only an unfinished Task can be verified",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if not self._all_execution_steps_completed(task):
+                raise AppError(
+                    code="STATE_TASK_EXECUTION_INCOMPLETE",
+                    message="Complete every execution step before verification",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+
+            now = datetime.now(UTC)
+            task.version += 1
+            task.updated_at = now
+            task.started_at = task.started_at or now
+            if payload.passed:
+                task.state = "completed"
+                task.verification_status = "passed"
+                task.deliverable_verified = True
+                task.actual_minutes = payload.actual_minutes
+                task.completed_at = now
+                companion_message = "验收已经通过，这项今日任务已完成。"
+                await self._plans.create_companion(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    task_id=task.id,
+                    trigger_tag="task_completed",
+                    message=companion_message,
+                    template_version="task_verified_v1",
+                )
+            else:
+                task.state = "in_progress"
+                task.verification_status = "failed"
+                task.deliverable_verified = False
+                task.actual_minutes = None
+                task.completed_at = None
+                companion_message = "已记录验收未通过，执行步骤保留，可以继续完善成果。"
+
+            if task.state == "in_progress" and plan.status == "generated":
+                plan.status = "active"
+                plan.adopted_at = plan.adopted_at or now
+                plan.updated_at = now
+                plan.version += 1
+            await self._session.flush()
+
+            if payload.passed:
+                counts = await self._plans.task_state_counts(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    scheduled_date=None,
+                )
+                total = sum(counts.values())
+                settled = sum(
+                    counts.get(state, 0) for state in ("completed", "abandoned", "expired")
+                )
+                if total > 0 and settled == total:
+                    plan.status = "completed"
+                    plan.completed_at = now
+                    plan.updated_at = now
+                    plan.version += 1
+                    await self._session.flush()
+
+            return TaskUpdateResponse(
+                task=self.to_task_response(task),
+                plan_status=PlanStatus(plan.status),
+                companion_message=companion_message,
+            )
+
+    @staticmethod
+    def _all_execution_steps_completed(task: Task) -> bool:
+        steps = parse_execution_steps(task.starter_action)
+        completed = {
+            index
+            for index in task.completed_step_indexes_json
+            if isinstance(index, int) and 0 <= index < len(steps)
+        }
+        return len(completed) == len(steps)
+
+    @staticmethod
+    def _is_current_archived_cycle(plan: Plan) -> bool:
+        return plan.status == "archived" and fixed_cycle_contains(
+            plan_date=plan.plan_date,
+            horizon_end=plan.horizon_end,
+            target=datetime.now(UTC).date(),
+        )
 
     @staticmethod
     def _abandoned_companion(reason: AbandonedReason | None) -> str:
@@ -373,6 +622,27 @@ class PlanQueryService:
 
     @staticmethod
     def to_task_response(task: Task) -> TaskResponse:
+        steps = parse_execution_steps(task.starter_action)
+        completed_indexes = (
+            set(range(len(steps)))
+            if task.state == "completed"
+            else {
+                index
+                for index in task.completed_step_indexes_json
+                if isinstance(index, int) and 0 <= index < len(steps)
+            }
+        )
+        deliverable_verified = task.state == "completed" or task.deliverable_verified
+        all_steps_completed = len(completed_indexes) == len(steps)
+        verification_status = (
+            "passed"
+            if task.state == "completed"
+            else "not_ready"
+            if not all_steps_completed
+            else "ready"
+            if task.verification_status == "not_ready"
+            else task.verification_status
+        )
         return TaskResponse(
             task_id=task.id,
             plan_id=task.plan_id,
@@ -382,7 +652,14 @@ class PlanQueryService:
             order_index=task.order_index,
             state=TaskStatus(task.state),
             starter_action=task.starter_action,
+            execution_steps=[
+                {"index": index, "text": text, "completed": index in completed_indexes}
+                for index, text in enumerate(steps)
+            ],
             deliverable=task.deliverable,
+            deliverable_verified=deliverable_verified,
+            verification_status=verification_status,
+            completion_ready=(all_steps_completed and task.state != "completed"),
             rationale=task.rationale,
             estimated_minutes=task.estimated_minutes,
             actual_minutes=task.actual_minutes,

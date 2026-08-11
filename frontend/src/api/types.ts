@@ -117,7 +117,11 @@ export interface TaskResponse {
   order_index: number;
   state: TaskStatus;
   starter_action: string;
+  execution_steps: TaskExecutionStep[];
   deliverable: string;
+  deliverable_verified: boolean;
+  verification_status: "not_ready" | "ready" | "failed" | "passed";
+  completion_ready: boolean;
   rationale: string | null;
   estimated_minutes: number;
   actual_minutes: number | null;
@@ -128,6 +132,12 @@ export interface TaskResponse {
   completed_at: string | null;
   abandoned_at: string | null;
   created_at: string;
+}
+
+export interface TaskExecutionStep {
+  index: number;
+  text: string;
+  completed: boolean;
 }
 
 export interface TaskDetailResponse {
@@ -385,6 +395,18 @@ export interface TaskUpdateResponse {
   task: TaskResponse;
   plan_status: PlanStatus;
   companion_message: string;
+}
+
+export interface TaskChecklistUpdateRequest {
+  version: number;
+  step_index: number;
+  step_completed: boolean;
+}
+
+export interface TaskVerificationRequest {
+  version: number;
+  passed: boolean;
+  actual_minutes?: number;
 }
 
 export interface MemoryResponse {

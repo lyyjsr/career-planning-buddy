@@ -33,6 +33,8 @@ For continue, preserve the source direction and leave adjustment_reason null.
 For adjust, preserve completed facts and provide a concise adjustment_reason.
 Never schedule a deliverable already completed in completed_facts or recent tasks.
 For every task, starter_action must contain 2-3 ordered, immediately executable steps.
+The final execution step must explicitly create, update, submit, or verify the named
+deliverable and its pass condition; execution steps and deliverable must be traceable.
 Name the concrete object, quantity, method, file/page or command when the context supports it.
 Every deliverable must define a measurable artifact and a pass condition; avoid vague outputs
 such as "完成学习", "推进项目", "整理材料", or a bare checklist name.

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -113,6 +114,14 @@ class Task(Base):
         CheckConstraint("estimated_minutes BETWEEN 5 AND 480", name="ck_tasks_estimated"),
         CheckConstraint("actual_minutes IS NULL OR actual_minutes >= 0", name="ck_tasks_actual"),
         CheckConstraint(
+            "verification_status IN ('not_ready','ready','failed','passed')",
+            name="ck_tasks_verification_status",
+        ),
+        CheckConstraint(
+            "(verification_status = 'passed') = deliverable_verified",
+            name="ck_tasks_verification_consistency",
+        ),
+        CheckConstraint(
             "abandoned_reason IS NULL OR abandoned_reason IN "
             "('too_hard','too_easy','no_time','lost_interest','blocked','other')",
             name="ck_tasks_abandoned_reason",
@@ -159,6 +168,15 @@ class Task(Base):
     rationale: Mapped[str | None] = mapped_column(String(500))
     estimated_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     actual_minutes: Mapped[int | None] = mapped_column(Integer)
+    completed_step_indexes_json: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    deliverable_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    verification_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="not_ready", server_default="not_ready"
+    )
     abandoned_reason: Mapped[str | None] = mapped_column(String(32))
     abandoned_reason_text: Mapped[str | None] = mapped_column(String(200))
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")

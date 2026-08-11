@@ -4574,6 +4574,32 @@
         "title": "TaskAdjustmentProposalResponse",
         "type": "object"
       },
+      "TaskChecklistUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "step_completed": {
+            "title": "Step Completed",
+            "type": "boolean"
+          },
+          "step_index": {
+            "minimum": 0.0,
+            "title": "Step Index",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "step_index",
+          "step_completed"
+        ],
+        "title": "TaskChecklistUpdateRequest",
+        "type": "object"
+      },
       "TaskDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4790,6 +4816,31 @@
         "title": "TaskEditResponse",
         "type": "object"
       },
+      "TaskExecutionStep": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "index": {
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "text",
+          "completed"
+        ],
+        "title": "TaskExecutionStep",
+        "type": "object"
+      },
       "TaskListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4866,6 +4917,10 @@
             ],
             "title": "Completed At"
           },
+          "completion_ready": {
+            "title": "Completion Ready",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4875,9 +4930,20 @@
             "title": "Deliverable",
             "type": "string"
           },
+          "deliverable_verified": {
+            "title": "Deliverable Verified",
+            "type": "boolean"
+          },
           "estimated_minutes": {
             "title": "Estimated Minutes",
             "type": "integer"
+          },
+          "execution_steps": {
+            "items": {
+              "$ref": "#/components/schemas/TaskExecutionStep"
+            },
+            "title": "Execution Steps",
+            "type": "array"
           },
           "order_index": {
             "minimum": 0.0,
@@ -4936,6 +5002,16 @@
             "title": "Title",
             "type": "string"
           },
+          "verification_status": {
+            "enum": [
+              "not_ready",
+              "ready",
+              "failed",
+              "passed"
+            ],
+            "title": "Verification Status",
+            "type": "string"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -4950,7 +5026,11 @@
           "order_index",
           "state",
           "starter_action",
+          "execution_steps",
           "deliverable",
+          "deliverable_verified",
+          "verification_status",
+          "completion_ready",
           "rationale",
           "estimated_minutes",
           "actual_minutes",
@@ -5069,6 +5149,39 @@
           "companion_message"
         ],
         "title": "TaskUpdateResponse",
+        "type": "object"
+      },
+      "TaskVerificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Minutes"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "passed"
+        ],
+        "title": "TaskVerificationRequest",
         "type": "object"
       },
       "TerminalInvariant": {
@@ -9913,6 +10026,94 @@
         ]
       }
     },
+    "/api/v1/tasks/{task_id}/checklist": {
+      "patch": {
+        "operationId": "update_task_checklist_api_v1_tasks__task_id__checklist_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskChecklistUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Task Checklist",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/tasks/{task_id}/details": {
       "patch": {
         "operationId": "edit_task_details_api_v1_tasks__task_id__details_patch",
@@ -10007,6 +10208,94 @@
           }
         ],
         "summary": "Edit Task Details",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/verification": {
+      "patch": {
+        "operationId": "verify_task_api_v1_tasks__task_id__verification_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Verify Task",
         "tags": [
           "tasks"
         ]

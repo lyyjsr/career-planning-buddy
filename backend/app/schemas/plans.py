@@ -53,6 +53,32 @@ class TaskUpdateRequest(StrictModel):
         return self
 
 
+class TaskChecklistUpdateRequest(StrictModel):
+    version: int = Field(ge=1)
+    step_index: int = Field(ge=0)
+    step_completed: bool
+
+
+class TaskVerificationRequest(StrictModel):
+    version: int = Field(ge=1)
+    passed: bool
+    actual_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+    @model_validator(mode="after")
+    def validate_verification_result(self) -> "TaskVerificationRequest":
+        if self.passed and self.actual_minutes is None:
+            raise ValueError("actual_minutes is required when verification passes")
+        if not self.passed and self.actual_minutes is not None:
+            raise ValueError("actual_minutes is only recorded after verification passes")
+        return self
+
+
+class TaskExecutionStep(StrictModel):
+    index: int = Field(ge=0)
+    text: str
+    completed: bool
+
+
 class TaskResponse(StrictModel):
     task_id: UUID
     plan_id: UUID
@@ -62,7 +88,11 @@ class TaskResponse(StrictModel):
     order_index: int = Field(ge=0)
     state: TaskStatus
     starter_action: str
+    execution_steps: list[TaskExecutionStep]
     deliverable: str
+    deliverable_verified: bool
+    verification_status: Literal["not_ready", "ready", "failed", "passed"]
+    completion_ready: bool
     rationale: str | None
     estimated_minutes: int
     actual_minutes: int | None

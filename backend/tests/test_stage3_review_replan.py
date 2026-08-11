@@ -18,7 +18,11 @@ from app.models.plan import Plan, Task
 from app.models.review import Review
 from app.schemas.agent_runs import RunInputSnapshot
 from app.schemas.enums import AbandonedReason, TaskStatus
-from app.schemas.plans import TaskUpdateRequest
+from app.schemas.plans import (
+    TaskChecklistUpdateRequest,
+    TaskUpdateRequest,
+    TaskVerificationRequest,
+)
 from app.schemas.reviews import ReviewCreateRequest, ReviewUpdateRequest
 from app.services.plans import PlanQueryService
 from app.services.reviews import ReviewService
@@ -124,6 +128,87 @@ def test_task_update_schema_rejects_state_specific_field_mismatches() -> None:
         )
     with pytest.raises(ValidationError):
         TaskUpdateRequest(state=TaskStatus.EXPIRED, version=1)
+
+
+@pytest.mark.asyncio
+async def test_task_checklist_is_reversible_and_gates_actual_time_prompt(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    _, plan, tasks = await generated_plan(
+        db_connection,
+        db_session,
+        user_id,
+        key="task-checklist",
+    )
+    task = tasks[0]
+    task.starter_action = "1. 选择文档类型与向量数据库 2. 形成技术选型文档并核对组件清单"
+    plan.status = "archived"
+    await db_session.flush()
+    service = PlanQueryService(db_session)
+
+    first = await service.update_task_checklist(
+        task_id=task.id,
+        user_id=user_id,
+        payload=TaskChecklistUpdateRequest(
+            version=task.version,
+            step_index=0,
+            step_completed=True,
+        ),
+    )
+    assert first.task.state == TaskStatus.IN_PROGRESS
+    assert first.task.execution_steps[0].completed is True
+    assert first.task.completion_ready is False
+    assert first.plan_status == "archived"
+
+    second = await service.update_task_checklist(
+        task_id=task.id,
+        user_id=user_id,
+        payload=TaskChecklistUpdateRequest(
+            version=first.task.version,
+            step_index=1,
+            step_completed=True,
+        ),
+    )
+    assert second.task.completion_ready is True
+    assert second.task.verification_status == "ready"
+
+    failed = await service.verify_task(
+        task_id=task.id,
+        user_id=user_id,
+        payload=TaskVerificationRequest(
+            version=second.task.version,
+            passed=False,
+        ),
+    )
+    assert failed.task.state == TaskStatus.IN_PROGRESS
+    assert failed.task.verification_status == "failed"
+    assert failed.task.execution_steps[0].completed is True
+
+    completed = await service.verify_task(
+        task_id=task.id,
+        user_id=user_id,
+        payload=TaskVerificationRequest(
+            passed=True,
+            version=failed.task.version,
+            actual_minutes=35,
+        ),
+    )
+    reopened = await service.update_task_checklist(
+        task_id=task.id,
+        user_id=user_id,
+        payload=TaskChecklistUpdateRequest(
+            version=completed.task.version,
+            step_index=0,
+            step_completed=False,
+        ),
+    )
+    assert reopened.task.state == TaskStatus.IN_PROGRESS
+    assert reopened.task.actual_minutes is None
+    assert reopened.task.execution_steps[0].completed is False
+    assert reopened.task.deliverable_verified is False
+    assert reopened.task.verification_status == "not_ready"
 
 
 @pytest.mark.asyncio
@@ -766,13 +851,25 @@ async def test_task_detail_manual_edit_and_confirmed_ai_proposal(
         headers=bearer(token),
     )
     assert started.status_code == HTTPStatus.OK
-    no_overwrite = await api_client.patch(
+    edit_while_in_progress = await api_client.patch(
         f"/api/v1/tasks/{tasks[1].id}/details",
-        json={"version": 3, "title": "不应覆盖"},
+        json={"version": 3, "title": "进行中仍可调整"},
         headers={**bearer(token), "Idempotency-Key": "manual-after-start"},
     )
-    assert no_overwrite.status_code == HTTPStatus.CONFLICT
-    assert no_overwrite.json()["error"]["code"] == "STATE_TASK_NOT_EDITABLE"
+    assert edit_while_in_progress.status_code == HTTPStatus.OK
+    assert edit_while_in_progress.json()["task"]["version"] == 4
+
+    completed = await api_client.patch(
+        f"/api/v1/tasks/{tasks[1].id}",
+        json={"state": "completed", "version": 4, "actual_minutes": 20},
+        headers=bearer(token),
+    )
+    assert completed.status_code == HTTPStatus.OK
+    completed_detail = await api_client.get(
+        f"/api/v1/tasks/{tasks[1].id}", headers=bearer(token)
+    )
+    assert completed_detail.json()["editable"] is False
+    assert completed_detail.json()["edit_reason"] == "Only an unfinished Task can be edited"
 
     plan_response = await api_client.get(
         f"/api/v1/plans/{plan.id}", headers=bearer(token)

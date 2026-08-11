@@ -41,6 +41,22 @@ export function toUserFacingError(error: unknown): UserFacingError {
       requestId: error.requestId,
     };
   }
+  if (error.code === "STATE_TASK_EXECUTION_INCOMPLETE") {
+    return {
+      title: "执行步骤还没有完成",
+      message: "请先完成全部执行步骤，再进行验收。",
+      action: "retry",
+      requestId: error.requestId,
+    };
+  }
+  if (error.code === "STATE_PLAN_NOT_MUTABLE") {
+    return {
+      title: "当前计划不能继续修改",
+      message: "这不是刷新问题，请返回路线页确认当前正在执行的计划。",
+      action: "retry",
+      requestId: error.requestId,
+    };
+  }
   if (error.code?.includes("VERSION") === true || error.status === 409) {
     return {
       title: "内容已经更新",
