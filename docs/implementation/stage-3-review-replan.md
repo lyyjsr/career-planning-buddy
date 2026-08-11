@@ -22,7 +22,7 @@
 6. 模板 fallback；
 7. Task PATCH 状态机；
 8. Review POST / GET / PATCH / DELETE；未被下一计划消费时可修改、删除，已消费后锁定；
-9. `POST /reviews/{id}/start-next-plan`，只在固定周周期到期或全部任务结算后支持 continue/adjust；
+9. `POST /reviews/{id}/start-next-plan`，只在固定周周期到期后支持 continue/adjust；任务提前全部结算不改变周期边界；
 10. 新计划成功时归档被替代计划；
 11. 首个任务开始时 generated → active；
 12. 所有任务进入 completed/abandoned/expired 后 active → completed；

@@ -20,6 +20,9 @@ class GoalExtraction(StrictModel):
     duration_weeks: int | None = Field(default=None, ge=1, le=8)
     deliverables: list[str] = Field(default_factory=list, max_length=8)
     success_criteria: list[str] = Field(default_factory=list, max_length=8)
+    feasibility: Literal["feasible", "tight", "unrealistic"] | None = None
+    feasibility_reason: str | None = Field(default=None, max_length=500)
+    constrained_strategy: str | None = Field(default=None, max_length=500)
 
 
 class GoalBriefCreateRequest(StrictModel):

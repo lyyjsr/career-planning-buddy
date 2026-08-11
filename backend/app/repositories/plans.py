@@ -34,6 +34,38 @@ class PlanRepository:
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def get_current_cycle_for_user(self, user_id: UUID) -> Plan | None:
+        """Return the Plan that should be visible today without changing domain state.
+
+        Archived Plans are considered only while their fixed cycle still contains
+        today. This read-only compatibility branch recovers legacy data where an
+        early completion archived the current cycle and created a future Plan.
+        """
+        today = datetime.now(UTC).date()
+        cycle_end = func.least(Plan.plan_date + 6, Plan.horizon_end)
+        result = await self._session.execute(
+            select(Plan)
+            .where(
+                Plan.user_id == user_id,
+                Plan.plan_date <= today,
+                or_(
+                    Plan.status.in_(("generated", "active", "completed")),
+                    ((Plan.status == "archived") & (cycle_end >= today)),
+                ),
+            )
+            .order_by(
+                case(
+                    (Plan.status.in_(("generated", "active")), 0),
+                    (Plan.status == "completed", 1),
+                    else_=2,
+                ),
+                Plan.plan_date.desc(),
+                Plan.created_at.desc(),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_latest_completed_for_user(self, user_id: UUID) -> Plan | None:
         result = await self._session.execute(
             select(Plan)

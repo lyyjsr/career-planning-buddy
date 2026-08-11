@@ -71,14 +71,26 @@ class GoalUnderstandingProvider(Protocol):
     model_id: str
     method: str
 
-    async def extract(self, message: str) -> GoalExtraction: ...
+    async def extract(
+        self,
+        message: str,
+        *,
+        planning_days: int | None = None,
+        daily_budget_minutes: int | None = None,
+    ) -> GoalExtraction: ...
 
 
 class RuleGoalUnderstandingProvider:
     model_id = "goal-rules-v2"
     method = "rule"
 
-    async def extract(self, message: str) -> GoalExtraction:
+    async def extract(
+        self,
+        message: str,
+        *,
+        planning_days: int | None = None,
+        daily_budget_minutes: int | None = None,
+    ) -> GoalExtraction:
         roles = {
             "AI 后端工程师": r"AI\s*后端|人工智能后端",
             "Agent 应用工程师": r"Agent|智能体",
@@ -104,12 +116,37 @@ class RuleGoalUnderstandingProvider:
             if re.search(re.escape(name), message, re.I)
         ]
         objective_type = classify_objective_type(message)
+        requested_weeks = parse_duration_weeks(message)
+        available_minutes = (
+            planning_days * daily_budget_minutes
+            if planning_days is not None and daily_budget_minutes is not None
+            else None
+        )
+        tight = (
+            planning_days is not None
+            and (
+                (requested_weeks is not None and requested_weeks * 7 > planning_days)
+                or (objective_type == ObjectiveType.PROJECT and planning_days < 7)
+                or (available_minutes is not None and available_minutes < 300)
+            )
+        )
         return GoalExtraction(
             objective_type=objective_type,
             target_role=target,
             objective=message.strip() if objective_type is not None else None,
             tech_stack=technologies,
-            duration_weeks=parse_duration_weeks(message),
+            duration_weeks=requested_weeks,
+            feasibility="tight" if tight else "feasible" if planning_days is not None else None,
+            feasibility_reason=(
+                "目标范围与已选时间或每日投入相比偏紧"
+                if tight
+                else None
+            ),
+            constrained_strategy=(
+                "保留一个可验证核心结果，按优先级压缩非必要功能和文档范围"
+                if tight
+                else None
+            ),
         )
 
 
@@ -142,14 +179,24 @@ class OpenAICompatibleGoalUnderstandingProvider:
             transport=transport,
         )
 
-    async def extract(self, message: str) -> GoalExtraction:
+    async def extract(
+        self,
+        message: str,
+        *,
+        planning_days: int | None = None,
+        daily_budget_minutes: int | None = None,
+    ) -> GoalExtraction:
         response = await self._client.complete(
             LLMRequest(
                 operation="goal_understanding",
                 model=self.model_id,
                 messages=[
                     LLMMessage.model_validate(item)
-                    for item in goal_understanding_messages(message)
+                    for item in goal_understanding_messages(
+                        message,
+                        planning_days=planning_days,
+                        daily_budget_minutes=daily_budget_minutes,
+                    )
                 ],
                 structured_output="json_object",
                 reasoning=self._reasoning,

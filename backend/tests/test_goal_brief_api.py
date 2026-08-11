@@ -42,7 +42,9 @@ async def test_goal_brief_requires_confirmation_before_agent_run(
     assert created.status_code == HTTPStatus.CREATED
     body = created.json()
     assert body["status"] == "awaiting_confirmation"
-    assert body["duration_weeks"] == 4
+    assert body["duration_weeks"] == 5
+    assert any("共 35 天" in assumption for assumption in body["assumptions"])
+    assert any("不会安排到日期范围之外" in assumption for assumption in body["assumptions"])
     assert body["objective_type"] == "project"
     assert body["objective"] == "设计一个面向岗位的项目"
     assert repeated.json()["goal_brief_id"] == body["goal_brief_id"]

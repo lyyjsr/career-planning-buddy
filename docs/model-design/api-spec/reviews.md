@@ -60,7 +60,7 @@ Query：plan_id、date_from、date_to、cursor、limit。
 
 - false 时创建 `hint_intent=replan, replan_mode=continue`；
 - true 或用户有 adjustment_request 时创建 `replan_mode=adjust`；
-- source_plan_id 固定使用 review.plan_id，source_review_id 使用当前 review；planning_date 沿固定周边界推进，并且必须落在用户 start_date/deadline 内；
+- source_plan_id 固定使用 review.plan_id，source_review_id 使用当前 review；planning_date 沿固定周边界推进，并且必须落在用户 start_date/deadline 内；即使本周期任务提前全部完成，也必须等待周期结束，不能提前创建未来周期；
 - 只有用户点击后才创建，不后台静默生成。
 
 Response 202：

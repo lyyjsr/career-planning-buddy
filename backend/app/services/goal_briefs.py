@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from hashlib import sha256
 from http import HTTPStatus
 from uuid import UUID
@@ -124,7 +124,7 @@ class GoalBriefService:
                     message="set a current target date before defining a plan",
                     status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 )
-        extraction, method, model_id = await self._extract(payload.message)
+        extraction, method, model_id = await self._extract(payload.message, profile)
         try:
             async with session_transaction(self._session):
                 existing = await self._briefs.get_by_idempotency(user_id, idempotency_key)
@@ -172,11 +172,16 @@ class GoalBriefService:
         self, *, brief_id: UUID, user_id: UUID, payload: GoalBriefRefineRequest
     ) -> GoalBrief:
         self._ensure_safe_for_external_processing(payload.message)
-        extraction, method, model_id = await self._extract(payload.message)
+        profile = await self._profiles.get_for_user(user_id)
+        if profile is None:
+            raise AppError(
+                code="VALIDATION_PROFILE_REQUIRED",
+                message="complete the career profile before refining a plan",
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
+        extraction, method, model_id = await self._extract(payload.message, profile)
         async with session_transaction(self._session):
             brief = await self._require_mutable(brief_id, user_id, payload.version)
-            profile = await self._profiles.get_for_user(user_id)
-            assert profile is not None
             current = {
                 "objective_type": extraction.objective_type or brief.objective_type,
                 "target_role": extraction.target_role or brief.target_role,
@@ -242,7 +247,7 @@ class GoalBriefService:
                     )
                 run = await self._runs_service.create(
                     user_id=user_id,
-                    message=self._planning_message(brief),
+                    message=self._planning_message(brief, profile),
                     hint_intent=brief.hint_intent,
                     goal_type_override=None,
                     source_plan_id=brief.source_plan_id,
@@ -276,13 +281,28 @@ class GoalBriefService:
             brief.version += 1
         return brief
 
-    async def _extract(self, message: str) -> tuple[GoalExtraction, str, str]:
+    async def _extract(
+        self, message: str, profile: UserProfile
+    ) -> tuple[GoalExtraction, str, str]:
+        _, _, planning_days, _ = self._profile_window(profile)
         try:
-            result = await self._provider.extract(message)
+            result = await self._provider.extract(
+                message,
+                planning_days=planning_days,
+                daily_budget_minutes=profile.time_budget_minutes,
+            )
             return result, self._provider.method, self._provider.model_id
         except (AgentError, httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError):
             fallback = RuleGoalUnderstandingProvider()
-            return await fallback.extract(message), "rule_fallback", fallback.model_id
+            return (
+                await fallback.extract(
+                    message,
+                    planning_days=planning_days,
+                    daily_budget_minutes=profile.time_budget_minutes,
+                ),
+                "rule_fallback",
+                fallback.model_id,
+            )
 
     @staticmethod
     def _complete(
@@ -309,10 +329,36 @@ class GoalBriefService:
             if objective_type is not None
             else None
         )
-        duration = extracted.get("duration_weeks")
-        if duration is None:
-            duration = 4
-            assumptions.append("未指定周期，暂按 4 周总体路线设计")
+        planning_start, planning_end, planning_days, duration = GoalBriefService._profile_window(
+            profile
+        )
+        requested_duration = extracted.get("duration_weeks")
+        assumptions.append(
+            f"总体周期固定为你选择的 {planning_start.isoformat()} 至 "
+            f"{planning_end.isoformat()}，共 {planning_days} 天，不会安排到日期范围之外"
+        )
+        if isinstance(requested_duration, int) and requested_duration != duration:
+            assumptions.append(
+                f"你在目标中提到 {requested_duration} 周，但日期范围折算为 {duration} 个周期；"
+                "系统以开始和结束日期为准"
+            )
+        feasibility = extracted.get("feasibility")
+        feasibility_reason = extracted.get("feasibility_reason")
+        constrained_strategy = extracted.get("constrained_strategy")
+        if feasibility in {"tight", "unrealistic"}:
+            reason = (
+                feasibility_reason.strip()
+                if isinstance(feasibility_reason, str) and feasibility_reason.strip()
+                else "目标范围与当前时间投入相比偏紧"
+            )
+            strategy = (
+                constrained_strategy.strip()
+                if isinstance(constrained_strategy, str) and constrained_strategy.strip()
+                else "保留最重要的可验证结果，并压缩非必要范围"
+            )
+            assumptions.append(
+                f"可行性提醒：{reason}。如果你仍确认按期执行，将采用受限方案：{strategy}"
+            )
         defaults = OBJECTIVE_DEFAULTS.get(
             objective_type or ObjectiveType.CAREER_PLAN,
             OBJECTIVE_DEFAULTS[ObjectiveType.CAREER_PLAN],
@@ -421,7 +467,7 @@ class GoalBriefService:
             )
 
     @staticmethod
-    def _planning_message(brief: GoalBrief) -> str:
+    def _planning_message(brief: GoalBrief, profile: UserProfile) -> str:
         capability_focus = "、".join(brief.capability_focus_json)
         tech_stack = "、".join(brief.tech_stack_json)
         deliverables = "、".join(brief.deliverables_json)
@@ -433,14 +479,29 @@ class GoalBriefService:
             ObjectiveType.INTERVIEW.value: "面试准备",
             ObjectiveType.SKILL_TRANSITION.value: "技能转型",
         }.get(brief.objective_type or "", "职业目标")
+        planning_start, planning_end, planning_days, duration = GoalBriefService._profile_window(
+            profile
+        )
         return (
             f"已由用户确认的{objective_label}目标：面向{brief.target_role}，{brief.objective}。"
-            f"总体周期 {brief.duration_weeks} 周；能力重点：{capability_focus}；"
+            f"用户确认的硬日期边界为 {planning_start.isoformat()} 至 "
+            f"{planning_end.isoformat()}，共 {planning_days} 天、{duration} 个周期；"
+            f"能力重点：{capability_focus}；"
             f"技术栈：{tech_stack}；交付物：{deliverables}；"
             f"成功标准：{success_criteria}。"
             "请生成截至目标日期的总体路线，并展开从开始日期起最多 7 天的具体任务；"
             "最后不足 7 天时不得越过目标日期补位。"
         )
+
+    @staticmethod
+    def _profile_window(profile: UserProfile) -> tuple[date, date, int, int]:
+        if profile.start_date is None or profile.deadline is None:
+            raise ValueError("profile planning dates are required")
+        planning_start = max(datetime.now(UTC).date(), profile.start_date)
+        planning_end = profile.deadline
+        planning_days = max((planning_end - planning_start).days + 1, 1)
+        duration = max(1, min(8, (planning_days + 6) // 7))
+        return planning_start, planning_end, planning_days, duration
 
     @staticmethod
     def to_response(brief: GoalBrief) -> GoalBriefResponse:

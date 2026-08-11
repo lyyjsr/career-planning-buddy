@@ -163,8 +163,10 @@ export function TodayPage(): JSX.Element {
       )}
 
       {activeBrief !== null && !isPlanning && (
-        <GoalBriefPanel
-          brief={activeBrief}
+          <GoalBriefPanel
+            brief={activeBrief}
+            startDate={me.data.profile?.start_date ?? null}
+            endDate={me.data.profile?.deadline ?? null}
           pending={refineGoalBrief.isPending || confirmGoalBrief.isPending || cancelGoalBrief.isPending}
           onRefine={(refinement) => refineGoalBrief.mutate(
             { briefId: activeBrief.goal_brief_id, version: activeBrief.version, message: refinement },
@@ -257,12 +259,16 @@ export function TodayPage(): JSX.Element {
 
 function GoalBriefPanel({
   brief,
+  startDate,
+  endDate,
   pending,
   onRefine,
   onConfirm,
   onCancel,
 }: {
   brief: GoalBriefResponse;
+  startDate: string | null;
+  endDate: string | null;
   pending: boolean;
   onRefine: (message: string) => void;
   onConfirm: () => void;
@@ -288,7 +294,7 @@ function GoalBriefPanel({
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div><dt className="text-muted-foreground">目标类型</dt><dd className="mt-1 font-medium">{brief.objective_type === null ? "待补充" : OBJECTIVE_LABELS[brief.objective_type]}</dd></div>
           <div><dt className="text-muted-foreground">面向岗位</dt><dd className="mt-1 font-medium">{brief.target_role ?? "待补充"}</dd></div>
-          <div><dt className="text-muted-foreground">总体周期</dt><dd className="mt-1 font-medium">{brief.duration_weeks === null ? "待补充" : `${brief.duration_weeks} 周`}</dd></div>
+          <div><dt className="text-muted-foreground">规划时间</dt><dd className="mt-1 font-medium">{startDate !== null && endDate !== null ? `${startDate} 至 ${endDate}` : "待补充"}</dd></div>
           <div><dt className="text-muted-foreground">能力重点</dt><dd className="mt-1 leading-6">{brief.capability_focus.join("、")}</dd></div>
           <div><dt className="text-muted-foreground">技术栈</dt><dd className="mt-1 leading-6">{brief.tech_stack.join("、")}</dd></div>
         </dl>
@@ -302,7 +308,7 @@ function GoalBriefPanel({
           </div>
         )}
         <div className="rounded-xl border border-primary/15 bg-background/70 p-3 text-sm leading-6">
-          确认后会生成 {brief.duration_weeks ?? "1–8"} 周总体路线，并展开一个固定七天执行周期；每天完成后不会向后滚动补位。
+          确认后会严格在上述日期内生成 {brief.duration_weeks ?? "1–8"} 个周期重点，并只展开首个固定周期的每日任务；提前完成不会滚动补位，也不会生成未来周期。
         </div>
         <form
           className="space-y-2"

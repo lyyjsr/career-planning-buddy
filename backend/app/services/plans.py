@@ -32,7 +32,7 @@ class PlanQueryService:
 
     async def get_active(self, user_id: UUID) -> ActivePlanResponse:
         async with session_transaction(self._session):
-            plan = await self._plans.get_active_for_user(user_id)
+            plan = await self._plans.get_current_cycle_for_user(user_id)
             if plan is None:
                 plan = await self._plans.get_latest_completed_for_user(user_id)
             if plan is None:

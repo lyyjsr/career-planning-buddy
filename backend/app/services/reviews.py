@@ -330,19 +330,15 @@ class ReviewService:
                         message="an archived Plan cannot start another next Plan Run",
                         status_code=HTTPStatus.CONFLICT,
                     )
-                tasks = await self._plans.tasks_for_plan(source_plan.id, user_id)
-                settled = bool(tasks) and all(
-                    task.state in {"completed", "abandoned", "expired"} for task in tasks
-                )
                 cycle_end = min(
                     source_plan.plan_date + timedelta(days=6), source_plan.horizon_end
                 )
-                if not settled and datetime.now(UTC).date() <= cycle_end:
+                if datetime.now(UTC).date() <= cycle_end:
                     raise AppError(
                         code="STATE_WEEKLY_CYCLE_OPEN",
                         message=(
-                            "The fixed weekly cycle is still open; adjust pending Tasks "
-                            "instead of replacing the whole week"
+                            "The fixed weekly cycle is still open; completing Tasks early "
+                            "does not roll the schedule forward"
                         ),
                         status_code=HTTPStatus.CONFLICT,
                         details={

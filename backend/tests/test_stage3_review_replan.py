@@ -91,6 +91,22 @@ async def settle_week(
         )
 
 
+def close_fixed_cycle(monkeypatch: pytest.MonkeyPatch, plan: Plan) -> None:
+    """Advance only the Review use-case clock beyond the fixed cycle boundary."""
+    cycle_closed_at = datetime.combine(
+        plan.plan_date + timedelta(days=7),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
+
+    class CycleClosedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return cycle_closed_at if tz is not None else cycle_closed_at.replace(tzinfo=None)
+
+    monkeypatch.setattr("app.services.reviews.datetime", CycleClosedDateTime)
+
+
 def test_task_update_schema_rejects_state_specific_field_mismatches() -> None:
     with pytest.raises(ValidationError):
         TaskUpdateRequest(state=TaskStatus.COMPLETED, version=1)
@@ -317,6 +333,7 @@ async def test_review_counts_rules_idempotency_listing_and_isolation(
 async def test_adjust_next_plan_keeps_history_and_uses_review_context(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = await create_user(db_session)
     _, source, source_tasks = await generated_plan(
@@ -345,6 +362,14 @@ async def test_adjust_next_plan_keeps_history_and_uses_review_context(
         )
     assert open_cycle.value.code == "STATE_WEEKLY_CYCLE_OPEN"
     await settle_week(db_session, user_id=user_id, tasks=source_tasks)
+    with pytest.raises(AppError) as completed_early:
+        await service.start_next_plan(
+            review_id=review.review_id,
+            user_id=user_id,
+            idempotency_key="stage3-adjust-run-still-too-early",
+        )
+    assert completed_early.value.code == "STATE_WEEKLY_CYCLE_OPEN"
+    close_fixed_cycle(monkeypatch, source)
     started = await service.start_next_plan(
         review_id=review.review_id,
         user_id=user_id,
@@ -423,6 +448,7 @@ async def test_adjust_next_plan_keeps_history_and_uses_review_context(
 async def test_continue_preserves_direction_and_failed_replan_does_not_archive_source(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     continue_user = await create_user(db_session)
     _, continue_source, continue_tasks = await generated_plan(
@@ -433,6 +459,7 @@ async def test_continue_preserves_direction_and_failed_replan_does_not_archive_s
     )
     continue_source_direction = continue_source.overall_direction
     await settle_week(db_session, user_id=continue_user, tasks=continue_tasks)
+    close_fixed_cycle(monkeypatch, continue_source)
     continue_service = ReviewService(db_session, get_settings(), ManualExecutor())
     review = await continue_service.create(
         user_id=continue_user,
@@ -461,6 +488,7 @@ async def test_continue_preserves_direction_and_failed_replan_does_not_archive_s
     )
     failed_source_id = failed_source.id
     await settle_week(db_session, user_id=failed_user, tasks=failed_tasks)
+    close_fixed_cycle(monkeypatch, failed_source)
     failed_service = ReviewService(db_session, get_settings(), ManualExecutor())
     failed_review = await failed_service.create(
         user_id=failed_user,
@@ -493,6 +521,7 @@ async def test_continue_preserves_direction_and_failed_replan_does_not_archive_s
 async def test_adjust_replan_preserves_completed_facts_without_rescheduling_them(
     db_connection: AsyncConnection,
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = await create_user(db_session)
     _, source, tasks = await generated_plan(
@@ -528,6 +557,7 @@ async def test_adjust_replan_preserves_completed_facts_without_rescheduling_them
         ),
     )
     await settle_week(db_session, user_id=user_id, tasks=tasks)
+    close_fixed_cycle(monkeypatch, source)
     service = ReviewService(db_session, get_settings(), ManualExecutor())
     review = await service.create(
         user_id=user_id,

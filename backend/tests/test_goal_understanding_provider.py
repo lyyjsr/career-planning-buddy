@@ -38,6 +38,19 @@ async def test_rule_provider_treats_fullstack_job_search_as_career_plan() -> Non
 
 
 @pytest.mark.asyncio
+async def test_rule_provider_warns_when_goal_exceeds_confirmed_window() -> None:
+    result = await RuleGoalUnderstandingProvider().extract(
+        "两周内完成一个可演示的 Agent 项目",
+        planning_days=5,
+        daily_budget_minutes=30,
+    )
+
+    assert result.feasibility == "tight"
+    assert result.feasibility_reason
+    assert result.constrained_strategy
+
+
+@pytest.mark.asyncio
 async def test_official_deepseek_disables_thinking_for_goal_json(
 ) -> None:
     captured: dict[str, object] = {}
