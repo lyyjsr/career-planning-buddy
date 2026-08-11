@@ -58,6 +58,7 @@ from app.schemas.agent_runs import (
     ReviewContext,
     RunInputSnapshot,
     TaskContext,
+    ValidationReport,
 )
 from app.schemas.enums import GoalType, PlanStatus, ReplanMode, RunIntent, TaskStatus
 from app.tools.contracts import ToolContext
@@ -316,13 +317,11 @@ class FixedPlanningGraph:
         validation = await self._nodes.run(
             state["run_id"],
             "rule_validator",
-            lambda: self._immediate(
-                validate_candidate(
-                    state["candidate_plan"],
-                    state["planning_context"],
-                    state["candidate_evidence_visibility"],
-                ),
-                {"check_count": 13, "attempt": attempt},
+            lambda: self._validate_with_trace(
+                state["candidate_plan"],
+                state["planning_context"],
+                state["candidate_evidence_visibility"],
+                attempt,
             ),
             attempt=attempt,
         )
@@ -799,6 +798,15 @@ class FixedPlanningGraph:
     ) -> NodeOutput[tuple[PlanCandidate, str | None, EvidenceVisibility]]:
         context = state["planning_context"]
         validation = state["validation_report"]
+        if not self._budget.can_reserve_llm_call():
+            fallback = fallback_candidate(context, state["intent"].replan_mode)
+            _, visibility = build_evidence_visibility(
+                call_id=f"{state['run_id']}:business_budget_fallback",
+                evidence_catalog=[],
+            )
+            return NodeOutput(
+                (fallback, "business_repair_budget_insufficient", visibility)
+            )
         if not self._budget.claim_business_repair():
             fallback = fallback_candidate(context, state["intent"].replan_mode)
             _, visibility = build_evidence_visibility(
@@ -858,6 +866,26 @@ class FixedPlanningGraph:
                 for key, value in values.items():
                     setattr(run, key, value)
                 await session.flush()
+
+    @staticmethod
+    async def _validate_with_trace(
+        candidate: PlanCandidate,
+        context: PlanningContext,
+        visibility: EvidenceVisibility,
+        attempt: int,
+    ) -> NodeOutput[ValidationReport]:
+        report = validate_candidate(candidate, context, visibility)
+        failed_checks = [check.code for check in report.checks if not check.passed]
+        return NodeOutput(
+            report,
+            NodeTelemetry(
+                trace_data={
+                    "check_count": len(report.checks),
+                    "failed_checks": failed_checks,
+                    "attempt": attempt,
+                }
+            ),
+        )
 
     @staticmethod
     async def _immediate[T](value: T, trace: dict[str, object]) -> NodeOutput[T]:

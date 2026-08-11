@@ -254,7 +254,7 @@ def test_provider_factory_switches_explicitly_without_fallback() -> None:
     assert real_snapshot.provider == "openai_compatible"
     assert real_snapshot.model_alias == "configured-model"
     assert real_snapshot.prompt_versions["career_planning"] == (
-        "openai_compatible_plan_stage6_week_schedule_v3"
+        "openai_compatible_plan_stage6_week_schedule_v5"
     )
     assert real_snapshot.node_timeouts_seconds["career_planning_agent"] == 120.0
     assert real_snapshot.node_timeouts_seconds["revise_or_fallback"] == 120.0

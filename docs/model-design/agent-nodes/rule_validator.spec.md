@@ -26,6 +26,7 @@ class ValidationReport(BaseModel):
 |---|---|
 | HORIZON_MATCH | plan_date/horizon 与 PlanningWindow 完全一致 |
 | WEEKLY_FOCUS | 1~8 条、week_index 连续，focus 与 success_signal 均不重复 |
+| FIRST_WEEK_ALIGNMENT | 七天任务的 rationale 均包含第 1 周 focus 原文，禁止提前混入后续周工作 |
 | TASK_COUNT | 当前七天执行表必须正好 7 个任务 |
 | TIME_BUDGET | 每个 scheduled_date 的总预计时间不超过每日 time_budget_minutes |
 | STARTER_ACTION | 每项有明确动作和对象 |
@@ -42,6 +43,7 @@ class ValidationReport(BaseModel):
 
 - 本节点不调用 LLM；
 - 所有检查顺序固定，保证测试和 Replay 可比较；
+- Trace 记录固定顺序的检查总数和实际失败的 check_code，不记录候选原文；
 - `repair_instructions` 从检查码映射生成，不把内部异常栈交给模型；
 - 必检规则失败时 `passed=false`；
 - 连续性中的“方向是否完全合理”等主观质量可交给离线 reviewer，但不得替代确定性检查；

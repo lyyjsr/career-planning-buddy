@@ -94,6 +94,7 @@ def candidate() -> tuple[PlanCandidate, PlanningContext]:
                 starter_action="打开项目并运行测试",
                 deliverable=f"第 {offset + 1} 天通过的测试报告",
                 estimated_minutes=60,
+                rationale="服务第 1 周重点并形成第 1 周产物",
             )
             for offset in range(7)
         ],
@@ -300,6 +301,22 @@ def test_fallback_has_progressive_weeks_and_seven_dated_tasks() -> None:
     assert all("包含" in task.deliverable for task in plan.tasks)
 
 
+def test_fallback_seven_day_tasks_stay_with_first_week_focus() -> None:
+    _, context = candidate()
+    plan = fallback_candidate(context, ReplanMode.INITIAL)
+    first_focus = plan.weekly_focus[0].focus
+
+    assert {task.task_type for task in plan.tasks} <= {
+        TaskType.LEARNING,
+        TaskType.OTHER,
+    }
+    assert all(task.rationale is not None for task in plan.tasks)
+    assert all(first_focus in (task.rationale or "") for task in plan.tasks)
+    assert not {"完成最小项目增量", "整理简历项目表达", "演练项目面试问答"} & {
+        task.title for task in plan.tasks
+    }
+
+
 def test_repeated_weekly_focus_fails_validation() -> None:
     plan, context = candidate()
     repeated = plan.model_copy(
@@ -314,7 +331,28 @@ def test_repeated_weekly_focus_fails_validation() -> None:
     report = validate_candidate(repeated, context)
 
     assert report.passed is False
-    assert [check.code for check in report.checks if not check.passed] == ["WEEKLY_FOCUS"]
+    assert [check.code for check in report.checks if not check.passed] == [
+        "WEEKLY_FOCUS",
+        "FIRST_WEEK_ALIGNMENT",
+    ]
+
+
+def test_daily_task_without_exact_first_week_focus_fails_alignment() -> None:
+    plan, context = candidate()
+    tasks = list(plan.tasks)
+    tasks[3] = tasks[3].model_copy(
+        update={"rationale": "提前推进后续周的简历工作"}
+    )
+
+    report = validate_candidate(plan.model_copy(update={"tasks": tasks}), context)
+
+    assert report.passed is False
+    assert [check.code for check in report.checks if not check.passed] == [
+        "FIRST_WEEK_ALIGNMENT"
+    ]
+    assert report.repair_instructions == [
+        "Every daily task rationale must include the exact week 1 focus phrase."
+    ]
 
 
 def test_stage2_budget_and_tool_registry_enforce_empty_tool_list() -> None:
@@ -330,3 +368,22 @@ def test_stage2_budget_and_tool_registry_enforce_empty_tool_list() -> None:
     guard.claim_format_repair()
     assert guard.format_repairs == 1
     assert ToolRegistry(feature_stage=2).available_specs() == []
+
+
+def test_budget_reservation_rejects_optional_call_that_cannot_fit() -> None:
+    config = SnapshotService.build_config(get_settings()).model_copy(
+        update={
+            "max_total_tokens": 1_200,
+            "max_input_tokens_per_call": 600,
+            "max_output_tokens_per_call": 500,
+        }
+    )
+    guard = BudgetGuard(
+        config,
+        datetime.now(UTC) + timedelta(seconds=5),
+        CancellationToken(),
+    )
+
+    assert guard.can_reserve_llm_call() is True
+    guard.record_llm_call(180, 320)
+    assert guard.can_reserve_llm_call() is False

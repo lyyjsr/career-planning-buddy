@@ -92,6 +92,9 @@ class TaskCandidate(BaseModel):
 ## 业务不变量
 
 - `weekly_focus` 覆盖规划窗口，week_index 连续且不重复；
+- 每项 Task 按 `scheduled_date` 相对 `horizon_start` 计算所属 week_index，标题、启动动作、
+  交付物和规划理由必须直接推进该周的 focus 与 success_signal，不得提前安排后续周工作；
+- 当前七天任务的 `rationale` 必须包含第 1 周 `focus` 原文，供规则校验器做确定性对齐检查；
 - 所有 Task 的 `scheduled_date` 必须落在从 `plan_date` 开始的七天行动窗口；
 - 七天执行表最多 7 个任务，每天的总时长不超过用户每日预算；
 - 每项 Task 的 `starter_action` 包含 2~3 个有对象、有数量或方法的有序步骤，`deliverable` 同时写明可量化产物和通过条件；

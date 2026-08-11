@@ -31,6 +31,7 @@ class ReviseDecision(BaseModel):
 ## 修复约束
 
 - 只允许 1 次模型调用；
+- 调用前按单次输入/输出上限预留总 Token；预留不足时不调用 Provider，直接进入确定性 fallback；
 - 不允许新增 evidence_ref；
 - 不允许改变 goal_type、planning window、source plan 和 completed facts；
 - Provider/Schema 错误直接进入 fallback；
@@ -38,9 +39,11 @@ class ReviseDecision(BaseModel):
 
 ## 模板 fallback
 
-模板由程序根据 goal_type、planning window、time budget 和当前日期生成“保守方向 + 1 条周重点 + 1 个基础任务”：
+模板由程序根据 goal_type、planning window、time budget 和当前日期生成“保守方向 +
+完整周重点 + 当前七天行动表”：
 
 - plan_date/horizon 必须来自 PlanningWindow；
+- 从 plan_date 起连续生成 7 个任务，每天 1 个，并且每项任务只推进其日期所属周重点；
 - 时长不超过预算且至少 15 分钟；
 - 有明确 starter_action 和 deliverable；
 - 不引用外部来源；

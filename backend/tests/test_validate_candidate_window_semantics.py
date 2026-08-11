@@ -39,6 +39,7 @@ def _context(daily_budget: int = 60, weeks: int = 4) -> PlanningContext:
 
 def _candidate(context: PlanningContext, tasks: list[TaskCandidate]) -> PlanCandidate:
     window = context.planning_window
+    first_week_focus = "重点1"
     return PlanCandidate(
         plan_date=window.planning_date,
         horizon_start=window.horizon_start,
@@ -50,7 +51,12 @@ def _candidate(context: PlanningContext, tasks: list[TaskCandidate]) -> PlanCand
         ],
         summary="摘要",
         rationale="原因",
-        tasks=tasks,
+        tasks=[
+            task.model_copy(
+                update={"rationale": f"{first_week_focus}：{task.rationale or '推进'}"}
+            )
+            for task in tasks
+        ],
     )
 
 

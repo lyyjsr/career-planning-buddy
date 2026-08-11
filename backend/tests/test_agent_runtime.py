@@ -364,6 +364,68 @@ async def test_repairs_are_bounded_and_fallback_is_deterministic(
     assert provider.plan_calls == 1
     assert provider.format_repair_calls == (1 if marker.startswith("[mock:invalid-schema") else 0)
     assert provider.business_repair_calls == (1 if marker.startswith("[mock:rule-") else 0)
+    if marker == "[mock:rule-fallback]":
+        validator_steps = list(
+            await db_session.scalars(
+                select(AgentStep)
+                .where(
+                    AgentStep.run_id == run.id,
+                    AgentStep.node_name == "rule_validator",
+                )
+                .order_by(AgentStep.sequence)
+            )
+        )
+        assert validator_steps[0].trace_data["failed_checks"] == [
+            "TIME_BUDGET",
+            "SCHEDULE_DATE",
+        ]
+        assert validator_steps[1].trace_data["failed_checks"] == [
+            "TIME_BUDGET",
+            "SCHEDULE_DATE",
+        ]
+        assert validator_steps[-1].trace_data["failed_checks"] == []
+
+
+@pytest.mark.asyncio
+async def test_business_repair_skips_provider_when_total_budget_is_insufficient(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+) -> None:
+    user_id = await create_user(db_session)
+    run = await create_run(
+        db_session,
+        user_id,
+        message="帮我制定未来五周计划 [mock:rule-repair]",
+        key="repair-budget-fallback",
+    )
+    run.config_snapshot_json = {
+        **run.config_snapshot_json,
+        "max_total_tokens": 1_000,
+        "max_input_tokens_per_call": 600,
+        "max_output_tokens_per_call": 500,
+    }
+    await db_session.flush()
+    provider = MockPlanningProvider()
+
+    await AgentRunExecutor(runtime_factory(db_connection), provider).execute(run.id)
+    run = await refresh_run(db_session, run.id)
+
+    assert run.status == "degraded", (run.error_code, run.fallback_reason)
+    assert run.result_kind == "plan"
+    assert run.fallback_reason == "business_repair_budget_insufficient"
+    assert provider.plan_calls == 1
+    assert provider.business_repair_calls == 0
+    terminal_count = await db_session.scalar(
+        select(func.count())
+        .select_from(AgentEvent)
+        .where(
+            AgentEvent.run_id == run.id,
+            AgentEvent.event_type.in_(
+                ("run.completed", "run.degraded", "run.failed", "run.cancelled")
+            ),
+        )
+    )
+    assert terminal_count == 1
 
 
 @pytest.mark.asyncio

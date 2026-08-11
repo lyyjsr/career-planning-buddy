@@ -7,7 +7,7 @@ from app.prompts.context_renderer import render_planning_context
 from app.schemas.agent_runs import EvidenceCatalogItem, PlanCandidate, PlanningContext
 from app.schemas.enums import ReplanMode
 
-PLAN_PROMPT_VERSION = "openai_compatible_plan_stage6_week_schedule_v3"
+PLAN_PROMPT_VERSION = "openai_compatible_plan_stage6_week_schedule_v5"
 DIRECT_BASELINE_PROMPT_VERSION = "direct_llm_baseline_v1"
 FORMAT_REPAIR_PROMPT_VERSION = "openai_compatible_format_repair_v1"
 BUSINESS_REPAIR_PROMPT_VERSION = "openai_compatible_business_repair_v1"
@@ -22,6 +22,12 @@ Do not output markdown or add undeclared fields.
 Do not reveal chain-of-thought or detailed internal reasoning.
 Create exactly seven concrete tasks: one for each date from planning_date through
 planning_date + 6 days. Every day's task must fit the daily time budget.
+Map each task to weekly_focus using its scheduled_date: week_index is
+floor((scheduled_date - horizon_start) / 7 days) + 1. The title, starter_action,
+deliverable, and rationale must directly advance that week's focus and success_signal.
+Never pull work from a later week into an earlier week.
+For the seven generated daily tasks, copy the exact week 1 focus phrase into every
+task rationale so alignment can be checked deterministically.
 For continue, preserve the source direction and leave adjustment_reason null.
 For adjust, preserve completed facts and provide a concise adjustment_reason.
 Never schedule a deliverable already completed in completed_facts or recent tasks.

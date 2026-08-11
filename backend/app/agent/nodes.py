@@ -439,6 +439,7 @@ def _within_daily_budget(tasks: list[TaskCandidate], daily_budget: int) -> bool:
 CHECK_ORDER = (
     "HORIZON_MATCH",
     "WEEKLY_FOCUS",
+    "FIRST_WEEK_ALIGNMENT",
     "TASK_COUNT",
     "TIME_BUDGET",
     "STARTER_ACTION",
@@ -481,6 +482,13 @@ def validate_candidate(
             and len({item.success_signal for item in candidate.weekly_focus})
             == len(candidate.weekly_focus)
         ),
+        "FIRST_WEEK_ALIGNMENT": (
+            bool(candidate.weekly_focus)
+            and all(
+                candidate.weekly_focus[0].focus in (task.rationale or "")
+                for task in candidate.tasks
+            )
+        ),
         "TASK_COUNT": len(candidate.tasks) == 7,
         "TIME_BUDGET": _within_daily_budget(candidate.tasks, context.time_budget_minutes),
         "STARTER_ACTION": all(bool(task.starter_action.strip()) for task in candidate.tasks),
@@ -516,7 +524,14 @@ def validate_candidate(
     return ValidationReport(
         passed=not failures,
         checks=checks,
-        repair_instructions=[f"Repair deterministic rule {code}" for code in failures],
+        repair_instructions=[
+            (
+                "Every daily task rationale must include the exact week 1 focus phrase."
+                if code == "FIRST_WEEK_ALIGNMENT"
+                else f"Repair deterministic rule {code}"
+            )
+            for code in failures
+        ],
     )
 
 
@@ -541,8 +556,16 @@ def _valid_replan_continuity(candidate: PlanCandidate, context: PlanningContext)
 def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandidate:
     window = context.planning_window
     minutes = max(5, min(context.time_budget_minutes, 30))
+    goal_label = {
+        GoalType.AI_BACKEND: "AI 后端",
+        GoalType.AGENT_APP: "Agent 应用",
+        GoalType.BACKEND_JAVA: "Java 后端",
+        GoalType.DATA_ENGINEER: "数据工程",
+        GoalType.FULLSTACK: "全栈工程师",
+        GoalType.OTHER: "目标",
+    }[context.profile.goal_type]
     weekly_templates = [
-        ("明确目标岗位与能力差距", "形成岗位要求与能力差距清单"),
+        (f"明确{goal_label}岗位与能力差距", "形成岗位要求与能力差距清单"),
         ("完成可展示的项目核心增量", "产出可运行、可验证的项目成果"),
         ("沉淀简历与项目表达材料", "形成可投递的简历项目描述"),
         ("开展模拟面试并验证准备效果", "完成复盘记录并修正薄弱点"),
@@ -551,48 +574,49 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
         ("集中投递并跟踪反馈", "形成投递与反馈跟踪表"),
         ("复盘结果并确定下一阶段策略", "形成下一阶段行动决策"),
     ]
+    first_week_focus = weekly_templates[0][0]
     daily_templates = [
         (
-            "梳理目标岗位要求",
+            f"收集{goal_label}岗位样本",
             TaskType.LEARNING,
-            "1. 收集3份目标岗位JD；2. 标出重复的技能、项目和学历要求；3. 按出现次数排序",
-            "岗位要求表，至少包含3份JD、10项要求及出现频次",
+            f"1. 收集3份{goal_label}JD；2. 保存岗位链接与公司信息；3. 标出重复要求",
+            f"岗位样本表，包含3份{goal_label}JD、来源及重复要求",
         ),
         (
-            "盘点当前能力差距",
+            "提取岗位能力要求",
             TaskType.LEARNING,
-            "1. 将要求分成已掌握、待补和可证明；2. 给待补项标优先级；3. 选出本周首要差距",
-            "能力差距表，包含优先级、现有证据和本周首要补齐项",
+            "1. 合并3份JD要求；2. 按前端、后端、数据和工程化分类；3. 统计出现频次",
+            "岗位要求清单，包含至少10项能力、分类及出现频次",
         ),
         (
-            "完成最小项目增量",
-            TaskType.PROJECT,
-            "1. 选择首要差距对应的项目功能；2. 先写验收用例；3. 实现最小闭环并提交",
-            "一次代码提交，包含可运行功能、至少1个自动化测试和运行说明",
+            "盘点现有能力证据",
+            TaskType.LEARNING,
+            "1. 逐项标记已掌握、待补或待证明；2. 关联项目与学习经历；3. 标出证据缺口",
+            "能力证据表，包含至少10项要求、当前水平及已有证据",
         ),
         (
-            "验证并记录项目结果",
-            TaskType.PROJECT,
-            "1. 运行项目和测试；2. 保存关键输入输出；3. 记录失败原因、修复动作和最终结果",
-            "验证记录，包含测试命令、通过结果以及截图或关键日志",
+            "建立能力差距矩阵",
+            TaskType.LEARNING,
+            "1. 对照岗位要求与现有证据；2. 标记能力、经验和表达差距；3. 写明判断依据",
+            "能力差距矩阵，包含至少5项差距、类型及判断依据",
         ),
         (
-            "整理简历项目表达",
-            TaskType.RESUME,
-            "1. 用背景、行动、结果重写项目经历；2. 补充技术取舍；3. 压缩成3至4条要点",
-            "3至4条可直接放入简历的项目描述，每条包含动作和结果",
+            "排定差距补齐优先级",
+            TaskType.LEARNING,
+            "1. 按岗位频次和当前差距评分；2. 估算补齐成本；3. 选出前三项优先差距",
+            "差距优先级表，包含至少5项评分、成本及前三项结论",
         ),
         (
-            "演练项目面试问答",
-            TaskType.INTERVIEW,
-            "1. 准备架构、难点、取舍各1题；2. 每题限时2分钟口述；3. 重答含糊部分",
-            "3组项目问答记录，每组包含首答问题和改进后的答案",
+            "复核首要能力差距",
+            TaskType.LEARNING,
+            "1. 新增2份同类JD；2. 核对前三项差距是否高频；3. 修正不一致的排序",
+            "差距复核记录，包含2份新增JD、核对结果及排序调整",
         ),
         (
-            "复盘本周并安排下一步",
+            "汇总岗位与能力结论",
             TaskType.OTHER,
-            "1. 汇总前6天产物；2. 标记完成、阻碍和欠账；3. 确定下周第一项可执行任务",
-            "周复盘，包含完成清单、最多3个阻碍和下一步行动",
+            "1. 汇总岗位要求与差距矩阵；2. 写出前三项差距；3. 确定下周项目增量方向",
+            "第一周结论，包含岗位要求清单、前三项差距和下周方向",
         ),
     ]
     return PlanCandidate(
@@ -626,7 +650,7 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
                     f"{deliverable}"
                 ),
                 estimated_minutes=minutes,
-                rationale="结合当前目标、每日预算和近期执行事实推进下一项可验证成果",
+                rationale=f"服务第1周目标“{first_week_focus}”并形成可验证证据",
             )
             for day_offset, (title, task_type, starter_action, deliverable) in enumerate(
                 daily_templates

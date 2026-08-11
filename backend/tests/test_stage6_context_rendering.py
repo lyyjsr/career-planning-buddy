@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 from app.agent.context_compression import compress_context_history, estimate_text_tokens
+from app.prompts.career_planning import SYSTEM_PROMPT
 from app.prompts.context_renderer import render_planning_context
 from app.schemas.agent_runs import (
     PlanningContext,
@@ -107,3 +108,9 @@ def test_renderer_has_stable_isolated_sections_without_chain_of_thought_request(
     assert "&lt;/user_request&gt;" in rendered
     assert "chain-of-thought" not in rendered.lower()
     assert "思维链" not in rendered
+
+
+def test_planning_prompt_requires_tasks_to_follow_their_scheduled_week_focus() -> None:
+    assert "scheduled_date" in SYSTEM_PROMPT
+    assert "weekly_focus" in SYSTEM_PROMPT
+    assert "Never pull work from a later week into an earlier week" in SYSTEM_PROMPT

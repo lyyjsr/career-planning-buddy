@@ -82,6 +82,25 @@ class BudgetGuard:
         self.tokens_out += tokens_out
         self.check()
 
+    def can_reserve_llm_call(self) -> bool:
+        """Return whether one worst-case configured Provider call still fits.
+
+        This is intentionally conservative. A repair is optional, so starting it
+        without enough room for the configured per-call ceilings would turn an
+        otherwise usable deterministic fallback into a terminal Run failure.
+        """
+        self.check()
+        if self.llm_calls >= self._config.max_llm_calls:
+            return False
+        reserved_tokens = (
+            self._config.max_input_tokens_per_call
+            + self._config.max_output_tokens_per_call
+        )
+        return (
+            self.tokens_in + self.tokens_out + reserved_tokens
+            <= self._config.max_total_tokens
+        )
+
     def claim_format_repair(self) -> None:
         if self.format_repairs >= 1:
             raise StructuredOutputError

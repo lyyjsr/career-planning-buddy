@@ -1,5 +1,7 @@
 """FastAPI application entrypoint."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,12 +16,33 @@ from app.core.database import AsyncSessionFactory
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.harness.pairwise_sweep_executor import pairwise_sweep_executor
+from app.providers.embedding import LocalEmbeddingProvider
 from app.providers.registry import build_runtime_provider_registry
+
+logger = logging.getLogger(__name__)
+
+
+def _log_embedding_warmup(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is None:
+        logger.info("local embedding model warmup completed")
+    else:
+        logger.error(
+            "local embedding model warmup failed: %s",
+            type(error).__name__,
+        )
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Start durable dispatchers and release local leases on shutdown."""
+    warmup_task: asyncio.Task[None] | None = None
+    embedding = application.state.runtime_providers.embedding
+    if isinstance(embedding, LocalEmbeddingProvider):
+        warmup_task = embedding.start_warmup()
+        warmup_task.add_done_callback(_log_embedding_warmup)
     await agent_run_executor.recover_interrupted()
     await agent_run_executor.start()
     await eval_runner_executor.recover_interrupted()
@@ -30,6 +53,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await pairwise_sweep_executor.shutdown()
         await eval_runner_executor.shutdown()
         await agent_run_executor.shutdown()
+        if warmup_task is not None and not warmup_task.done():
+            warmup_task.cancel()
+            await asyncio.gather(warmup_task, return_exceptions=True)
 
 
 def create_app() -> FastAPI:

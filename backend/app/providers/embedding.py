@@ -63,10 +63,29 @@ class LocalEmbeddingProvider:
         self.model_name = model_name or self._model_path.name
         self._model: _SentenceTransformerModel | None = None
         self._lock = asyncio.Lock()
+        self._warmup_task: asyncio.Task[None] | None = None
+
+    def start_warmup(self) -> asyncio.Task[None]:
+        """Begin one process-local model load without blocking application startup."""
+        if self._warmup_task is None:
+            self._warmup_task = asyncio.create_task(
+                self.warmup(),
+                name="local-embedding-warmup",
+            )
+        return self._warmup_task
+
+    async def warmup(self) -> None:
+        await self._load()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        if self._warmup_task is not None and not self._warmup_task.done():
+            raise ProviderUnavailableError(
+                "local embedding is warming up; semantic retrieval is temporarily unavailable"
+            )
+        if self._warmup_task is not None:
+            await self._warmup_task
         model = await self._load()
         encoded = await asyncio.to_thread(
             model.encode,
