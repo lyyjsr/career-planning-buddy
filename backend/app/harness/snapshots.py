@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.models.agent_run import AgentRun
+from app.providers.llm_profiles import model_for_operation
 from app.runtime.versioning import build_runtime_identity
 from app.schemas.agent_runs import RunInputSnapshot, RuntimeConfigSnapshot
 
@@ -45,7 +46,7 @@ class SnapshotService:
             available_tools=["memory_lookup", "rag_retrieve", "web_search"],
             provider=settings.llm_provider,
             model_alias=(
-                settings.llm_model
+                model_for_operation(settings, "planning")
                 if is_real and settings.llm_model is not None
                 else "mock-career-planner-v1"
             ),

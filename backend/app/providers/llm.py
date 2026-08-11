@@ -4,22 +4,12 @@ import asyncio
 import json
 from collections.abc import Mapping
 from datetime import timedelta
-from hashlib import sha256
-from time import monotonic
 from typing import Protocol
-from urllib.parse import urlparse
 
 import httpx
 from pydantic import ValidationError
 
-from app.agent.errors import (
-    ProviderAuthenticationError,
-    ProviderConfigurationError,
-    ProviderRateLimitError,
-    ProviderTimeoutError,
-    ProviderUnavailableError,
-    parse_retry_after,
-)
+from app.agent.errors import ProviderConfigurationError
 from app.core.config import Settings
 from app.prompts.career_planning import (
     business_repair_messages,
@@ -27,6 +17,14 @@ from app.prompts.career_planning import (
     format_repair_messages,
     generation_messages,
 )
+from app.providers.llm_client import LLMClient, OpenAIChatLLMClient
+from app.providers.llm_contracts import (
+    LLMMessage,
+    LLMRequest,
+    LLMResponse,
+    LLMToolDefinition,
+)
+from app.providers.llm_profiles import model_for_operation, resolve_provider_profile
 from app.schemas.agent_runs import (
     AgentTurnResponse,
     EvidenceCatalogItem,
@@ -85,7 +83,7 @@ class PlanningProvider(Protocol):
 
 
 class OpenAICompatiblePlanningProvider:
-    """OpenAI-compatible Chat Completions adapter with strict JSON output."""
+    """Planning use-case adapter over the provider-neutral LLM client."""
 
     def __init__(
         self,
@@ -96,31 +94,27 @@ class OpenAICompatiblePlanningProvider:
         timeout_seconds: float = 30,
         max_output_tokens: int = 1500,
         transport: httpx.AsyncBaseTransport | None = None,
+        provider_name: str = "auto",
+        reasoning: str = "off",
+        client: LLMClient | None = None,
     ) -> None:
         if not api_key or not base_url or not model:
             raise ProviderConfigurationError(
                 "openai_compatible requires API key, base URL, and model"
             )
-        self._api_key = api_key
-        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
-        provider_host = urlparse(base_url).hostname
-        self._supports_thinking_control = provider_host == "api.deepseek.com" or (
-            provider_host is not None and provider_host.endswith(".deepseek.com")
-        )
         self._model = model
-        self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
-        self._transport = transport
-        self._client = (
-            httpx.AsyncClient(
-                timeout=self._timeout_seconds,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            if transport is None
-            else None
+        self._reasoning = "off" if reasoning == "off" else "auto"
+        self._owns_client = client is None
+        self._client = client or OpenAIChatLLMClient(
+            api_key=api_key,
+            base_url=base_url,
+            profile=resolve_provider_profile(
+                configured_name=provider_name,
+                base_url=base_url,
+            ),
+            timeout_seconds=timeout_seconds,
+            transport=transport,
         )
 
     async def generate_plan(
@@ -137,7 +131,8 @@ class OpenAICompatiblePlanningProvider:
                 context=context,
                 replan_mode=replan_mode,
                 evidence_catalog=evidence_catalog,
-            )
+            ),
+            operation="planning",
         )
 
     async def generate_direct_plan(
@@ -152,7 +147,8 @@ class OpenAICompatiblePlanningProvider:
                 message=message,
                 context=context,
                 replan_mode=replan_mode,
-            )
+            ),
+            operation="planning",
         )
 
     async def generate_agent_turn(
@@ -171,58 +167,43 @@ class OpenAICompatiblePlanningProvider:
             replan_mode=replan_mode,
             evidence_catalog=evidence_catalog,
         )
-        request_body: dict[str, object] = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": self._max_output_tokens,
-            "response_format": {"type": "json_object"},
-        }
-        self._apply_thinking_disabled(request_body)
-        if available_tools and not force_final:
-            request_body["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.input_json_schema,
-                        "strict": True,
-                    },
-                }
-                for tool in available_tools
-            ]
-            request_body["tool_choice"] = "auto"
-        response, latency_ms, response_text = await self._post(request_body)
-        body = self._response_mapping(response)
-        usage = self._usage(
-            body=body,
-            latency_ms=latency_ms,
-            request_id=response.headers.get("x-request-id"),
-            raw_output_hash=sha256(response_text.encode("utf-8")).hexdigest(),
+        tools = available_tools if available_tools and not force_final else []
+        response = await self._client.complete(
+            self._request(
+                operation="planning",
+                messages=messages,
+                tools=tools,
+            )
         )
-        message_object = self._message_mapping(body)
-        tool_calls = self._tool_calls(message_object)
-        content = message_object.get("content") if message_object is not None else None
-        has_content = isinstance(content, str) and bool(content.strip())
-        if tool_calls and has_content:
+        usage = self._provider_usage(response)
+        if response.tool_calls and response.content:
             return {
                 "_raw_text": "mixed tool calls and final",
                 "usage": usage.model_dump(mode="json"),
             }
-        if tool_calls:
+        if response.tool_calls:
             return AgentTurnResponse(
-                tool_calls=tool_calls,
+                tool_calls=[
+                    ProviderToolCall(
+                        call_id=call.call_id,
+                        name=call.name,
+                        arguments=call.arguments,
+                    )
+                    for call in response.tool_calls
+                ],
                 usage=usage,
             ).model_dump(mode="json")
-        if isinstance(content, str) and content.strip():
+        if response.content:
             try:
-                candidate_object: object = json.loads(content)
+                candidate_object: object = json.loads(response.content)
                 candidate = PlanCandidate.model_validate(candidate_object)
             except (json.JSONDecodeError, ValidationError):
-                return {"_raw_text": content[:12000], "usage": usage.model_dump(mode="json")}
+                return {
+                    "_raw_text": response.content[:12000],
+                    "usage": usage.model_dump(mode="json"),
+                }
             return AgentTurnResponse(final=candidate, usage=usage).model_dump(mode="json")
-        return {"_raw_text": response_text[:12000], "usage": usage.model_dump(mode="json")}
+        return {"_raw_text": "", "usage": usage.model_dump(mode="json")}
 
     async def repair_format(
         self,
@@ -238,7 +219,8 @@ class OpenAICompatiblePlanningProvider:
                 context=context,
                 replan_mode=replan_mode,
                 evidence_catalog=evidence_catalog,
-            )
+            ),
+            operation="format_repair",
         )
 
     async def repair_business_rules(
@@ -259,43 +241,35 @@ class OpenAICompatiblePlanningProvider:
                 message=message,
                 replan_mode=replan_mode,
                 evidence_catalog=evidence_catalog,
-            )
+            ),
+            operation="business_repair",
         )
 
-    async def _generate(self, messages: list[dict[str, str]]) -> Mapping[str, object]:
-        request_body: dict[str, object] = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": self._max_output_tokens,
-            "response_format": {"type": "json_object"},
-        }
-        self._apply_thinking_disabled(request_body)
-        response, latency_ms, response_text = await self._post(request_body)
-        raw_output_hash = sha256(response_text.encode("utf-8")).hexdigest()
-        body = self._response_mapping(response)
-        usage = self._usage(
-            body=body,
-            latency_ms=latency_ms,
-            request_id=response.headers.get("x-request-id"),
-            raw_output_hash=raw_output_hash,
+    async def _generate(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        operation: str,
+    ) -> Mapping[str, object]:
+        response = await self._client.complete(
+            self._request(operation=operation, messages=messages)
         )
-        content = self._message_content(body)
-        if content is None:
+        usage = self._provider_usage(response)
+        if response.content is None:
             return {
-                "_raw_text": response_text[:12000],
+                "_raw_text": "",
                 "usage": usage.model_dump(mode="json"),
             }
         try:
-            candidate_object: object = json.loads(content)
+            candidate_object: object = json.loads(response.content)
         except json.JSONDecodeError:
             return {
-                "_raw_text": content[:12000],
+                "_raw_text": response.content[:12000],
                 "usage": usage.model_dump(mode="json"),
             }
         if not isinstance(candidate_object, Mapping):
             return {
-                "_raw_text": content[:12000],
+                "_raw_text": response.content[:12000],
                 "usage": usage.model_dump(mode="json"),
             }
         candidate = {str(key): value for key, value in candidate_object.items()}
@@ -304,177 +278,47 @@ class OpenAICompatiblePlanningProvider:
             "usage": usage.model_dump(mode="json"),
         }
 
-    async def _post(self, request_body: dict[str, object]) -> tuple[httpx.Response, int, str]:
-        started = monotonic()
-        try:
-            if self._client is not None:
-                response = await self._client.post(self._endpoint, json=request_body)
-            else:
-                async with httpx.AsyncClient(
-                    transport=self._transport,
-                    timeout=self._timeout_seconds,
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
-                ) as client:
-                    response = await client.post(self._endpoint, json=request_body)
-        except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError(
-                "LLM provider request timed out", retryable=True
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ProviderUnavailableError(
-                "LLM provider could not be reached", retryable=True
-            ) from exc
-
-        if response.status_code in {401, 403}:
-            raise ProviderAuthenticationError("LLM provider rejected authentication")
-        if response.status_code == 429:
-            raise ProviderRateLimitError(
-                "LLM provider rate limit was reached",
-                retryable=True,
-                retry_after_seconds=parse_retry_after(
-                    response.headers.get("retry-after")
-                ),
-            )
-        if response.status_code >= 500:
-            raise ProviderUnavailableError(
-                f"LLM provider returned HTTP {response.status_code}",
-                retryable=True,
-                retry_after_seconds=parse_retry_after(
-                    response.headers.get("retry-after")
-                ),
-            )
-        if response.status_code >= 400:
-            raise ProviderUnavailableError(
-                f"LLM provider returned HTTP {response.status_code}",
-                retryable=False,
-            )
-
-        return response, int((monotonic() - started) * 1000), response.text
-
     async def aclose(self) -> None:
-        if self._client is not None:
+        if self._owns_client:
             await self._client.aclose()
 
-    def _apply_thinking_disabled(self, request_body: dict[str, object]) -> None:
-        """Disable reasoning only for the explicitly supported DeepSeek API."""
-        if self._supports_thinking_control:
-            request_body["thinking"] = {"type": "disabled"}
-
-
-    @staticmethod
-    def _response_mapping(response: httpx.Response) -> Mapping[object, object]:
-        try:
-            body: object = response.json()
-        except ValueError:
-            return {}
-        return body if isinstance(body, Mapping) else {}
-
-    @staticmethod
-    def _message_content(body: Mapping[object, object]) -> str | None:
-        choices = body.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return None
-        first = choices[0]
-        if not isinstance(first, Mapping):
-            return None
-        message = first.get("message")
-        if not isinstance(message, Mapping):
-            return None
-        content = message.get("content")
-        if isinstance(content, str):
-            return content
-        if not isinstance(content, list):
-            return None
-        parts: list[str] = []
-        for item in content:
-            if not isinstance(item, Mapping):
-                continue
-            text = item.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-        return "".join(parts) or None
-
-    @staticmethod
-    def _message_mapping(body: Mapping[object, object]) -> Mapping[object, object] | None:
-        choices = body.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return None
-        first = choices[0]
-        if not isinstance(first, Mapping):
-            return None
-        message = first.get("message")
-        return message if isinstance(message, Mapping) else None
-
-    @staticmethod
-    def _tool_calls(
-        message: Mapping[object, object] | None,
-    ) -> list[ProviderToolCall]:
-        if message is None:
-            return []
-        raw_calls = message.get("tool_calls")
-        if not isinstance(raw_calls, list):
-            return []
-        calls: list[ProviderToolCall] = []
-        for index, raw_call in enumerate(raw_calls):
-            if not isinstance(raw_call, Mapping):
-                continue
-            function = raw_call.get("function")
-            if not isinstance(function, Mapping):
-                continue
-            name = function.get("name")
-            raw_arguments = function.get("arguments")
-            call_id = raw_call.get("id")
-            if not isinstance(name, str) or not isinstance(raw_arguments, str):
-                continue
-            try:
-                arguments_object: object = json.loads(raw_arguments)
-            except json.JSONDecodeError:
-                arguments_object = {}
-            if not isinstance(arguments_object, Mapping):
-                arguments_object = {}
-            calls.append(
-                ProviderToolCall(
-                    call_id=call_id if isinstance(call_id, str) else f"call-{index}",
-                    name=name,
-                    arguments={str(key): value for key, value in arguments_object.items()},
-                )
-            )
-        return calls
-
-    def _usage(
+    def _request(
         self,
         *,
-        body: Mapping[object, object],
-        latency_ms: int,
-        request_id: str | None,
-        raw_output_hash: str,
-    ) -> ProviderUsage:
-        usage_object = body.get("usage")
-        usage = usage_object if isinstance(usage_object, Mapping) else {}
-        model_object = body.get("model")
-        response_id = body.get("id")
-        return ProviderUsage(
-            model_id=model_object if isinstance(model_object, str) else self._model,
-            provider="openai_compatible",
-            request_id=(
-                request_id
-                if request_id is not None
-                else response_id
-                if isinstance(response_id, str)
-                else None
-            ),
-            raw_output_hash=raw_output_hash,
-            tokens_in=self._nonnegative_int(usage.get("prompt_tokens")),
-            tokens_out=self._nonnegative_int(usage.get("completion_tokens")),
-            latency_ms=latency_ms,
+        operation: str,
+        messages: list[dict[str, str]],
+        tools: list[ModelToolSpec] | None = None,
+    ) -> LLMRequest:
+        return LLMRequest(
+            operation=operation,
+            model=self._model,
+            messages=[LLMMessage.model_validate(message) for message in messages],
+            tools=[
+                LLMToolDefinition(
+                    name=tool.name,
+                    description=tool.description,
+                    input_json_schema=tool.input_json_schema,
+                )
+                for tool in tools or []
+            ],
+            tool_choice="auto" if tools else "none",
+            structured_output="json_object",
+            reasoning=self._reasoning,
+            temperature=0.1,
+            max_output_tokens=self._max_output_tokens,
         )
 
     @staticmethod
-    def _nonnegative_int(value: object) -> int:
-        return value if isinstance(value, int) and value >= 0 else 0
+    def _provider_usage(response: LLMResponse) -> ProviderUsage:
+        return ProviderUsage(
+            model_id=response.model_id,
+            provider=response.provider_id,
+            request_id=response.request_id,
+            raw_output_hash=response.raw_output_hash,
+            tokens_in=response.usage.input_tokens,
+            tokens_out=response.usage.output_tokens,
+            latency_ms=response.latency_ms,
+        )
 
 
 class DirectLLMPlanningProvider:
@@ -1125,6 +969,8 @@ _AGENT_VARIANT_PROFILE_MAP: dict[str, str] = {
 def build_planning_provider(
     settings: Settings,
     agent_variant: str | None = None,
+    *,
+    client: LLMClient | None = None,
 ) -> PlanningProvider:
     """Build exactly the configured Provider; never silently substitute Mock.
 
@@ -1150,9 +996,12 @@ def build_planning_provider(
     provider = OpenAICompatiblePlanningProvider(
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=str(settings.llm_base_url),
-        model=settings.llm_model,
+        model=model_for_operation(settings, "planning"),
         timeout_seconds=settings.llm_timeout_seconds,
         max_output_tokens=settings.agent_max_output_tokens_per_call,
+        provider_name=settings.llm_provider_name,
+        reasoning=settings.llm_planning_reasoning,
+        client=client,
     )
     if agent_variant == "direct_llm_v1":
         return DirectLLMPlanningProvider(provider)

@@ -39,7 +39,6 @@ async def test_rule_provider_treats_fullstack_job_search_as_career_plan() -> Non
 
 @pytest.mark.asyncio
 async def test_official_deepseek_disables_thinking_for_goal_json(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -70,18 +69,12 @@ async def test_official_deepseek_disables_thinking_for_goal_json(
             },
         )
 
-    original_client = httpx.AsyncClient
-
-    def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
-        kwargs["transport"] = httpx.MockTransport(handler)
-        return original_client(*args, **kwargs)
-
-    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
     provider = OpenAICompatibleGoalUnderstandingProvider(
         api_key="test-only",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
     )
 
     result = await provider.extract("四周全栈求职准备")
@@ -92,7 +85,6 @@ async def test_official_deepseek_disables_thinking_for_goal_json(
 
 @pytest.mark.asyncio
 async def test_other_openai_compatible_goal_provider_omits_thinking(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -113,20 +105,56 @@ async def test_other_openai_compatible_goal_provider_omits_thinking(
             },
         )
 
-    original_client = httpx.AsyncClient
-
-    def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
-        kwargs["transport"] = httpx.MockTransport(handler)
-        return original_client(*args, **kwargs)
-
-    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
     provider = OpenAICompatibleGoalUnderstandingProvider(
         api_key="test-only",
         base_url="https://llm.example.com/v1",
         model="compatible-model",
         timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
     )
 
     await provider.extract("求职准备")
 
     assert "thinking" not in captured
+
+
+@pytest.mark.asyncio
+async def test_glm_disables_thinking_for_goal_json(
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "model": "glm-4.7",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "objective_type": "project",
+                                    "capability_focus": ["RAG"],
+                                    "success_criteria": ["可运行"],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ],
+            },
+        )
+
+    provider = OpenAICompatibleGoalUnderstandingProvider(
+        api_key="test-only",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        model="glm-4.7",
+        timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await provider.extract("设计一个面向岗位的 RAG 项目")
+
+    assert captured["thinking"] == {"type": "disabled"}
+    assert result.capability_focus == ["RAG"]

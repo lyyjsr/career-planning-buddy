@@ -8,6 +8,7 @@ from pytest import MonkeyPatch
 
 from app.core.config import PROJECT_ROOT, Settings, get_settings
 from app.core.provider_status import build_provider_configuration_status
+from app.harness.snapshots import SnapshotService
 from scripts.audit_config import audit_configuration
 from scripts.migrate_legacy_env import migrate_lines
 
@@ -93,6 +94,25 @@ def test_openai_compatible_configuration_is_validated_without_exposing_key() -> 
     assert settings.llm_api_key is not None
     assert settings.llm_api_key.get_secret_value() == "unit-test-secret"
     assert "unit-test-secret" not in repr(settings)
+
+
+def test_llm_provider_profile_and_task_models_are_explicit() -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_provider="openai_compatible",
+        llm_provider_name="zhipu",
+        llm_api_key="unit-test-secret",
+        llm_base_url="https://open.bigmodel.cn/api/paas/v4",
+        llm_model="glm-default",
+        llm_planning_model="glm-planning",
+        llm_goal_understanding_model="glm-goal",
+    )
+
+    status = build_provider_configuration_status(settings)
+    snapshot = SnapshotService.build_config(settings)
+
+    assert status.providers["planning_llm"].provider == "zhipu"
+    assert snapshot.model_alias == "glm-planning"
 
 
 def test_openai_compatible_judge_requires_dedicated_configuration() -> None:

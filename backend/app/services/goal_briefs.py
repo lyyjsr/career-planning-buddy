@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.errors import AgentError
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.models.goal_brief import GoalBrief
@@ -255,7 +256,7 @@ class GoalBriefService:
         try:
             result = await self._provider.extract(message)
             return result, self._provider.method, self._provider.model_id
-        except (httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError):
+        except (AgentError, httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError):
             fallback = RuleGoalUnderstandingProvider()
             return await fallback.extract(message), "rule_fallback", fallback.model_id
 

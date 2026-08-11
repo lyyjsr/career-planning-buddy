@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionFactory
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.telemetry import RequestTelemetryMiddleware
 from app.harness.pairwise_sweep_executor import pairwise_sweep_executor
 from app.providers.embedding import LocalEmbeddingProvider
 from app.providers.registry import build_runtime_provider_registry
@@ -53,6 +54,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await pairwise_sweep_executor.shutdown()
         await eval_runner_executor.shutdown()
         await agent_run_executor.shutdown()
+        await application.state.runtime_providers.aclose()
         if warmup_task is not None and not warmup_task.done():
             warmup_task.cancel()
             await asyncio.gather(warmup_task, return_exceptions=True)
@@ -84,6 +86,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.runtime_providers = providers
+    application.add_middleware(RequestTelemetryMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -95,7 +98,9 @@ def create_app() -> FastAPI:
             "Content-Type",
             "Idempotency-Key",
             "Last-Event-ID",
+            "X-Request-ID",
         ],
+        expose_headers=["X-Request-ID"],
     )
     register_exception_handlers(application)
     application.include_router(api_router)

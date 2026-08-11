@@ -1,6 +1,7 @@
 """Build secret-free Provider configuration diagnostics."""
 
 from app.core.config import Settings
+from app.providers.llm_profiles import resolve_provider_profile
 from app.schemas.configuration import ProviderConfigurationItem, ProviderConfigurationStatus
 
 
@@ -23,9 +24,15 @@ def build_provider_configuration_status(settings: Settings) -> ProviderConfigura
         ("EMBEDDING_MODEL_PATH", settings.embedding_model_path),
     ) if settings.embedding_provider == "local" else []
 
+    planning_provider: str = settings.llm_provider
+    if settings.llm_provider == "openai_compatible" and settings.llm_base_url is not None:
+        planning_provider = resolve_provider_profile(
+            configured_name=settings.llm_provider_name,
+            base_url=str(settings.llm_base_url),
+        ).provider_id
     items = {
         "planning_llm": ProviderConfigurationItem(
-            provider=settings.llm_provider,
+            provider=planning_provider,
             configured=not planning_missing,
             real=settings.llm_provider != "mock",
             missing_fields=planning_missing,

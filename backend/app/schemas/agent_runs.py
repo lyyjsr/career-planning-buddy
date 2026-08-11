@@ -124,7 +124,9 @@ class RuntimeConfigSnapshot(StrictModel):
     # Keep prior snapshots readable while new runs are pinned to Stage 6B.
     feature_stage: Literal[3, 4, 5, 6] = 6
     available_tools: list[str] = Field(default_factory=list, max_length=3)
-    provider: Literal["mock", "openai_compatible"] = "mock"
+    provider: Literal[
+        "mock", "openai", "zhipu", "deepseek", "openai_compatible"
+    ] = "mock"
     model_alias: str
     prompt_versions: dict[str, str]
     max_llm_calls: int = Field(ge=1, le=7)
@@ -368,7 +370,9 @@ class CompanionMessageCandidate(StrictModel):
 
 class ProviderUsage(StrictModel):
     model_id: str
-    provider: Literal["mock", "openai_compatible"] = "mock"
+    provider: Literal[
+        "mock", "openai", "zhipu", "deepseek", "openai_compatible"
+    ] = "mock"
     request_id: str | None = None
     raw_output_hash: str | None = Field(default=None, min_length=64, max_length=64)
     tokens_in: int = Field(ge=0)

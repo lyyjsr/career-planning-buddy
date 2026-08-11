@@ -2,14 +2,15 @@
 
 import json
 import re
-from collections.abc import Mapping
 from typing import Protocol
-from urllib.parse import urlparse
 
 import httpx
 
 from app.core.config import Settings
 from app.prompts.goal_understanding import goal_understanding_messages
+from app.providers.llm_client import LLMClient, OpenAIChatLLMClient
+from app.providers.llm_contracts import LLMMessage, LLMRequest
+from app.providers.llm_profiles import model_for_operation, resolve_provider_profile
 from app.schemas.enums import ObjectiveType
 from app.schemas.goal_briefs import GoalExtraction
 
@@ -115,51 +116,61 @@ class RuleGoalUnderstandingProvider:
 class OpenAICompatibleGoalUnderstandingProvider:
     method = "model"
 
-    def __init__(self, *, api_key: str, base_url: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        timeout_seconds: float,
+        transport: httpx.AsyncBaseTransport | None = None,
+        provider_name: str = "auto",
+        reasoning: str = "off",
+        client: LLMClient | None = None,
+    ) -> None:
         self.model_id = model
-        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
-        self._timeout = timeout_seconds
-        provider_host = (urlparse(base_url).hostname or "").lower()
-        self._supports_thinking_control = provider_host == "api.deepseek.com" or (
-            provider_host.endswith(".deepseek.com")
+        self._reasoning = "off" if reasoning == "off" else "auto"
+        self._owns_client = client is None
+        self._client = client or OpenAIChatLLMClient(
+            api_key=api_key,
+            base_url=base_url,
+            profile=resolve_provider_profile(
+                configured_name=provider_name,
+                base_url=base_url,
+            ),
+            timeout_seconds=timeout_seconds,
+            transport=transport,
         )
-        self._headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
 
     async def extract(self, message: str) -> GoalExtraction:
-        request_body: dict[str, object] = {
-            "model": self.model_id,
-            "messages": goal_understanding_messages(message),
-            "temperature": 0,
-            "max_tokens": 700,
-            "response_format": {"type": "json_object"},
-        }
-        if self._supports_thinking_control:
-            request_body["thinking"] = {"type": "disabled"}
-        async with httpx.AsyncClient(timeout=self._timeout, headers=self._headers) as client:
-            response = await client.post(
-                self._endpoint,
-                json=request_body,
+        response = await self._client.complete(
+            LLMRequest(
+                operation="goal_understanding",
+                model=self.model_id,
+                messages=[
+                    LLMMessage.model_validate(item)
+                    for item in goal_understanding_messages(message)
+                ],
+                structured_output="json_object",
+                reasoning=self._reasoning,
+                temperature=0,
+                max_output_tokens=700,
             )
-        response.raise_for_status()
-        body = response.json()
-        if not isinstance(body, Mapping):
-            raise ValueError("goal Provider returned an invalid response")
-        choices = body.get("choices")
-        if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
-            raise ValueError("goal Provider returned no choices")
-        response_message = choices[0].get("message")
-        if not isinstance(response_message, Mapping):
-            raise ValueError("goal Provider returned no message")
-        content = response_message.get("content")
-        if not isinstance(content, str) or not content.strip():
+        )
+        if response.content is None:
             raise ValueError("goal Provider returned empty content")
-        return GoalExtraction.model_validate(json.loads(content))
+        return GoalExtraction.model_validate(json.loads(response.content))
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
 
-def build_goal_understanding_provider(settings: Settings) -> GoalUnderstandingProvider:
+def build_goal_understanding_provider(
+    settings: Settings,
+    *,
+    client: LLMClient | None = None,
+) -> GoalUnderstandingProvider:
     if settings.llm_provider == "mock":
         return RuleGoalUnderstandingProvider()
     assert settings.llm_api_key is not None
@@ -168,6 +179,9 @@ def build_goal_understanding_provider(settings: Settings) -> GoalUnderstandingPr
     return OpenAICompatibleGoalUnderstandingProvider(
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=str(settings.llm_base_url),
-        model=settings.llm_model,
+        model=model_for_operation(settings, "goal_understanding"),
         timeout_seconds=settings.llm_timeout_seconds,
+        provider_name=settings.llm_provider_name,
+        reasoning=settings.llm_goal_understanding_reasoning,
+        client=client,
     )

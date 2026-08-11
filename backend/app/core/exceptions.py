@@ -35,7 +35,7 @@ async def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):
         raise exc
 
-    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request_id = getattr(request.state, "request_id", None) or str(uuid4())
     payload = ErrorResponse(
         error=ErrorBody(
             code=exc.code,
@@ -78,7 +78,7 @@ async def request_validation_error_handler(request: Request, exc: Exception) -> 
         error=ErrorBody(
             code=code,
             message="request validation failed",
-            request_id=request.headers.get("X-Request-ID") or str(uuid4()),
+            request_id=getattr(request.state, "request_id", None) or str(uuid4()),
             details={"errors": validation_details},
         )
     )

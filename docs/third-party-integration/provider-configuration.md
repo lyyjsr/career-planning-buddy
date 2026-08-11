@@ -29,6 +29,22 @@
 
 `APP_ENV=production` 禁止 Planning LLM、Search 或 Embedding 使用 Mock。`EVAL_PROVIDER_MODE=live` 要求真实 Planning LLM。Judge 选择 `openai_compatible` 时必须使用完整的独立 Judge 配置。
 
+## LLM Provider Profile 与任务模型
+
+`LLM_PROVIDER` 控制 Mock/真实运行模式；真实模式下用 `LLM_PROVIDER_NAME` 声明供应商能力：
+`openai`、`zhipu`、`deepseek`、`openai_compatible`。`auto` 仅用于兼容旧配置，部署环境推荐
+显式填写，避免兼容网关被错误识别。
+
+`LLM_MODEL` 是默认模型。以下可选字段只覆盖对应任务，留空时回退到默认模型：
+
+- `LLM_PLANNING_MODEL`；
+- `LLM_GOAL_UNDERSTANDING_MODEL`；
+- `LLM_EVIDENCE_DISTILLATION_MODEL`。
+
+三个任务分别通过对应的 `*_REASONING=off|auto` 控制推理。结构化抽取和修复默认 `off`，
+以降低延迟和无效 reasoning token；Provider Profile 负责转换成 GLM/DeepSeek 支持的参数。
+统一协议、能力与观测边界见[统一 LLM Provider 与调用观测设计](../architecture/llm-provider-and-telemetry.md)。
+
 ## Docker 启动
 
 Mock 或远程 API Provider：

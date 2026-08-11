@@ -22,6 +22,7 @@ from app.agent.finalizer import AgentRunFinalizer
 from app.agent.graph import GraphFactory, load_profile
 from app.agent.node_runner import NodeRunner
 from app.core.database import AsyncSessionFactory, session_transaction
+from app.core.telemetry import bind_telemetry_context
 from app.harness.budget import BudgetGuard, CancellationToken
 from app.harness.events import EventRecorder
 from app.models.agent_run import AgentRun, AgentStep
@@ -148,6 +149,17 @@ class AgentRunExecutor:
         await self._execute_claimed(run, config)
 
     async def _execute_claimed(
+        self,
+        run: AgentRun,
+        config: RuntimeConfigSnapshot | None,
+    ) -> None:
+        with bind_telemetry_context(
+            trace_id=f"agent-run:{run.id}",
+            run_id=str(run.id),
+        ):
+            await self._execute_claimed_in_context(run, config)
+
+    async def _execute_claimed_in_context(
         self,
         run: AgentRun,
         config: RuntimeConfigSnapshot | None,

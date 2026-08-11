@@ -15,6 +15,7 @@ from app.providers.goal_understanding import (
     build_goal_understanding_provider,
 )
 from app.providers.llm import PlanningProvider, build_planning_provider
+from app.providers.llm_client import LLMClient, build_llm_client
 from app.providers.search import SearchProvider, build_search_provider
 from app.tools.registry import ToolRegistry, build_tool_registry
 
@@ -29,6 +30,11 @@ class RuntimeProviderRegistry:
     search: SearchProvider
     evidence_distillation: EvidenceDistillationProvider
     tools: ToolRegistry
+    llm_client: LLMClient | None = None
+
+    async def aclose(self) -> None:
+        if self.llm_client is not None:
+            await self.llm_client.aclose()
 
 
 def build_runtime_provider_registry(
@@ -39,16 +45,20 @@ def build_runtime_provider_registry(
     """Build each runtime Provider exactly once for one application instance."""
     embedding = build_embedding_provider(settings)
     search = build_search_provider(settings)
+    llm_client = build_llm_client(settings) if settings.llm_provider != "mock" else None
     return RuntimeProviderRegistry(
-        planning=build_planning_provider(settings),
-        goal_understanding=build_goal_understanding_provider(settings),
+        planning=build_planning_provider(settings, client=llm_client),
+        goal_understanding=build_goal_understanding_provider(settings, client=llm_client),
         embedding=embedding,
         search=search,
-        evidence_distillation=build_evidence_distillation_provider(settings),
+        evidence_distillation=build_evidence_distillation_provider(
+            settings, client=llm_client
+        ),
         tools=build_tool_registry(
             settings=settings,
             session_factory=session_factory,
             embedding_provider=embedding,
             search_provider=search,
         ),
+        llm_client=llm_client,
     )

@@ -47,9 +47,22 @@ class Settings(BaseSettings):
     agent_graph_version: str = Field(default="stage6b-v1", min_length=1, max_length=64)
     agent_feature_stage: int = Field(default=6, ge=4, le=6)
     llm_provider: Literal["mock", "openai_compatible"] = "mock"
+    llm_provider_name: Literal[
+        "auto", "openai", "zhipu", "deepseek", "openai_compatible"
+    ] = "auto"
     llm_api_key: SecretStr | None = Field(default=None, min_length=1)
     llm_base_url: AnyHttpUrl | None = None
     llm_model: str | None = Field(default=None, min_length=1, max_length=128)
+    llm_planning_model: str | None = Field(default=None, min_length=1, max_length=128)
+    llm_goal_understanding_model: str | None = Field(
+        default=None, min_length=1, max_length=128
+    )
+    llm_evidence_distillation_model: str | None = Field(
+        default=None, min_length=1, max_length=128
+    )
+    llm_planning_reasoning: Literal["off", "auto"] = "off"
+    llm_goal_understanding_reasoning: Literal["off", "auto"] = "off"
+    llm_evidence_distillation_reasoning: Literal["off", "auto"] = "off"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
     search_provider: Literal["mock", "baidu"] = "mock"
     baidu_search_api_key: SecretStr | None = Field(default=None, min_length=1)
@@ -154,6 +167,9 @@ class Settings(BaseSettings):
         "llm_api_key",
         "llm_base_url",
         "llm_model",
+        "llm_planning_model",
+        "llm_goal_understanding_model",
+        "llm_evidence_distillation_model",
         "judge_llm_api_key",
         "judge_llm_base_url",
         "judge_llm_model",
