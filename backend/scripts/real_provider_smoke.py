@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -68,7 +68,7 @@ async def _run_in_transaction(
 ) -> dict[str, object]:
     from app.agent.executor import AgentRunExecutor
     from app.core.security import TokenService
-    from app.models.plan import Plan
+    from app.models.plan import Plan, Task
     from app.schemas.enums import CareerStage, GoalType, SkillLevel
     from app.schemas.profile import ProfilePutRequest
     from app.schemas.reviews import ReviewCreateRequest
@@ -108,6 +108,8 @@ async def _run_in_transaction(
                 time_budget_minutes=60,
                 skill_level=SkillLevel.INTERMEDIATE,
                 skill_summary="FastAPI, PostgreSQL, and deterministic Agent Runtime",
+                start_date=datetime.now(UTC).date(),
+                deadline=datetime.now(UTC).date() + timedelta(days=27),
             ),
             idempotency_key="real-provider-smoke-profile",
         )
@@ -129,6 +131,21 @@ async def _run_in_transaction(
         source_plan = await session.scalar(select(Plan).where(Plan.source_run_id == create_run_id))
         if source_plan is None:
             raise SmokeRunError("SMOKE_PLAN_NOT_PERSISTED", stage="create_plan")
+
+        # Replanning is a weekly settlement action. Close the generated fixed cycle
+        # before exercising the review-to-next-week smoke path.
+        source_tasks = list(
+            await session.scalars(select(Task).where(Task.plan_id == source_plan.id))
+        )
+        settled_at = datetime.now(UTC)
+        for task in source_tasks:
+            task.state = "completed"
+            task.actual_minutes = task.estimated_minutes
+            task.started_at = settled_at
+            task.completed_at = settled_at
+        source_plan.status = "completed"
+        source_plan.updated_at = settled_at
+        await session.flush()
 
         review_service = ReviewService(session, settings, deferred)
         review = await review_service.create(

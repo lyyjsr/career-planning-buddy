@@ -15,7 +15,7 @@ from app.schemas.enums import (
     SkillLevel,
     TaskStatus,
 )
-from app.schemas.profile import ProfilePatchRequest, ProfilePutRequest
+from app.schemas.profile import ProfilePatchRequest, ProfilePutRequest, ProfileResponse
 
 
 def test_stage_one_enums_match_contract_values() -> None:
@@ -89,6 +89,8 @@ def test_profile_time_budget_is_bounded(minutes: int) -> None:
             stage=CareerStage.PREPARING,
             time_budget_minutes=minutes,
             skill_level=SkillLevel.INTERMEDIATE,
+            start_date=datetime.now(UTC).date(),
+            deadline=datetime.now(UTC).date() + timedelta(days=27),
         )
 
 
@@ -99,8 +101,61 @@ def test_profile_deadline_cannot_be_in_the_past() -> None:
             stage=CareerStage.PREPARING,
             time_budget_minutes=120,
             skill_level=SkillLevel.INTERMEDIATE,
+            start_date=datetime.now(UTC).date(),
             deadline=datetime.now(UTC).date() - timedelta(days=1),
         )
+
+
+def test_profile_dates_are_required_and_period_is_bounded_to_eight_weeks() -> None:
+    base = {
+        "goal_type": "agent_app",
+        "stage": "preparing",
+        "time_budget_minutes": 120,
+        "skill_level": "intermediate",
+        "start_date": datetime.now(UTC).date().isoformat(),
+    }
+    with pytest.raises(ValidationError, match="Field required"):
+        ProfilePutRequest.model_validate(base)
+    with pytest.raises(ValidationError, match="planning period cannot be more than 8 weeks"):
+        ProfilePutRequest.model_validate(
+            {
+                **base,
+                "deadline": (datetime.now(UTC).date() + timedelta(days=56)).isoformat(),
+            }
+        )
+
+
+def test_profile_response_can_read_an_expired_historical_deadline() -> None:
+    response = ProfileResponse(
+        goal_type=GoalType.AGENT_APP,
+        stage=CareerStage.PREPARING,
+        time_budget_minutes=120,
+        skill_level=SkillLevel.INTERMEDIATE,
+        start_date=datetime.now(UTC).date() - timedelta(days=2),
+        deadline=datetime.now(UTC).date() - timedelta(days=1),
+        version=1,
+    )
+
+    assert response.deadline < datetime.now(UTC).date()
+
+
+def test_profile_patch_cannot_clear_deadline() -> None:
+    with pytest.raises(ValidationError, match="cannot be cleared"):
+        ProfilePatchRequest.model_validate({"version": 1, "deadline": None})
+
+
+def test_profile_period_requires_start_before_end() -> None:
+    with pytest.raises(ValidationError, match="start_date must be on or before"):
+        ProfilePutRequest(
+            goal_type=GoalType.AGENT_APP,
+            stage=CareerStage.PREPARING,
+            time_budget_minutes=120,
+            skill_level=SkillLevel.INTERMEDIATE,
+            start_date=datetime.now(UTC).date() + timedelta(days=2),
+            deadline=datetime.now(UTC).date() + timedelta(days=1),
+        )
+    with pytest.raises(ValidationError, match="start_date is required"):
+        ProfilePatchRequest.model_validate({"version": 1, "start_date": None})
 
 
 def test_profile_preferences_reject_unknown_fields() -> None:

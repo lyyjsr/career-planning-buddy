@@ -20,7 +20,8 @@ const profile: ProfileResponse = {
   time_budget_minutes: 60,
   skill_level: "intermediate",
   skill_summary: "已经完成 Agent 项目主链路",
-  deadline: "2026-10-31",
+  start_date: "2026-08-11",
+  deadline: "2026-09-30",
   preferences: { target_companies: [], preferred_time_slot: null, weekly_available_days: [] },
   version: 1,
 };
@@ -60,7 +61,11 @@ describe("ProfileSettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并整理重新规划目标" }));
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({ time_budget_minutes: 90 }),
+      payload: expect.objectContaining({
+        time_budget_minutes: 90,
+        start_date: "2026-08-11",
+        deadline: "2026-09-30",
+      }),
     })));
     await waitFor(() => expect(createGoalBrief).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({

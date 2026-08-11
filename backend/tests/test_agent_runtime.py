@@ -65,6 +65,8 @@ async def create_user(session: AsyncSession, *, with_profile: bool = True) -> UU
                 time_budget_minutes=90,
                 skill_level=SkillLevel.INTERMEDIATE,
                 skill_summary="FastAPI and PostgreSQL",
+                start_date=datetime.now(UTC).date(),
+                deadline=datetime.now(UTC).date() + timedelta(days=34),
             ),
             idempotency_key=f"profile-{user.id}",
         )

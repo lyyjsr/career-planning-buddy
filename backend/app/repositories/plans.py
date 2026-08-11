@@ -143,8 +143,8 @@ class PlanRepository:
             .where(Task.user_id == user_id)
             .order_by(
                 case(
-                    (Task.state == "completed", 0),
-                    (Task.state == "abandoned", 1),
+                    (Task.state == "abandoned", 0),
+                    (Task.state == "completed", 1),
                     (Task.state == "in_progress", 2),
                     else_=3,
                 ),

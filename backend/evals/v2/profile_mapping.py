@@ -13,6 +13,7 @@ populated ``ProfilePutRequest`` from an ``EvalScenario``. ``stage`` and
 passed through unchanged.
 """
 
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
 from app.schemas.enums import CareerStage, GoalType, SkillLevel
@@ -60,4 +61,6 @@ def scenario_to_profile_payload(scenario: EvalScenario) -> ProfilePutRequest:
         time_budget_minutes=profile.time_budget_minutes,
         skill_level=SkillLevel(profile.skill_level),
         skill_summary=f"eval-profile:{profile.goal_type}",
+        start_date=datetime.now(UTC).date(),
+        deadline=datetime.now(UTC).date() + timedelta(days=27),
     )

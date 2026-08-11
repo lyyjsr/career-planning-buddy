@@ -113,6 +113,17 @@ class GoalBriefService:
                     message="complete the career profile before defining a plan",
                     status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 )
+            if (
+                profile.start_date is None
+                or profile.deadline is None
+                or profile.start_date > profile.deadline
+                or profile.deadline < datetime.now(UTC).date()
+            ):
+                raise AppError(
+                    code="VALIDATION_PROFILE_DEADLINE_REQUIRED",
+                    message="set a current target date before defining a plan",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
         extraction, method, model_id = await self._extract(payload.message)
         try:
             async with session_transaction(self._session):
@@ -215,6 +226,19 @@ class GoalBriefService:
                         code="STATE_GOAL_BRIEF_NOT_READY",
                         message="answer the remaining goal questions before confirmation",
                         status_code=HTTPStatus.CONFLICT,
+                    )
+                profile = await self._profiles.get_for_user(user_id)
+                if (
+                    profile is None
+                    or profile.start_date is None
+                    or profile.deadline is None
+                    or profile.start_date > profile.deadline
+                    or profile.deadline < datetime.now(UTC).date()
+                ):
+                    raise AppError(
+                        code="VALIDATION_PROFILE_DEADLINE_REQUIRED",
+                        message="set a current target date before confirming the plan",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                     )
                 run = await self._runs_service.create(
                     user_id=user_id,
@@ -414,7 +438,8 @@ class GoalBriefService:
             f"总体周期 {brief.duration_weeks} 周；能力重点：{capability_focus}；"
             f"技术栈：{tech_stack}；交付物：{deliverables}；"
             f"成功标准：{success_criteria}。"
-            "请生成总体路线，并展开从今天开始滚动未来 7 天的具体任务。"
+            "请生成截至目标日期的总体路线，并展开从开始日期起最多 7 天的具体任务；"
+            "最后不足 7 天时不得越过目标日期补位。"
         )
 
     @staticmethod

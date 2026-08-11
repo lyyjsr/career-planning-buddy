@@ -10,7 +10,7 @@ from app.models.evidence import (
     SearchSource,
 )
 from app.models.goal_brief import GoalBrief
-from app.models.plan import CompanionMessage, Plan, Task
+from app.models.plan import CompanionMessage, Plan, Task, TaskAdjustmentProposal
 from app.models.provider_call import (
     EvalProviderFixtureBundle,
     EvalProviderFixtureItem,
@@ -40,6 +40,7 @@ __all__ = [
     "Review",
     "SearchSource",
     "Task",
+    "TaskAdjustmentProposal",
     "ToolCall",
     "User",
     "UserProfile",

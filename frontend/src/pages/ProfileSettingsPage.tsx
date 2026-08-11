@@ -17,6 +17,24 @@ import { GOAL_LABELS, SKILL_LABELS, STAGE_LABELS } from "@/lib/labels";
 
 const TIME_OPTIONS = [30, 45, 60, 90, 120];
 
+function dateInputValue(offsetDays: number): string {
+  const value = new Date();
+  value.setDate(value.getDate() + offsetDays);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: string, offsetDays: number): string {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function ProfileSettingsPage(): JSX.Element {
   const profile = useProfile();
   const me = useMe();
@@ -28,6 +46,7 @@ export function ProfileSettingsPage(): JSX.Element {
   const [stage, setStage] = useState<CareerStage>("preparing");
   const [skillLevel, setSkillLevel] = useState<SkillLevel>("intermediate");
   const [timeBudget, setTimeBudget] = useState(60);
+  const [startDate, setStartDate] = useState("");
   const [deadline, setDeadline] = useState("");
   const [skillSummary, setSkillSummary] = useState("");
 
@@ -37,6 +56,7 @@ export function ProfileSettingsPage(): JSX.Element {
     setStage(profile.data.stage);
     setSkillLevel(profile.data.skill_level);
     setTimeBudget(profile.data.time_budget_minutes);
+    setStartDate(profile.data.start_date ?? "");
     setDeadline(profile.data.deadline ?? "");
     setSkillSummary(profile.data.skill_summary ?? "");
   }, [profile.data]);
@@ -53,7 +73,7 @@ export function ProfileSettingsPage(): JSX.Element {
   const isPending = patchProfile.isPending || createGoalBrief.isPending;
 
   async function save(regeneratePlan: boolean): Promise<void> {
-    if (profile.data === undefined || isPending) return;
+    if (profile.data === undefined || isPending || startDate.length === 0 || deadline.length === 0 || startDate > deadline) return;
     try {
       const updated = await patchProfile.mutateAsync({
         payload: {
@@ -62,7 +82,8 @@ export function ProfileSettingsPage(): JSX.Element {
           stage,
           skill_level: skillLevel,
           time_budget_minutes: timeBudget,
-          deadline: deadline || null,
+          start_date: startDate,
+          deadline,
           skill_summary: skillSummary.trim() || null,
         },
         idempotencyKey: `profile-patch-${profile.data.version}-${regeneratePlan ? "replan" : "save"}`,
@@ -163,10 +184,7 @@ export function ProfileSettingsPage(): JSX.Element {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="settings-deadline">目标日期（可选）</Label>
-              <Input id="settings-deadline" type="date" min={new Date().toISOString().slice(0, 10)} value={deadline} onChange={(event) => setDeadline(event.target.value)} />
-            </div>
+            <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="settings-start-date">开始日期</Label><Input id="settings-start-date" type="date" required value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div><div className="space-y-2"><Label htmlFor="settings-deadline">结束日期</Label><Input id="settings-deadline" type="date" required min={startDate || dateInputValue(0)} max={startDate ? addDays(startDate, 55) : undefined} value={deadline} onChange={(event) => setDeadline(event.target.value)} /></div><p className="text-xs text-muted-foreground sm:col-span-2">必填。系统只会在这个时间段内安排任务，最长 8 周。</p></div>
 
             <div className="space-y-2">
               <Label htmlFor="settings-summary">技能与背景（可选）</Label>
@@ -182,11 +200,11 @@ export function ProfileSettingsPage(): JSX.Element {
 
             <div className="flex flex-col gap-2 sm:flex-row">
               {sourcePlan !== null && (
-                <Button type="button" variant="outline" onClick={() => void save(false)} disabled={isPending || timeBudget < 15 || timeBudget > 480}>
+                <Button type="button" variant="outline" onClick={() => void save(false)} disabled={isPending || timeBudget < 15 || timeBudget > 480 || startDate.length === 0 || deadline.length === 0 || startDate > deadline}>
                   仅保存资料
                 </Button>
               )}
-              <Button type="button" onClick={() => void save(sourcePlan !== null)} disabled={isPending || timeBudget < 15 || timeBudget > 480}>
+              <Button type="button" onClick={() => void save(sourcePlan !== null)} disabled={isPending || timeBudget < 15 || timeBudget > 480 || startDate.length === 0 || deadline.length === 0 || startDate > deadline}>
                 {isPending ? "处理中…" : sourcePlan !== null ? "保存并整理重新规划目标" : "保存调整"}
               </Button>
             </div>

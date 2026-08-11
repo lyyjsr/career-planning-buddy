@@ -15,7 +15,8 @@
   "time_budget_minutes": 120,
   "skill_level": "intermediate",
   "skill_summary": "熟悉 FastAPI、RAG 和基础 Agent 开发",
-  "deadline": "2026-10-31",
+  "start_date": "2026-09-01",
+  "deadline": "2026-10-26",
   "preferences": {
     "target_companies": ["字节跳动"],
     "preferred_time_slot": "evening",
@@ -24,7 +25,7 @@
 }
 ```
 
-必填：goal_type、stage、time_budget_minutes、skill_level。
+必填：goal_type、stage、time_budget_minutes、skill_level、start_date、deadline。
 
 ## PATCH /api/v1/profile
 
@@ -43,7 +44,9 @@
 ## 约束
 
 - `time_budget_minutes`: 15~480；
-- `deadline` 不能早于当前日期；
+- `start_date` 与 `deadline` 共同定义用户确认的闭区间；`start_date <= deadline`，区间最长 8 周；
+- 首次计划从 `max(本地今日, start_date)` 开始，任何任务都不得早于开始日期或晚于结束日期；
+- PATCH 不允许清空开始/结束日期；历史上缺少任一日期或结束日期已经过去的画像会被视为未完成，并重新进入资料补全页；历史值仍可读取用于表单预填；
 - `preferences` 只允许已定义字段；
 - version 冲突返回 409；
 - 请求不允许 user_id。

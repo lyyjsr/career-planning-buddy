@@ -16,7 +16,7 @@ run_id、user_id、validated `PlanCandidate`、`CompanionMessageCandidate`、evi
 2. 再次确认 Run 为 running、未请求取消、未超过 Deadline；
 3. replan 时在当前事务内把旧 generated/active/completed 来源 Plan 更新为 archived；若后续失败，事务整体回滚，旧计划状态恢复；
 4. 创建新 Plan(generated, parent_plan_id=旧计划 id)；
-5. 批量创建当前七天执行表的 Tasks；
+5. 批量创建当前固定周期（1~7 天）的 Tasks；
 6. 创建 CompanionMessage；
 7. 校验并写入 `plans.evidence_refs_json`，引用本 Run/当前用户可用的 SearchSource、Memory、ExperienceAtom；
 8. 把 persist 对应 `agent_steps` 更新为 completed，并写 `node.completed(persist)`；

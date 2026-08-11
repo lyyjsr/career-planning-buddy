@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.evidence import Memory, MemoryCandidate
@@ -161,6 +161,19 @@ class MemoryRepository:
             .limit(1)
         )
         return candidate_id is not None
+
+    async def delete_pending_candidates_for_review(
+        self, *, user_id: UUID, review_id: UUID
+    ) -> None:
+        await self._session.execute(
+            delete(MemoryCandidate).where(
+                MemoryCandidate.user_id == user_id,
+                MemoryCandidate.status == "pending",
+                MemoryCandidate.content_json["source_review_id"].as_string()
+                == str(review_id),
+            )
+        )
+        await self._session.flush()
 
     @staticmethod
     def expire_if_needed(candidate: MemoryCandidate) -> None:

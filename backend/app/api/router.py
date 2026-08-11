@@ -10,7 +10,7 @@ from app.api.goal_briefs import router as goal_briefs_router
 from app.api.health import router as health_router
 from app.api.memories import router as memories_router
 from app.api.pairwise_calibration import router as pairwise_router
-from app.api.plans import plans_router, tasks_router
+from app.api.plans import plans_router, task_adjustments_router, tasks_router
 from app.api.profile import router as profile_router
 from app.api.reviews import router as reviews_router
 
@@ -24,6 +24,7 @@ api_v1_router.include_router(goal_briefs_router)
 api_v1_router.include_router(agent_runs_router)
 api_v1_router.include_router(plans_router)
 api_v1_router.include_router(tasks_router)
+api_v1_router.include_router(task_adjustments_router)
 api_v1_router.include_router(reviews_router)
 api_v1_router.include_router(memories_router)
 api_v1_router.include_router(eval_router)

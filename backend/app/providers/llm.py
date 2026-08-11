@@ -40,6 +40,12 @@ from app.schemas.enums import GoalType, ReplanMode, TaskType
 from app.tools.contracts import ModelToolSpec
 
 
+def _action_day_count(context: PlanningContext) -> int:
+    window = context.planning_window
+    remaining = (window.horizon_end - window.planning_date).days + 1
+    return max(1, min(7, remaining))
+
+
 class PlanningProvider(Protocol):
     async def generate_agent_turn(
         self,
@@ -703,6 +709,7 @@ class MockPlanningProvider:
                 "第一周结论，包含岗位要求清单、前三项差距和下周方向",
             ),
         ]
+        cycle_days = _action_day_count(context)
         minutes = max(5, min(45, context.time_budget_minutes))
         tasks = [
             TaskCandidate(
@@ -718,7 +725,7 @@ class MockPlanningProvider:
                 rationale=f"服务第1周目标“{first_week_focus}”并形成可验证证据",
             )
             for day_offset, (title, task_type, starter_action, deliverable) in enumerate(
-                daily_templates
+                daily_templates[:cycle_days]
             )
         ]
         adjustment_reason = None
@@ -903,7 +910,7 @@ class PairSmokePlanningProvider(MockPlanningProvider):
                     ),
                     rationale="把准备动作压缩为最小可展示单位",
                 )
-                for day in range(7)
+                for day in range(_action_day_count(context))
             ]
             summary = (
                 f"[compact_v1] 七天精简版本:每天闭环一个高杠杆增量,"
@@ -933,7 +940,9 @@ class PairSmokePlanningProvider(MockPlanningProvider):
                     estimated_minutes=max(5, min(30, context.time_budget_minutes)),
                     rationale="按岗位差距、实践证据、表达和复盘的显式链条推进",
                 )
-                for day, (title, task_type, deliverable) in enumerate(structured_templates)
+                for day, (title, task_type, deliverable) in enumerate(
+                    structured_templates[:_action_day_count(context)]
+                )
             ]
             summary = (
                 f"[structured_v1] 七天结构化版本:本周按差距→实践→表达→复盘"

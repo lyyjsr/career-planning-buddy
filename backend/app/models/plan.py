@@ -23,7 +23,7 @@ from app.core.database import Base
 
 
 class Plan(Base):
-    """Versioned medium-term direction plus one rolling seven-day action schedule."""
+    """Versioned direction plus a fixed cycle of up to seven action days."""
 
     __tablename__ = "plans"
     __table_args__ = (
@@ -166,6 +166,66 @@ class Task(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class TaskAdjustmentProposal(Base):
+    """Auditable manual or model-proposed change to one pending Task."""
+
+    __tablename__ = "task_adjustment_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "idempotency_key", name="uq_task_adjustments_user_idempotency"
+        ),
+        CheckConstraint(
+            "status IN ('pending','applied','rejected')",
+            name="ck_task_adjustments_status",
+        ),
+        CheckConstraint(
+            "generation_method IN ('manual','rule','model','rule_fallback')",
+            name="ck_task_adjustments_generation_method",
+        ),
+        CheckConstraint("version >= 1", name="ck_task_adjustments_version"),
+        Index("ix_task_adjustments_task_created", "task_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("plans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    request_text: Mapped[str] = mapped_column(String(1000), nullable=False)
+    original_task_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    proposed_patch_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    rationale: Mapped[str] = mapped_column(String(500), nullable=False)
+    generation_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_id: Mapped[str | None] = mapped_column(String(128))
+    task_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

@@ -49,11 +49,11 @@ class PlanningContext(BaseModel):
 ## 规划窗口
 
 - 首次规划或用户手动即时调整时，`planning_date` 使用用户时区的本地日期；
-- 从 Review 执行 `start-next-plan` 时，`planning_date=max(用户本地今日, review_date + 1 天)`，避免复盘后又生成同一天任务；
-- 用户明确“未来 N 周”时，规则解析 `requested_horizon_weeks`，范围 1~8；
-- 未明确时，优先根据 profile.deadline 计算，最多展开 8 周；
-- 没有 deadline 时默认 4 周；
-- `horizon_start=planning_date`，`horizon_end` 按周数确定并冻结到 input snapshot；
+- 从 Review 执行 `start-next-plan` 时，`planning_date=max(用户本地今日, source_plan.plan_date + 7 天)`；日期始终按固定周边界推进，不按复盘日滚动补位；
+- `profile.start_date` 与 `profile.deadline` 必填并形成用户确认的闭区间，最长为 8 周；用户请求中的周数只作意图参考，不能覆盖日期边界；
+- 首次 `planning_date=max(用户本地今日, profile.start_date)`；续接也不得早于 start_date；
+- `horizon_start=planning_date`，`horizon_end=profile.deadline` 并冻结到 input snapshot；
+- 若最终周期距离 `horizon_end` 少于 7 天，只生成剩余 1~7 天；`planning_date > deadline` 时拒绝生成；
 - Agent 不得自行扩大或缩短窗口。
 
 ## 数据来源与上限
@@ -101,8 +101,8 @@ Profile > planning window > source/active plan > completed facts > 当前未完�
 - 用户隔离；
 - create_plan/continue/adjust 三种上下文；
 - source_plan 越权；
-- 5 周解析、deadline 推导、默认 4 周与 8 周上限；
-- 当天 Review 触发 next plan 时 planning_date 自动进入次日；
+- deadline 精确收口、最终短周期与 8 周上限；
+- Review 触发 next plan 时 planning_date 按 source plan 的固定第 8 天推进；
 - 预算裁剪稳定且确定；
 - 快照在原数据改变后仍不变；
 - 高风险敏感字段不进入 snapshot。

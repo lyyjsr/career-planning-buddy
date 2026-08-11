@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskResponse } from "@/api/types";
@@ -38,7 +39,11 @@ afterEach(() => {
 
 describe("WeeklyTaskSchedule", () => {
   it("shows seven dates and keeps completion attached to its scheduled day", () => {
-    render(<WeeklyTaskSchedule startDate="2026-08-10" tasks={[task]} />);
+    render(
+      <MemoryRouter>
+        <WeeklyTaskSchedule startDate="2026-08-10" tasks={[task]} />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByText("梳理岗位要求")).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
@@ -46,6 +51,10 @@ describe("WeeklyTaskSchedule", () => {
     expect(screen.getByText("岗位要求清单")).toBeInTheDocument();
     expect(screen.getByText("打开岗位描述")).toBeInTheDocument();
     expect(screen.getByText("先明确岗位要求，再决定项目补强顺序")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看与调整" })).toHaveAttribute(
+      "href",
+      "/journey/plan-1/day/2026-08-10",
+    );
     expect(screen.getAllByText("当天暂无安排")).toHaveLength(6);
   });
 });

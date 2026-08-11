@@ -509,10 +509,10 @@ class FixedPlanningGraph:
         plan_context = self._plan_context(source_plan) if source_plan else None
         review_context = self._review_context(source_review) if source_review else None
         planning_date = None
-        if source_review is not None:
+        if source_plan is not None:
             planning_date = max(
                 datetime.now(UTC).date(),
-                source_review.review_date + timedelta(days=1),
+                source_plan.plan_date + timedelta(days=7),
             )
         context = build_planning_context(
             profile=profile,

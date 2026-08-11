@@ -24,7 +24,7 @@ from app.core.database import Base
 
 
 class Review(Base):
-    """One immutable daily review derived from persisted Task facts."""
+    """One versioned daily review derived from persisted Task facts."""
 
     __tablename__ = "reviews"
     __table_args__ = (
@@ -38,6 +38,7 @@ class Review(Base):
         CheckConstraint("mood BETWEEN 1 AND 5", name="ck_reviews_mood"),
         CheckConstraint("completed_count >= 0", name="ck_reviews_completed_count"),
         CheckConstraint("abandoned_count >= 0", name="ck_reviews_abandoned_count"),
+        CheckConstraint("version >= 1", name="ck_reviews_version"),
         Index("ix_reviews_user_date_created", "user_id", "review_date", "created_at"),
     )
 
@@ -73,6 +74,10 @@ class Review(Base):
         unique=True,
     )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

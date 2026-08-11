@@ -26,12 +26,12 @@ class ValidationReport(BaseModel):
 |---|---|
 | HORIZON_MATCH | plan_date/horizon 与 PlanningWindow 完全一致 |
 | WEEKLY_FOCUS | 1~8 条、week_index 连续，focus 与 success_signal 均不重复 |
-| FIRST_WEEK_ALIGNMENT | 七天任务的 rationale 均包含第 1 周 focus 原文，禁止提前混入后续周工作 |
-| TASK_COUNT | 当前七天执行表必须正好 7 个任务 |
+| FIRST_WEEK_ALIGNMENT | 当前周期任务的 rationale 均包含第 1 周 focus 原文，禁止提前混入后续周工作 |
+| TASK_COUNT | 执行表必须与剩余周期天数一致：通常 7 个，最终短周期为 1~7 个 |
 | TIME_BUDGET | 每个 scheduled_date 的总预计时间不超过每日 time_budget_minutes |
 | STARTER_ACTION | 每项有明确动作和对象 |
 | DELIVERABLE | 每项有可观测产物 |
-| SCHEDULE_DATE | 7 个 Task 必须分别覆盖 planning_date 起连续 7 天，每天正好 1 个 |
+| SCHEDULE_DATE | Task 必须每天正好 1 个，连续覆盖 planning_date 到 min(planning_date + 6 天, horizon_end) |
 | RECENT_DUPLICATE | 不重复近期已完成交付物 |
 | REPLAN_CONTINUITY | continue 保持方向并推进；adjust 保留 completed facts 并回应 blocker |
 | SOURCE_INTEGRITY | evidence_ref 在当前候选 Provider 调用的 visible refs 中且类型匹配 |

@@ -43,19 +43,31 @@ class ProfileFields(StrictModel):
     time_budget_minutes: int = Field(ge=15, le=480)
     skill_level: SkillLevel
     skill_summary: str | None = Field(default=None, max_length=2000)
+    start_date: date | None = None
     deadline: date | None = None
     preferences: ProfilePreferences = Field(default_factory=ProfilePreferences)
 
+class ProfilePutRequest(ProfileFields):
+    """Complete profile creation or replacement."""
+
+    start_date: date
+    deadline: date
+
     @field_validator("deadline")
     @classmethod
-    def validate_deadline(cls, value: date | None) -> date | None:
-        if value is not None and value < datetime.now(UTC).date():
+    def validate_deadline(cls, value: date) -> date:
+        today = datetime.now(UTC).date()
+        if value < today:
             raise ValueError("deadline cannot be earlier than today")
         return value
 
-
-class ProfilePutRequest(ProfileFields):
-    """Complete profile creation or replacement."""
+    @model_validator(mode="after")
+    def validate_period(self) -> "ProfilePutRequest":
+        if self.start_date > self.deadline:
+            raise ValueError("start_date must be on or before deadline")
+        if (self.deadline - self.start_date).days > 55:
+            raise ValueError("the planning period cannot be more than 8 weeks")
+        return self
 
 
 class ProfilePatchRequest(StrictModel):
@@ -67,13 +79,15 @@ class ProfilePatchRequest(StrictModel):
     time_budget_minutes: int | None = Field(default=None, ge=15, le=480)
     skill_level: SkillLevel | None = None
     skill_summary: str | None = Field(default=None, max_length=2000)
+    start_date: date | None = None
     deadline: date | None = None
     preferences: ProfilePreferences | None = None
 
     @field_validator("deadline")
     @classmethod
     def validate_deadline(cls, value: date | None) -> date | None:
-        if value is not None and value < datetime.now(UTC).date():
+        today = datetime.now(UTC).date()
+        if value is not None and value < today:
             raise ValueError("deadline cannot be earlier than today")
         return value
 
@@ -82,6 +96,10 @@ class ProfilePatchRequest(StrictModel):
         update_fields = self.model_fields_set - {"version"}
         if not update_fields:
             raise ValueError("at least one profile field must be supplied")
+        if "deadline" in update_fields and self.deadline is None:
+            raise ValueError("deadline is required and cannot be cleared")
+        if "start_date" in update_fields and self.start_date is None:
+            raise ValueError("start_date is required and cannot be cleared")
         required_fields = {
             "goal_type",
             "stage",

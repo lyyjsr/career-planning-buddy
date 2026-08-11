@@ -29,7 +29,8 @@ sequenceDiagram
 - 保留 overall_direction；
 - 延续 weekly_focus，推进下一可执行步骤；
 - 读取昨天 completed/abandoned facts；
-- 从下一 planning_date 开始滚动生成未来七天行动表；
+- 当前固定七天周期结束或全部任务结算后，从下一 planning_date 生成新的固定七天行动表；
+- 下一周期起点固定为来源计划 `plan_date + 7 天`；不得再使用 `review_date + 1 天`，提前结算只允许提前预览下一周期，不改变周边界；
 - 不需要伪造 adjustment_reason。
 
 ### adjust
@@ -39,7 +40,7 @@ sequenceDiagram
 - 保留已完成事实；
 - 可修改后续 weekly_focus，但不能未经确认改变 goal_type；
 - 必须给出 adjustment_reason；
-- 仍只滚动生成从下一 planning_date 开始的七天行动表。
+- 仍只生成从下一 planning_date 开始的固定七天行动表，不因每日完成滚动补位。
 
 ## 约束
 

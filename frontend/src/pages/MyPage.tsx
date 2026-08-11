@@ -64,7 +64,9 @@ export function MyPage(): JSX.Element {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Target className="h-4 w-4 text-primary" />
-              {profile.deadline === null ? "暂未设置截止日" : `目标日期 ${profile.deadline}`}
+              {profile.start_date === null || profile.deadline === null
+                ? "暂未设置完整时间段"
+                : `计划时间 ${profile.start_date} 至 ${profile.deadline}`}
             </div>
           </div>
           {profile.skill_summary !== null && (

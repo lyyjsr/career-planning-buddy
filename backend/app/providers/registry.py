@@ -17,6 +17,10 @@ from app.providers.goal_understanding import (
 from app.providers.llm import PlanningProvider, build_planning_provider
 from app.providers.llm_client import LLMClient, build_llm_client
 from app.providers.search import SearchProvider, build_search_provider
+from app.providers.task_adjustment import (
+    TaskAdjustmentProvider,
+    build_task_adjustment_provider,
+)
 from app.tools.registry import ToolRegistry, build_tool_registry
 
 
@@ -29,6 +33,7 @@ class RuntimeProviderRegistry:
     embedding: EmbeddingProvider
     search: SearchProvider
     evidence_distillation: EvidenceDistillationProvider
+    task_adjustment: TaskAdjustmentProvider
     tools: ToolRegistry
     llm_client: LLMClient | None = None
 
@@ -54,6 +59,7 @@ def build_runtime_provider_registry(
         evidence_distillation=build_evidence_distillation_provider(
             settings, client=llm_client
         ),
+        task_adjustment=build_task_adjustment_provider(settings, llm_client),
         tools=build_tool_registry(
             settings=settings,
             session_factory=session_factory,

@@ -15,7 +15,9 @@ from app.schemas.agent_runs import (
 from app.schemas.enums import CareerStage, GoalType, SkillLevel, TaskType
 
 
-def _profile() -> ProfileContext:
+def _profile(
+    *, start_date: date | None = None, deadline: date | None = None
+) -> ProfileContext:
     return ProfileContext(
         user_id=uuid4(),
         version=1,
@@ -23,6 +25,8 @@ def _profile() -> ProfileContext:
         stage=CareerStage.PREPARING,
         time_budget_minutes=60,
         skill_level=SkillLevel.INTERMEDIATE,
+        start_date=start_date,
+        deadline=deadline,
     )
 
 
@@ -181,3 +185,48 @@ def test_duplicate_day_fails_exact_daily_coverage() -> None:
 
     assert report.passed is False
     assert "SCHEDULE_DATE" in _failed_codes(report)
+
+
+def test_final_partial_cycle_ends_exactly_on_deadline() -> None:
+    planning_date = date.today()
+    context = build_planning_context(
+        profile=_profile(deadline=planning_date + timedelta(days=2)),
+        requested_horizon_weeks=8,
+        source_plan_id=None,
+        source_plan_version=None,
+        completed_facts=[],
+        planning_date=planning_date,
+    )
+    tasks = [
+        _task(
+            planning_date + timedelta(days=offset),
+            30,
+            title=f"day-{offset + 1}",
+            deliverable=f"deliverable-{offset + 1}",
+        )
+        for offset in range(3)
+    ]
+
+    report = validate_candidate(_candidate(context, tasks), context)
+
+    assert context.planning_window.horizon_end == planning_date + timedelta(days=2)
+    assert report.passed, _failed_codes(report)
+
+
+def test_future_user_period_delays_first_task_until_start_date() -> None:
+    today = date.today()
+    start_date = today + timedelta(days=3)
+    deadline = start_date + timedelta(days=9)
+
+    context = build_planning_context(
+        profile=_profile(start_date=start_date, deadline=deadline),
+        requested_horizon_weeks=None,
+        source_plan_id=None,
+        source_plan_version=None,
+        completed_facts=[],
+        planning_date=today,
+    )
+
+    assert context.planning_window.planning_date == start_date
+    assert context.planning_window.horizon_start == start_date
+    assert context.planning_window.horizon_end == deadline

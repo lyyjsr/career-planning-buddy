@@ -19,6 +19,7 @@ from app.harness.pairwise_sweep_executor import (
 from app.providers.embedding import EmbeddingProvider
 from app.providers.goal_understanding import GoalUnderstandingProvider
 from app.providers.registry import RuntimeProviderRegistry
+from app.providers.task_adjustment import TaskAdjustmentProvider
 from app.repositories.users import UserRepository
 from app.services.agent_runs import AgentRunService
 from app.services.auth import AuthService
@@ -29,6 +30,7 @@ from app.services.memories import MemoryService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
 from app.services.reviews import ReviewService
+from app.services.task_adjustments import TaskAdjustmentService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -42,6 +44,11 @@ def get_embedding_provider(request: Request) -> EmbeddingProvider:
 def get_goal_understanding_provider(request: Request) -> GoalUnderstandingProvider:
     providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
     return providers.goal_understanding
+
+
+def get_task_adjustment_provider(request: Request) -> TaskAdjustmentProvider:
+    providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
+    return providers.task_adjustment
 
 
 def get_token_service(settings: Annotated[Settings, Depends(get_settings)]) -> TokenService:
@@ -108,6 +115,13 @@ def get_review_service(
     executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> ReviewService:
     return ReviewService(session, settings, executor)
+
+
+def get_task_adjustment_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    provider: Annotated[TaskAdjustmentProvider, Depends(get_task_adjustment_provider)],
+) -> TaskAdjustmentService:
+    return TaskAdjustmentService(session, provider)
 
 
 def get_memory_service(

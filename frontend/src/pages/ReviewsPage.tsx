@@ -1,8 +1,10 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useMe } from "@/api/auth";
-import { useCreateReview, useReviews, useStartNextPlan } from "@/api/reviews";
+import { useCreateReview, useDeleteReview, useReviews, useStartNextPlan, useUpdateReview } from "@/api/reviews";
 import { useActivePlan } from "@/api/plans";
+import type { ActivePlanResponse, ReviewResponse } from "@/api/types";
+import { localDateIso } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +24,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { ReviewResponse } from "@/api/types";
 import { toUserFacingError } from "@/lib/errors";
 
 const MOOD_EMOJI = ["😞", "😕", "😐", "🙂", "😄"];
@@ -31,17 +32,36 @@ function moodLabel(mood: number): string {
   return MOOD_EMOJI[mood - 1] ?? "—";
 }
 
-function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }) {
+function ReviewForm({ planId, review, onClose }: { planId: string; review?: ReviewResponse; onClose: () => void }) {
   const today = new Date().toISOString().slice(0, 10);
   const createReview = useCreateReview();
-  const [mood, setMood] = useState(3);
-  const [blockers, setBlockers] = useState("");
-  const [adjustmentRequest, setAdjustmentRequest] = useState("");
-  const [freeText, setFreeText] = useState("");
-  const displayError = createReview.error === null ? null : toUserFacingError(createReview.error);
+  const updateReview = useUpdateReview();
+  const [mood, setMood] = useState(review?.mood ?? 3);
+  const [blockers, setBlockers] = useState(review?.blockers ?? "");
+  const [adjustmentRequest, setAdjustmentRequest] = useState(review?.adjustment_request ?? "");
+  const [freeText, setFreeText] = useState(review?.free_text ?? "");
+  const pending = createReview.isPending || updateReview.isPending;
+  const mutationError = createReview.error ?? updateReview.error;
+  const displayError = mutationError === null ? null : toUserFacingError(mutationError);
 
   function submit(): void {
-    if (createReview.isPending) return;
+    if (pending) return;
+    if (review !== undefined) {
+      updateReview.mutate(
+        {
+          reviewId: review.review_id,
+          payload: {
+            version: review.version,
+            mood,
+            blockers: blockers.trim() || null,
+            adjustment_request: adjustmentRequest.trim() || null,
+            free_text: freeText.trim() || null,
+          },
+        },
+        { onSuccess: () => onClose() },
+      );
+      return;
+    }
     createReview.mutate(
       {
         payload: {
@@ -62,8 +82,8 @@ function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>今日复盘</DialogTitle>
-          <DialogDescription>记录今天的状态，便于下一份计划做出调整。</DialogDescription>
+          <DialogTitle>{review === undefined ? "今日复盘" : "修改复盘"}</DialogTitle>
+          <DialogDescription>记录今天的状态；周中用于调整待办，周期结束后用于本周结算。</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -115,8 +135,8 @@ function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }
         </div>
         <DialogFooter>
           {displayError !== null && <p className="mr-auto text-sm text-destructive">{displayError.message}</p>}
-          <Button onClick={submit} disabled={createReview.isPending}>
-            {createReview.isPending ? "提交中…" : "提交复盘"}
+          <Button onClick={submit} disabled={pending}>
+            {pending ? "保存中…" : review === undefined ? "提交复盘" : "保存修改"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -126,10 +146,16 @@ function ReviewForm({ planId, onClose }: { planId: string; onClose: () => void }
 
 function ReviewItem({
   review,
+  canStartNext,
   onStartNext,
+  onEdit,
+  onDelete,
 }: {
   review: ReviewResponse;
+  canStartNext: boolean;
   onStartNext: (id: string) => void;
+  onEdit: (review: ReviewResponse) => void;
+  onDelete: (review: ReviewResponse) => void;
 }) {
   return (
     <Card>
@@ -166,14 +192,26 @@ function ReviewItem({
         )}
         <p className="text-muted-foreground">{review.companion_message}</p>
         {review.next_plan_run_id === null && (
+          <div className="flex gap-2 pt-1">
+            <Button variant="ghost" size="sm" onClick={() => onEdit(review)}>修改</Button>
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(review)}>删除</Button>
+          </div>
+        )}
+        {review.next_plan_run_id !== null && <p className="text-xs text-muted-foreground">该复盘已用于生成后续计划，现作为执行依据保留，不能再修改或删除。</p>}
+        {review.next_plan_run_id === null && canStartNext && (
           <Button
             variant="outline"
             size="sm"
             onClick={() => onStartNext(review.review_id)}
             className="mt-2"
           >
-            基于本次复盘生成下一份计划 →
+            完成本周结算并生成下一周 →
           </Button>
+        )}
+        {review.next_plan_run_id === null && !canStartNext && (
+          <p className="rounded-lg bg-muted/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            当前固定周周期仍在进行，不会提前替换整周计划。需要调整时，请进入对应日期修改待办。
+          </p>
         )}
       </CardContent>
     </Card>
@@ -185,7 +223,10 @@ export function ReviewsPage(): JSX.Element {
   const reviews = useReviews();
   const activePlan = useActivePlan();
   const startNext = useStartNextPlan();
+  const deleteReview = useDeleteReview();
   const [showForm, setShowForm] = useState(false);
+  const [editingReview, setEditingReview] = useState<ReviewResponse | null>(null);
+  const [deletingReview, setDeletingReview] = useState<ReviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -194,6 +235,9 @@ export function ReviewsPage(): JSX.Element {
     me.data?.profile_complete === true &&
     resolvedPlan !== null &&
     resolvedPlan !== undefined;
+  const canSettlePlan = resolvedPlan === null || resolvedPlan === undefined
+    ? false
+    : isFixedWeekClosed(resolvedPlan);
 
   function onStartNext(reviewId: string): void {
     if (startNext.isPending) return;
@@ -237,11 +281,17 @@ export function ReviewsPage(): JSX.Element {
 
       {error !== null && <p className="text-sm text-destructive">{error}</p>}
 
-      {showForm && activePlan.data !== undefined && activePlan.data !== null && (
+      {showForm && resolvedPlan !== undefined && resolvedPlan !== null && (
         <ReviewForm
-          planId={activePlan.data.plan_id}
+          planId={resolvedPlan.plan_id}
           onClose={() => setShowForm(false)}
         />
+      )}
+      {editingReview !== null && <ReviewForm planId={editingReview.plan_id} review={editingReview} onClose={() => setEditingReview(null)} />}
+      {deletingReview !== null && (
+        <Dialog open onOpenChange={(open) => !open && setDeletingReview(null)}>
+          <DialogContent><DialogHeader><DialogTitle>删除这条复盘？</DialogTitle><DialogDescription>删除后无法恢复，也不会再用于后续计划判断。</DialogDescription></DialogHeader>{deleteReview.error !== null && <p className="text-sm text-destructive">{toUserFacingError(deleteReview.error).message}</p>}<DialogFooter><Button variant="outline" onClick={() => setDeletingReview(null)}>取消</Button><Button variant="destructive" disabled={deleteReview.isPending} onClick={() => deleteReview.mutate(deletingReview.review_id, { onSuccess: () => setDeletingReview(null) })}>{deleteReview.isPending ? "删除中…" : "确认删除"}</Button></DialogFooter></DialogContent>
+        </Dialog>
       )}
 
       {!reviews.isLoading && (reviews.data?.items.length ?? 0) === 0 ? (
@@ -253,10 +303,33 @@ export function ReviewsPage(): JSX.Element {
       ) : (
         <div className="space-y-3">
           {(reviews.data?.items ?? []).map((r) => (
-            <ReviewItem key={r.review_id} review={r} onStartNext={onStartNext} />
+            <ReviewItem
+              key={r.review_id}
+              review={r}
+              canStartNext={
+                canSettlePlan
+                && resolvedPlan !== null
+                && resolvedPlan !== undefined
+                && r.plan_id === resolvedPlan.plan_id
+              }
+              onStartNext={onStartNext}
+              onEdit={setEditingReview}
+              onDelete={setDeletingReview}
+            />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function isFixedWeekClosed(plan: ActivePlanResponse): boolean {
+  if (plan.tasks.length > 0 && plan.tasks.every((task) => ["completed", "abandoned", "expired"].includes(task.state))) {
+    return true;
+  }
+  const cycleEnd = new Date(`${plan.plan_date}T00:00:00`);
+  cycleEnd.setDate(cycleEnd.getDate() + 6);
+  const horizonEnd = new Date(`${plan.horizon_end}T00:00:00`);
+  if (horizonEnd < cycleEnd) cycleEnd.setTime(horizonEnd.getTime());
+  return localDateIso() > localDateIso(cycleEnd);
 }

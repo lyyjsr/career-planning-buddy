@@ -33,12 +33,24 @@
 
 `next_plan_action`：
 
-- `continue`：方向不变，生成下一 planning_date 的行动批次；
+- `continue`：方向不变，在当前固定七天周期结算后生成下一 planning_date 的行动批次；
 - `adjust`：根据 blocker/时间/用户指令调整周重点和下一批任务。
 
 ## GET /api/v1/reviews
 
 Query：plan_id、date_from、date_to、cursor、limit。
+
+## GET /api/v1/reviews/{review_id}
+
+返回一条属于当前用户的完整复盘。
+
+## PATCH /api/v1/reviews/{review_id}
+
+通过 `version` 乐观锁修改 mood、blockers、adjustment_request、free_text；字段传 null 表示清空。修改后服务端重新计算 suggested_replan、replan_reason 和陪伴反馈，任务完成/放弃数量仍从数据库事实读取。
+
+## DELETE /api/v1/reviews/{review_id}
+
+删除尚未用于下一计划的复盘并返回 204。已经存在 `next_plan_run_id` 的复盘是后续计划的输入事实，修改或删除均返回 409 `STATE_REVIEW_ALREADY_CONSUMED`。
 
 ## POST /api/v1/reviews/{review_id}/start-next-plan
 
@@ -48,7 +60,7 @@ Query：plan_id、date_from、date_to、cursor、limit。
 
 - false 时创建 `hint_intent=replan, replan_mode=continue`；
 - true 或用户有 adjustment_request 时创建 `replan_mode=adjust`；
-- source_plan_id 固定使用 review.plan_id，source_review_id 使用当前 review；planning_date 由服务端设为 `max(local_today, review_date+1)`；
+- source_plan_id 固定使用 review.plan_id，source_review_id 使用当前 review；planning_date 沿固定周边界推进，并且必须落在用户 start_date/deadline 内；
 - 只有用户点击后才创建，不后台静默生成。
 
 Response 202：

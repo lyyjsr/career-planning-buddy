@@ -40,10 +40,10 @@ class ReviseDecision(BaseModel):
 ## 模板 fallback
 
 模板由程序根据 goal_type、planning window、time budget 和当前日期生成“保守方向 +
-完整周重点 + 当前七天行动表”：
+完整周重点 + 当前固定周期行动表”：
 
 - plan_date/horizon 必须来自 PlanningWindow；
-- 从 plan_date 起连续生成 7 个任务，每天 1 个，并且每项任务只推进其日期所属周重点；
+- 从 plan_date 起生成最多 7 个任务，每天 1 个；最终周期不得越过 horizon_end，并且每项任务只推进其日期所属周重点；
 - 时长不超过预算且至少 15 分钟；
 - 有明确 starter_action 和 deliverable；
 - 不引用外部来源；

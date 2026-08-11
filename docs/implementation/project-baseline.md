@@ -17,9 +17,9 @@
 ## 1. 核心用例
 
 ```text
-Guest 登录 → 建档 → 创建 Goal Brief → 补充信息并确认 → 创建 Agent Run → SSE 查看进度
-→ 获得多周方向与未来 7 天每日计划 → 完成当天任务 → 提交复盘 → 生成下一版 continue/adjust 计划
-→ 系统建议重规划 → 用户确认 → 产生新计划版本
+Guest 登录 → 选择开始/结束日期并建档 → 创建 Goal Brief → 补充信息并确认 → 创建 Agent Run → SSE 查看进度
+→ 获得多周方向与固定 7 天执行周期 → 完成当天任务 → 提交每日复盘并调整本周待办
+→ 周周期结算 → 用户确认 → 生成下一周；重大方向变化才提前产生新计划版本
 ```
 
 ## 2. 后端分层
@@ -91,6 +91,7 @@ generated/active → archived
 pending → in_progress → completed
 pending/in_progress → abandoned
 pending → expired
+completed → in_progress（仅当前未归档周期内由用户撤销误操作）
 ```
 
 ## 5. 运行时限制
@@ -102,7 +103,8 @@ pending → expired
 - 单 Run 默认截止时间 45 秒；
 - 单 Run 默认总 Token 预算 16000，单次输入 6000、输出 1500（均可配置）；
 - 结构化格式失败最多修复 1 次；业务规则失败最多使用专用 repair Prompt 修复 1 次；
-- 计划包含 1~8 周方向与互不重复的周重点；当前执行层展开未来 7 天、每天 1 个关键任务，每日预计时长不得超过用户预算；
+- 计划严格位于用户必填的开始/结束日期闭区间（最多 8 周）；当前执行层通常展开固定 7 天周期，最终周期可为剩余 1~7 天，每天 1 个关键任务，不因每日完成而滚动补位；每日预计时长不得超过用户预算；
+- `今天` 页面只承载当天任务、当天进度与复盘入口；固定七天安排、周重点和总体方向统一在 `路线` 页面查看，避免两个页面重复表达规划信息；
 - 取消和超时必须通过统一 Finalizer 写唯一最终状态及事件；
 - Run 冻结 graph/config snapshot，context_builder 后冻结 input snapshot；
 - 终态 result_kind 为 plan/clarification/safe_response/navigation；failed/cancelled 无结果。

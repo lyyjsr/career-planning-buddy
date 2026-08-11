@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useGuestLogin, useMe } from "@/api/auth";
-import { getAuthToken, setAuthToken } from "@/api/client";
+import { ApiError, getAuthToken, setAuthToken } from "@/api/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -9,6 +9,8 @@ export function LoginRoute(): JSX.Element {
   const guestLogin = useGuestLogin();
   const me = useMe();
   const hasStoredToken = getAuthToken() !== null;
+  const reauthAttempted = useRef(false);
+  const isUnauthorized = me.error instanceof ApiError && me.error.status === 401;
 
   // 首次进入：自动 guest 登录
   useEffect(() => {
@@ -18,11 +20,17 @@ export function LoginRoute(): JSX.Element {
   }, [guestLogin.isIdle, guestLogin.mutate, hasStoredToken]);
 
   useEffect(() => {
-    if (hasStoredToken && me.isError && guestLogin.isIdle) {
+    if (
+      hasStoredToken
+      && isUnauthorized
+      && !reauthAttempted.current
+      && guestLogin.isIdle
+    ) {
+      reauthAttempted.current = true;
       setAuthToken(null);
       guestLogin.mutate();
     }
-  }, [guestLogin.isIdle, guestLogin.mutate, hasStoredToken, me.isError]);
+  }, [guestLogin.isIdle, guestLogin.mutate, hasStoredToken, isUnauthorized]);
 
   if (me.data !== undefined && me.data !== null) {
     return <Navigate to={me.data.profile_complete ? "/today" : "/onboarding"} replace />;
@@ -38,6 +46,24 @@ export function LoginRoute(): JSX.Element {
           </CardHeader>
           <CardContent>
             <Button onClick={() => guestLogin.mutate()}>重试</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (me.isError && (!isUnauthorized || (reauthAttempted.current && guestLogin.isSuccess))) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>暂时无法加载账号</CardTitle>
+            <CardDescription>
+              登录已经完成，但用户信息加载失败。请稍后重试；如果问题持续，请检查后端日志。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => void me.refetch()}>重试加载</Button>
           </CardContent>
         </Card>
       </div>

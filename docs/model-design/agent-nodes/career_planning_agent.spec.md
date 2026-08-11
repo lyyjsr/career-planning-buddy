@@ -7,9 +7,9 @@
 产品输出分两层：
 
 1. **方向层**：面向 1~8 周的整体方向和每周重点；
-2. **行动层**：生成从 `planning_date` 开始的七天执行表，每天默认 1 个关键任务。
+2. **行动层**：生成从 `planning_date` 开始、最多七天且不越过目标日期的执行表，每天默认 1 个关键任务。
 
-这样既能回答“未来几周怎么准备”，又避免一次生成几十个很快失效的任务。次日通过来源计划和复盘生成新的计划版本。
+这样既能回答“到目标日期前怎么准备”，又避免一次生成几十个很快失效的任务。当前固定周期结算后，才通过来源计划和复盘生成下一版本。
 
 完整循环见 [`../agent-runtime/README.md`](../agent-runtime/README.md)，Tool 契约见 [`../tools/README.md`](../tools/README.md)。
 
@@ -78,7 +78,7 @@ class TaskCandidate(BaseModel):
     rationale: str | None = Field(default=None, max_length=500)
 ```
 
-`horizon_start/horizon_end` 必须等于 `PlanningContext.planning_window`。用户没有明确周期时，ContextBuilder 根据 profile.deadline 计算并最多展开 8 周；更远目标只在 overall_direction 中表达，不生成虚假的远期细节。
+`horizon_start/horizon_end` 必须等于 `PlanningContext.planning_window`，其中 `horizon_end` 精确等于必填的 profile.deadline，最长 8 周。
 
 ## Tool Calling 行为
 
@@ -94,9 +94,9 @@ class TaskCandidate(BaseModel):
 - `weekly_focus` 覆盖规划窗口，week_index 连续且不重复；
 - 每项 Task 按 `scheduled_date` 相对 `horizon_start` 计算所属 week_index，标题、启动动作、
   交付物和规划理由必须直接推进该周的 focus 与 success_signal，不得提前安排后续周工作；
-- 当前七天任务的 `rationale` 必须包含第 1 周 `focus` 原文，供规则校验器做确定性对齐检查；
-- 所有 Task 的 `scheduled_date` 必须落在从 `plan_date` 开始的七天行动窗口；
-- 七天执行表最多 7 个任务，每天的总时长不超过用户每日预算；
+- 当前周期任务的 `rationale` 必须包含第 1 周 `focus` 原文，供规则校验器做确定性对齐检查；
+- 所有 Task 的 `scheduled_date` 必须连续覆盖 `plan_date` 到 `min(plan_date + 6 天, horizon_end)`；
+- 执行表为 1~7 个任务，每天 1 个，每天的总时长不超过用户每日预算；
 - 每项 Task 的 `starter_action` 包含 2~3 个有对象、有数量或方法的有序步骤，`deliverable` 同时写明可量化产物和通过条件；
 - `evidence_refs` 只能引用产生当前候选的 Provider 调用实际可见的
   Memory/ExperienceAtom/SearchSource；Graph 不得自动补齐引用；
@@ -127,8 +127,8 @@ Trace 必须记录：prompt_version、实际 model_id、每次 call 的 token/la
 ## 测试
 
 - Stage 3 无 Tool 一次生成；
-- 5 周请求得到 5 个递进 weekly focus，同时只展开当前七天执行表；
-- 次日 continue 保持方向并推进下一步；
+- 5 周截止日期得到 5 个递进 weekly focus，同时只展开当前固定周期；
+- continue 按固定周边界保持方向并推进下一步；
 - adjust replan 保留 completed facts 并解释调整；
 - 两轮 Tool 后正常输出；
 - 未知 Tool、参数越界、重复 args_hash；

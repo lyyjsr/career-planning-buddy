@@ -33,6 +33,7 @@ from app.services.auth import AuthService
 from app.services.goal_briefs import GoalBriefService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
+from app.services.reviews import ReviewService
 
 router = APIRouter(tags=["auth"])
 
@@ -108,15 +109,27 @@ async def get_me(
         user_id, plan_id=None, date_from=None, date_to=None, cursor=None, limit=1
     )
     if latest_rows:
-        latest_review = ReviewResponse.model_validate(latest_rows[0], from_attributes=True)
+        latest_row = latest_rows[0]
+        companion = await review_repo.companion_for_review(latest_row.id, user_id)
+        latest_review = ReviewService.to_response(
+            latest_row,
+            companion.message if companion is not None else "",
+        )
 
+    profile_complete = (
+        profile is not None
+        and profile.start_date is not None
+        and profile.deadline is not None
+        and profile.start_date <= profile.deadline
+        and profile.deadline >= datetime.now(UTC).date()
+    )
     return MeResponse(
         user=UserSummary(
             id=current_user.id,
             display_name=current_user.display_name,
             role="dev" if current_user.role == "dev" else "user",
         ),
-        profile_complete=profile is not None,
+        profile_complete=profile_complete,
         profile=(
             ProfileResponse.model_validate(profile, from_attributes=True)
             if profile is not None

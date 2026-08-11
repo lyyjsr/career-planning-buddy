@@ -28,5 +28,5 @@
 ## 约束
 
 - UNIQUE `(plan_id, scheduled_date, order_index)`；
-- 当前七天执行表默认每天 1 个关键任务；每日总时间不超预算由 rule_validator 保证；
+- 当前固定周期默认每天 1 个关键任务；通常 7 天，最终周期可为 1~7 天；每日总时间不超预算由 rule_validator 保证；
 - `user_id` 必须与 plan.user_id 一致，由 Service 写入并测试。

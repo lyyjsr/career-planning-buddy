@@ -2,10 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
-  ChevronDown,
   CircleDot,
   Clock3,
-  Map,
   RefreshCw,
   Sparkles,
   WifiOff,
@@ -17,7 +15,6 @@ import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineG
 import { useRunEventStream, type RunStreamState } from "@/api/sse";
 import type { AgentRunResponse, GoalBriefResponse, ObjectiveType, TaskResponse } from "@/api/types";
 import { TaskCard } from "@/components/TaskCard";
-import { localDateIso, WeeklyTaskSchedule } from "@/components/WeeklyTaskSchedule";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,15 +92,20 @@ export function TodayPage(): JSX.Element {
   const activePlan = me.data.active_plan;
   const tasks = me.data.today_tasks;
   const firstTask = nextActionTask(tasks);
-  const remainingTasks = firstTask === undefined ? [] : tasks.filter((task) => task.task_id !== firstTask.task_id);
+  const orderedTasks = [...tasks].sort((left, right) => {
+    const priority: Record<TaskResponse["state"], number> = {
+      in_progress: 0,
+      pending: 1,
+      completed: 2,
+      abandoned: 3,
+      expired: 4,
+    };
+    return priority[left.state] - priority[right.state] || left.order_index - right.order_index;
+  });
   const allSettled = tasks.length > 0 && tasks.every((task) => ["completed", "abandoned", "expired"].includes(task.state));
   const completedCount = tasks.filter((task) => task.state === "completed").length;
   const totalMinutes = tasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
   const isPlanning = run?.status === "pending" || run?.status === "running";
-  const today = localDateIso();
-  const nextPlannedTask = activePlan?.tasks
-    .filter((task) => task.scheduled_date > today && ["pending", "in_progress"].includes(task.state))
-    .sort((left, right) => left.scheduled_date.localeCompare(right.scheduled_date) || left.order_index - right.order_index)[0];
 
   function submitPlan(event: React.FormEvent): void {
     event.preventDefault();
@@ -144,9 +146,11 @@ export function TodayPage(): JSX.Element {
               : `${GOAL_LABELS[me.data.profile.goal_type]} · ${STAGE_LABELS[me.data.profile.stage]} · 每天约 ${me.data.profile.time_budget_minutes} 分钟`}
           </p>
         </div>
-        <Link to="/settings/profile" className="text-sm font-medium text-primary hover:underline">
-          调整目标与时间
-        </Link>
+        {activePlan !== null && (
+          <Link to={`/journey/${activePlan.plan_id}`} className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
+            查看本周路线 <ArrowRight className="h-4 w-4" />
+          </Link>
+        )}
       </header>
 
       {run !== undefined && (
@@ -197,47 +201,24 @@ export function TodayPage(): JSX.Element {
         />
       )}
 
-      {!isPlanning && activeBrief === null && activePlan !== null && (
-        <section className="space-y-3" aria-labelledby="week-schedule-heading">
-          <div className="flex items-end justify-between gap-3">
+      {!isPlanning && activeBrief === null && activePlan !== null && tasks.length > 0 && (
+        <section className="space-y-4" aria-labelledby="today-tasks-heading">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">未来 7 天</p>
-              <h2 id="week-schedule-heading" className="mt-1 text-lg font-semibold">本周每日计划</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">今日执行</p>
+              <h2 id="today-tasks-heading" className="mt-1 text-lg font-semibold">今天的计划</h2>
             </div>
-            <Link to={`/journey/${activePlan.plan_id}`} className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
-              查看详情 <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-          <WeeklyTaskSchedule startDate={activePlan.plan_date} tasks={activePlan.tasks} />
-        </section>
-      )}
-
-      {!isPlanning && activeBrief === null && firstTask !== undefined && (
-        <section className="space-y-4" aria-labelledby="first-step-heading">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">建议先做</p>
-              <h2 id="first-step-heading" className="mt-1 text-lg font-semibold">你的第一步</h2>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">已完成 {completedCount}/{tasks.length}</Badge>
+              <Badge variant="outline" className="gap-1 py-1"><Clock3 className="h-3.5 w-3.5" />共 {totalMinutes} 分钟</Badge>
             </div>
-            <Badge variant="outline" className="gap-1 py-1">
-              <Clock3 className="h-3.5 w-3.5" />{firstTask.estimated_minutes} 分钟
-            </Badge>
           </div>
-          <TaskCard task={firstTask} featured onFeedback={setFeedback} />
-
-          {remainingTasks.length > 0 && (
-            <details className="group rounded-2xl border bg-card">
-              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between px-4 text-sm font-medium sm:px-5">
-                <span>完成后还有 {remainingTasks.length} 步 · 今日共 {totalMinutes} 分钟</span>
-                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="space-y-3 border-t p-3 sm:p-4">
-                {remainingTasks.map((task) => (
-                  <TaskCard key={task.task_id} task={task} onFeedback={setFeedback} />
-                ))}
-              </div>
-            </details>
-          )}
+          <p className="text-sm leading-6 text-muted-foreground">点击圆圈开始或完成；点击任务标题可查看细节并调整。</p>
+          <div className="space-y-3">
+            {orderedTasks.map((task) => (
+              <TaskCard key={task.task_id} task={task} featured={task.task_id === firstTask?.task_id} onFeedback={setFeedback} />
+            ))}
+          </div>
         </section>
       )}
 
@@ -250,7 +231,7 @@ export function TodayPage(): JSX.Element {
             <div>
               <h2 className="text-lg font-semibold">收下今天的进展</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                完成 {completedCount} 步。用 30 秒记下阻碍，明天的计划会更贴合真实节奏。
+                完成 {completedCount} 步。用 30 秒记下阻碍，让本周后续安排更贴合真实节奏。
               </p>
             </div>
             <Button asChild><Link to="/reviews">开始今日复盘 <ArrowRight className="h-4 w-4" /></Link></Button>
@@ -258,51 +239,17 @@ export function TodayPage(): JSX.Element {
         </Card>
       )}
 
-      {!isPlanning && activeBrief === null && activePlan !== null && firstTask === undefined && nextPlannedTask !== undefined && (
+      {!isPlanning && activeBrief === null && activePlan !== null && tasks.length === 0 && (
         <Card className="border-primary/15">
           <CardHeader>
-            <CardDescription>下一项将在 {nextPlannedTask.scheduled_date} 自动开放</CardDescription>
-            <CardTitle className="text-lg">{nextPlannedTask.title}</CardTitle>
+            <CardDescription>今天只看今天</CardDescription>
+            <CardTitle className="text-lg">今天没有需要执行的任务</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm leading-6">
-            <p><span className="font-medium">怎么做：</span>{nextPlannedTask.starter_action}</p>
-            <p><span className="font-medium">完成标志：</span>{nextPlannedTask.deliverable}</p>
-            <p className="text-muted-foreground">不用手动解锁；到排期日期后，它会自动成为“今天”的可执行任务。</p>
-            <Button asChild variant="outline" size="sm"><Link to={`/journey/${activePlan.plan_id}`}>查看完整每日计划</Link></Button>
+          <CardContent className="space-y-3 text-sm leading-6 text-muted-foreground">
+            <p>未来安排保留在路线页，不提前占用今天的注意力。</p>
+            <Button asChild variant="outline" size="sm"><Link to={`/journey/${activePlan.plan_id}`}>查看本周路线</Link></Button>
           </CardContent>
         </Card>
-      )}
-
-      {activePlan !== null && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">这一步在路线中的位置</h2>
-            <Link to="/journey" className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
-              查看完整路线 <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-          <Card className="overflow-hidden">
-            <CardContent className="grid gap-4 p-5 sm:grid-cols-[1fr_auto] sm:items-center">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Map className="h-4 w-4 text-primary" />{activePlan.overall_direction}
-                </div>
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{activePlan.rationale}</p>
-              </div>
-              <Badge variant="secondary">{activePlan.weekly_focus.length} 周路线</Badge>
-            </CardContent>
-          </Card>
-          {!isPlanning && activeBrief === null && (
-            <details className="rounded-xl">
-              <summary className="cursor-pointer py-2 text-sm text-muted-foreground hover:text-foreground">需要调整计划内容？</summary>
-              <form onSubmit={submitPlan} className="space-y-3 rounded-2xl border bg-card p-4">
-                <p className="text-xs leading-5 text-muted-foreground">如果目标方向或每日可投入时间变了，请先到“目标与时间”保存并重新规划。</p>
-                <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} maxLength={2000} placeholder="例如：保留当前每日时间，但后续优先补 Agent 评测与可观测性" />
-                <Button type="submit" size="sm" disabled={createGoalBrief.isPending || message.trim().length === 0}>整理调整方案</Button>
-              </form>
-            </details>
-          )}
-        </section>
       )}
     </div>
   );
@@ -355,7 +302,7 @@ function GoalBriefPanel({
           </div>
         )}
         <div className="rounded-xl border border-primary/15 bg-background/70 p-3 text-sm leading-6">
-          确认后会生成 {brief.duration_weeks ?? "1–8"} 周总体路线，并固定展开从今天开始滚动未来 7 天的具体任务。
+          确认后会生成 {brief.duration_weeks ?? "1–8"} 周总体路线，并展开一个固定七天执行周期；每天完成后不会向后滚动补位。
         </div>
         <form
           className="space-y-2"

@@ -35,7 +35,7 @@ export function PlanDetailPage(): JSX.Element {
           <h2 className="mt-1 text-lg font-semibold">每日计划</h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">每天只安排一个关键结果；任务状态只记录在对应日期。</p>
         </div>
-        <WeeklyTaskSchedule startDate={plan.plan_date} tasks={plan.tasks} detailed />
+        <WeeklyTaskSchedule startDate={plan.plan_date} endDate={plan.horizon_end} tasks={plan.tasks} detailed />
       </section>
 
       <section className="space-y-3">

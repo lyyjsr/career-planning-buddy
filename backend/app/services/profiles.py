@@ -80,6 +80,33 @@ class ProfileService:
                     message="profile was not found",
                     status_code=HTTPStatus.NOT_FOUND,
                 )
+            if existing.deadline is None and payload.deadline is None:
+                raise AppError(
+                    code="VALIDATION_PROFILE_DEADLINE_REQUIRED",
+                    message="a target date is required before updating the profile",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            if existing.start_date is None and payload.start_date is None:
+                raise AppError(
+                    code="VALIDATION_PROFILE_START_DATE_REQUIRED",
+                    message="a start date is required before updating the profile",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            merged_start = payload.start_date or existing.start_date
+            merged_deadline = payload.deadline or existing.deadline
+            if merged_start is not None and merged_deadline is not None:
+                if merged_start > merged_deadline:
+                    raise AppError(
+                        code="VALIDATION_PROFILE_PERIOD",
+                        message="start_date must be on or before deadline",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                if (merged_deadline - merged_start).days > 55:
+                    raise AppError(
+                        code="VALIDATION_PROFILE_PERIOD",
+                        message="the planning period cannot be more than 8 weeks",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
             updated = await self._profiles.update_with_version(
                 user_id=user_id,
                 expected_version=payload.version,
@@ -97,6 +124,7 @@ class ProfileService:
             "time_budget_minutes": payload.time_budget_minutes,
             "skill_level": payload.skill_level.value,
             "skill_summary": payload.skill_summary,
+            "start_date": payload.start_date,
             "deadline": payload.deadline,
             "preferences": payload.preferences.model_dump(mode="json"),
         }

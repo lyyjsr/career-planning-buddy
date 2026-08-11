@@ -4,10 +4,11 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RequireAuth, RequireDev } from "./LoginRoute";
+import { LoginRoute, RequireAuth, RequireDev } from "./LoginRoute";
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -75,6 +76,49 @@ describe("RequireAuth", () => {
     expect(await screen.findByText("受保护的今日页面")).toBeInTheDocument();
     await waitFor(() => expect(guestRequests).toBe(1));
     expect(sessionStorage.getItem("cpb_access_token")).toBe("guest-token");
+  });
+});
+
+describe("LoginRoute", () => {
+  it("shows a retryable error instead of relogging forever when /me returns 500", async () => {
+    sessionStorage.setItem("cpb_access_token", "guest-token");
+    let guestRequests = 0;
+    let meRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/auth/guest")) {
+          guestRequests += 1;
+          return new Response(null, { status: 500 });
+        }
+        if (url.endsWith("/api/v1/me")) {
+          meRequests += 1;
+          return new Response(
+            JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "failed" } }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(null, { status: 404 });
+      }),
+    );
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/login"]}>
+          <Routes>
+            <Route path="/login" element={<LoginRoute />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("暂时无法加载账号")).toBeInTheDocument();
+    expect(meRequests).toBe(1);
+    expect(guestRequests).toBe(0);
   });
 });
 

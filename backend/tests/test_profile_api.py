@@ -1,5 +1,6 @@
 """Guest authentication and profile API contract tests."""
 
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 
 import pytest
@@ -27,6 +28,8 @@ def profile_body(time_budget_minutes: int = 120) -> dict[str, object]:
         "time_budget_minutes": time_budget_minutes,
         "skill_level": "intermediate",
         "skill_summary": "FastAPI and RAG",
+        "start_date": datetime.now(UTC).date().isoformat(),
+        "deadline": (datetime.now(UTC).date() + timedelta(days=34)).isoformat(),
         "preferences": {
             "target_companies": ["Example Company"],
             "preferred_time_slot": "evening",

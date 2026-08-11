@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Check, Circle, CircleDot, Minus } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useUpdateTask } from "@/api/plans";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,36 +108,92 @@ export function TaskCard({
     );
   }
 
+  function statusAction(): void {
+    if (task.state === "pending") startTask();
+    if (task.state === "in_progress") setCompleteOpen(true);
+  }
+
+  function reopenTask(): void {
+    updateTask.mutate(
+      {
+        taskId: task.task_id,
+        payload: { state: "in_progress", version: task.version },
+      },
+      { onSuccess: (result) => onFeedback?.(result.companion_message) },
+    );
+  }
+
+  const statusActionLabel = task.state === "pending"
+    ? `开始：${task.title}`
+    : task.state === "in_progress"
+      ? `完成：${task.title}`
+      : task.state === "completed"
+        ? `已完成：${task.title}`
+        : `${TASK_STATUS_LABELS[task.state]}：${task.title}`;
+
   return (
     <Card
       className={`${isCompleted || isAbandoned ? "opacity-70" : ""} ${featured ? "overflow-hidden border-primary/25 shadow-[0_22px_70px_-42px_rgba(24,122,112,0.7)]" : ""}`}
     >
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="text-base">
-              {task.title}
-              <Badge variant="outline" className="ml-2 text-xs">
-                {TASK_TYPE_LABELS[task.task_type]}
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            aria-label={statusActionLabel}
+            title={statusActionLabel}
+            onClick={statusAction}
+            disabled={updateTask.isPending || !["pending", "in_progress"].includes(task.state)}
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+              task.state === "completed"
+                ? "border-primary bg-primary text-primary-foreground"
+                : task.state === "in_progress"
+                  ? "border-primary bg-accent text-primary"
+                  : task.state === "pending"
+                    ? "border-muted-foreground/45 text-muted-foreground hover:border-primary hover:text-primary"
+                    : "border-muted text-muted-foreground"
+            }`}
+          >
+            {task.state === "completed" ? (
+              <Check className="h-5 w-5" />
+            ) : task.state === "in_progress" ? (
+              <CircleDot className="h-5 w-5" />
+            ) : task.state === "pending" ? (
+              <Circle className="h-5 w-5" />
+            ) : (
+              <Minus className="h-5 w-5" />
+            )}
+          </button>
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <CardTitle className="min-w-0 text-base">
+                <Link
+                  to={`/journey/${task.plan_id}/day/${task.scheduled_date}`}
+                  className="hover:text-primary hover:underline"
+                >
+                  {task.title}
+                </Link>
+                <Badge variant="outline" className="ml-2 text-xs">
+                  {TASK_TYPE_LABELS[task.task_type]}
+                </Badge>
+              </CardTitle>
+              <Badge
+                variant={
+                  task.state === "completed"
+                    ? "success"
+                    : task.state === "abandoned"
+                      ? "destructive"
+                      : task.state === "in_progress"
+                        ? "default"
+                        : "secondary"
+                }
+              >
+                {TASK_STATUS_LABELS[task.state]}
               </Badge>
-            </CardTitle>
+            </div>
             <CardDescription className="text-xs">
-              预计 {task.estimated_minutes} 分钟 · {task.scheduled_date}
+              预计 {task.estimated_minutes} 分钟
             </CardDescription>
           </div>
-          <Badge
-            variant={
-              task.state === "completed"
-                ? "success"
-                : task.state === "abandoned"
-                  ? "destructive"
-                  : task.state === "in_progress"
-                    ? "default"
-                    : "secondary"
-            }
-          >
-            {TASK_STATUS_LABELS[task.state]}
-          </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
@@ -160,27 +218,34 @@ export function TaskCard({
           </div>
         )}
 
-        {/* 状态机操作 */}
-        <div className="flex flex-wrap gap-2">
-          {task.state === "pending" && (
-              <Button size={featured ? "default" : "sm"} onClick={startTask} disabled={updateTask.isPending} className={featured ? "w-full sm:w-auto" : ""}>
-              开始这一步
+        <div className="flex flex-wrap items-center gap-2">
+          {task.state === "in_progress" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setAbandonOpen(true)}
+              disabled={updateTask.isPending}
+            >
+              今天先放下
             </Button>
           )}
+
+          {task.state === "completed" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={reopenTask}
+              disabled={updateTask.isPending}
+            >
+              标记为未完成
+            </Button>
+          )}
+
+          {task.state === "pending" && (
+            <span className="text-xs text-muted-foreground">点击左侧圆圈开始</span>
+          )}
           {task.state === "in_progress" && (
-            <>
-              <Button size="sm" onClick={() => setCompleteOpen(true)} disabled={updateTask.isPending}>
-                完成
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setAbandonOpen(true)}
-                disabled={updateTask.isPending}
-              >
-                放弃
-              </Button>
-            </>
+            <span className="text-xs text-muted-foreground">再次点击左侧圆圈完成</span>
           )}
 
           {task.actual_minutes !== null && (

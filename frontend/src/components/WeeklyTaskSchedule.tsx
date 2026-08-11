@@ -1,4 +1,5 @@
-import { CheckCircle2, Circle, Clock3 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Circle, Clock3 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import type { TaskResponse, TaskStatus } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -37,15 +38,23 @@ function dayIsSettled(tasks: TaskResponse[]): boolean {
 
 export function WeeklyTaskSchedule({
   startDate,
+  endDate,
   tasks,
   detailed = true,
 }: {
   startDate: string;
+  endDate?: string;
   tasks: TaskResponse[];
   detailed?: boolean;
 }): JSX.Element {
   const today = localDateIso();
-  const rows = Array.from({ length: 7 }, (_, offset) => {
+  const finalOffset = endDate === undefined
+    ? 6
+    : Math.max(0, Math.min(6, Math.round(
+      (new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime())
+      / 86_400_000,
+    )));
+  const rows = Array.from({ length: finalOffset + 1 }, (_, offset) => {
     const date = addDays(startDate, offset);
     return {
       date,
@@ -92,6 +101,12 @@ export function WeeklyTaskSchedule({
                             </Badge>
                           </div>
                         </div>
+                        <Link
+                          to={`/journey/${task.plan_id}/day/${row.date}`}
+                          className="mt-2 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-primary hover:underline"
+                        >
+                          查看与调整 <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
                         {detailed && (
                           <div className="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
                             <p><span className="font-medium text-foreground">开始：</span>{task.starter_action}</p>

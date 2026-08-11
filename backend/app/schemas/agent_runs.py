@@ -170,6 +170,7 @@ class ProfileContext(StrictModel):
     time_budget_minutes: int = Field(ge=15, le=480)
     skill_level: SkillLevel
     skill_summary: str | None = Field(default=None, max_length=2000)
+    start_date: date | None = None
     deadline: date | None = None
 
 

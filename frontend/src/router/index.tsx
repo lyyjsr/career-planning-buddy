@@ -16,6 +16,9 @@ const PlansPage = lazy(async () => ({
 const PlanDetailPage = lazy(async () => ({
   default: (await import("@/pages/PlanDetailPage")).PlanDetailPage,
 }));
+const DayPlanPage = lazy(async () => ({
+  default: (await import("@/pages/DayPlanPage")).DayPlanPage,
+}));
 const ReviewsPage = lazy(async () => ({
   default: (await import("@/pages/ReviewsPage")).ReviewsPage,
 }));
@@ -50,6 +53,7 @@ export const router = createBrowserRouter([
               { path: "/today", element: <TodayPage /> },
               { path: "/journey", element: <PlansPage /> },
               { path: "/journey/:planId", element: <PlanDetailPage /> },
+              { path: "/journey/:planId/day/:date", element: <DayPlanPage /> },
               { path: "/plans", element: <Navigate to="/journey" replace /> },
               { path: "/plans/:planId", element: <PlanDetailPage /> },
               { path: "/reviews", element: <ReviewsPage /> },

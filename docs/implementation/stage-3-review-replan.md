@@ -21,11 +21,12 @@
 5. 规则校验 + 专用 repair Prompt 一次；
 6. 模板 fallback；
 7. Task PATCH 状态机；
-8. Review POST / GET；
-9. `POST /reviews/{id}/start-next-plan`，支持 continue/adjust；
+8. Review POST / GET / PATCH / DELETE；未被下一计划消费时可修改、删除，已消费后锁定；
+9. `POST /reviews/{id}/start-next-plan`，只在固定周周期到期或全部任务结算后支持 continue/adjust；
 10. 新计划成功时归档被替代计划；
 11. 首个任务开始时 generated → active；
-12. 所有任务完成后 active → completed。
+12. 所有任务进入 completed/abandoned/expired 后 active → completed；
+13. 本周 pending Task 支持人工编辑和 AI 提案，经用户确认后应用，完成事实不可覆盖。
 
 ## 模型预算
 
@@ -49,7 +50,7 @@ Review 请求只提交用户复盘内容，完成/放弃数量由 Service 从 ta
 - 目标方向明确变化；
 - 阻塞持续存在。
 
-重规划必须由用户确认，不允许后台静默替换活跃计划。
+每日复盘不替换仍开放的固定周周期。重规划必须由用户确认，不允许后台静默替换活跃计划。
 
 `context_builder` 对 replan 必须提供：source plan、completed facts、未完成任务、blockers、最近 review 和新时间预算。新计划不得删除已完成历史。
 

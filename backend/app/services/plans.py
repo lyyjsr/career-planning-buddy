@@ -34,6 +34,8 @@ class PlanQueryService:
         async with session_transaction(self._session):
             plan = await self._plans.get_active_for_user(user_id)
             if plan is None:
+                plan = await self._plans.get_latest_completed_for_user(user_id)
+            if plan is None:
                 raise AppError(
                     code="NOT_FOUND_PLAN",
                     message="active Plan was not found",
@@ -132,7 +134,7 @@ class PlanQueryService:
                 plan_id=plan_id,
                 limit=limit,
             )
-            return TaskListResponse(items=[self._task_response(task) for task in tasks])
+            return TaskListResponse(items=[self.to_task_response(task) for task in tasks])
 
     async def update_task(
         self,
@@ -163,7 +165,11 @@ class PlanQueryService:
                     message="Plan was not found",
                     status_code=HTTPStatus.NOT_FOUND,
                 )
-            if plan.status not in {"generated", "active"}:
+            reopening_task = (
+                task.state == "completed" and payload.state == TaskStatus.IN_PROGRESS
+            )
+            reopening_plan = plan.status == "completed" and reopening_task
+            if plan.status not in {"generated", "active"} and not reopening_plan:
                 raise AppError(
                     code="STATE_PLAN_NOT_MUTABLE",
                     message="Tasks can only be updated for a generated or active Plan",
@@ -173,6 +179,7 @@ class PlanQueryService:
             allowed = {
                 "pending": {"in_progress", "abandoned"},
                 "in_progress": {"completed", "abandoned"},
+                "completed": {"in_progress"},
             }
             if target not in allowed.get(task.state, set()):
                 raise AppError(
@@ -191,13 +198,20 @@ class PlanQueryService:
             )
             task.abandoned_reason_text = payload.abandoned_reason_text
             if target == "in_progress":
-                task.started_at = now
-                if plan.status == "generated":
+                task.completed_at = None
+                task.actual_minutes = None
+                task.started_at = task.started_at or now
+                if plan.status in {"generated", "completed"}:
                     plan.status = "active"
+                    plan.completed_at = None
                     plan.adopted_at = now
                     plan.updated_at = now
                     plan.version += 1
-                companion_message = f"已经开始「{task.title}」，先完成第一个可验证动作。"
+                companion_message = (
+                    f"已将「{task.title}」恢复为进行中，可以继续完善后再完成。"
+                    if reopening_task
+                    else f"已经开始「{task.title}」，先完成第一个可验证动作。"
+                )
             elif target == "completed":
                 task.completed_at = now
                 companion_message = "你已经完成了这一步，今天的推进已经成为可验证的成果。"
@@ -222,14 +236,17 @@ class PlanQueryService:
                 )
             await self._session.flush()
 
-            if target == "completed":
+            if target in {"completed", "abandoned"}:
                 counts = await self._plans.task_state_counts(
                     user_id=user_id,
                     plan_id=plan.id,
                     scheduled_date=None,
                 )
                 total = sum(counts.values())
-                if total > 0 and counts.get("completed", 0) == total:
+                settled = sum(
+                    counts.get(state, 0) for state in ("completed", "abandoned", "expired")
+                )
+                if total > 0 and settled == total:
                     plan.status = "completed"
                     plan.completed_at = now
                     plan.updated_at = now
@@ -237,7 +254,7 @@ class PlanQueryService:
                     await self._session.flush()
 
             return TaskUpdateResponse(
-                task=self._task_response(task),
+                task=self.to_task_response(task),
                 plan_status=PlanStatus(plan.status),
                 companion_message=companion_message,
             )
@@ -272,7 +289,7 @@ class PlanQueryService:
             rationale=plan.rationale,
             adjustment_reason=plan.adjustment_reason,
             sources=sources,
-            tasks=[cls._task_response(task) for task in tasks],
+            tasks=[cls.to_task_response(task) for task in tasks],
             companion_message=companion_message,
             version=plan.version,
             adopted_at=plan.adopted_at,
@@ -355,7 +372,7 @@ class PlanQueryService:
         return result
 
     @staticmethod
-    def _task_response(task: Task) -> TaskResponse:
+    def to_task_response(task: Task) -> TaskResponse:
         return TaskResponse(
             task_id=task.id,
             plan_id=task.plan_id,

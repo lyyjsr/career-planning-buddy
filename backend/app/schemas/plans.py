@@ -85,6 +85,64 @@ class TaskUpdateResponse(StrictModel):
     companion_message: str
 
 
+class TaskEditFields(StrictModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    starter_action: str | None = Field(default=None, min_length=1, max_length=240)
+    deliverable: str | None = Field(default=None, min_length=1, max_length=240)
+    rationale: str | None = Field(default=None, min_length=1, max_length=500)
+    estimated_minutes: int | None = Field(default=None, ge=5, le=480)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "TaskEditFields":
+        editable = {"title", "starter_action", "deliverable", "rationale", "estimated_minutes"}
+        if not self.model_fields_set.intersection(editable):
+            raise ValueError("at least one editable field is required")
+        return self
+
+
+class TaskEditRequest(TaskEditFields):
+    version: int = Field(ge=1)
+
+
+class TaskEditResponse(StrictModel):
+    task: TaskResponse
+    adjustment_id: UUID
+    companion_message: str
+
+
+class TaskAdjustmentCreateRequest(StrictModel):
+    version: int = Field(ge=1)
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class TaskAdjustmentDecisionRequest(StrictModel):
+    version: int = Field(ge=1)
+
+
+class TaskAdjustmentProposalResponse(StrictModel):
+    adjustment_id: UUID
+    plan_id: UUID
+    task_id: UUID
+    status: Literal["pending", "applied", "rejected"]
+    request_text: str
+    original_task: dict[str, object]
+    proposed_patch: TaskEditFields
+    rationale: str
+    generation_method: Literal["manual", "rule", "model", "rule_fallback"]
+    model_id: str | None
+    task_version: int
+    version: int
+    created_at: datetime
+
+
+class TaskDetailResponse(StrictModel):
+    task: TaskResponse
+    week_focus: str
+    week_success_signal: str
+    editable: bool
+    edit_reason: str | None
+
+
 class PlanSourceResponse(StrictModel):
     kind: Literal["memory", "experience_atom", "search_source"]
     id: UUID

@@ -397,11 +397,21 @@ def build_planning_context(
     planning_date: date | None = None,
 ) -> PlanningContext:
     today = planning_date or datetime.now(UTC).date()
-    horizon_weeks = requested_horizon_weeks or _deadline_weeks(today, profile.deadline)
+    if profile.start_date is not None:
+        today = max(today, profile.start_date)
+    if profile.deadline is not None:
+        if today > profile.deadline:
+            raise ValueError("planning date cannot be after the target date")
+        horizon_weeks = _deadline_weeks(today, profile.deadline)
+        horizon_end = profile.deadline
+    else:
+        # Transitional fallback for legacy profiles. New profile writes require a deadline.
+        horizon_weeks = requested_horizon_weeks or 4
+        horizon_end = today + timedelta(weeks=horizon_weeks) - timedelta(days=1)
     window = PlanningWindow(
         planning_date=today,
         horizon_start=today,
-        horizon_end=today + timedelta(weeks=horizon_weeks) - timedelta(days=1),
+        horizon_end=horizon_end,
         horizon_weeks=horizon_weeks,
     )
     return PlanningContext(
@@ -426,6 +436,12 @@ def _deadline_weeks(today: date, deadline: date | None) -> int:
         return 4
     days = max((deadline - today).days + 1, 1)
     return max(1, min(8, (days + 6) // 7))
+
+
+def action_day_count(window: PlanningWindow) -> int:
+    """Number of executable dates in this cycle without crossing the target date."""
+    remaining = (window.horizon_end - window.planning_date).days + 1
+    return max(1, min(7, remaining))
 
 
 def _within_daily_budget(tasks: list[TaskCandidate], daily_budget: int) -> bool:
@@ -464,8 +480,9 @@ def validate_candidate(
     completed_deliverables.update(
         task.deliverable for task in context.recent_tasks if task.state == TaskStatus.COMPLETED
     )
+    expected_count = action_day_count(window)
     expected_action_dates = {
-        window.planning_date + timedelta(days=offset) for offset in range(7)
+        window.planning_date + timedelta(days=offset) for offset in range(expected_count)
     }
     scheduled_dates = [task.scheduled_date for task in candidate.tasks]
     results = {
@@ -489,12 +506,13 @@ def validate_candidate(
                 for task in candidate.tasks
             )
         ),
-        "TASK_COUNT": len(candidate.tasks) == 7,
+        "TASK_COUNT": len(candidate.tasks) == expected_count,
         "TIME_BUDGET": _within_daily_budget(candidate.tasks, context.time_budget_minutes),
         "STARTER_ACTION": all(bool(task.starter_action.strip()) for task in candidate.tasks),
         "DELIVERABLE": all(bool(task.deliverable.strip()) for task in candidate.tasks),
         "SCHEDULE_DATE": (
-            len(scheduled_dates) == 7 and set(scheduled_dates) == expected_action_dates
+            len(scheduled_dates) == expected_count
+            and set(scheduled_dates) == expected_action_dates
         ),
         "RECENT_DUPLICATE": not any(
             task.deliverable in completed_deliverables for task in candidate.tasks
@@ -619,6 +637,7 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
             "第一周结论，包含岗位要求清单、前三项差距和下周方向",
         ),
     ]
+    cycle_days = action_day_count(window)
     return PlanCandidate(
         plan_date=window.planning_date,
         horizon_start=window.horizon_start,
@@ -636,8 +655,8 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
             )
             for index in range(1, window.horizon_weeks + 1)
         ],
-        summary="本次采用保守的七天执行表，每天只推进一个可验证结果。",
-        rationale="候选计划未通过规则检查，因此使用递进周目标和七天确定性模板保证可执行性。",
+        summary=f"本次采用保守的 {cycle_days} 天执行表，每天只推进一个可验证结果。",
+        rationale="候选计划未通过规则检查，因此使用不越过目标日期的确定性模板保证可执行性。",
         adjustment_reason="根据复盘阻碍采用保守调整" if mode == ReplanMode.ADJUST else None,
         tasks=[
             TaskCandidate(
@@ -653,7 +672,7 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
                 rationale=f"服务第1周目标“{first_week_focus}”并形成可验证证据",
             )
             for day_offset, (title, task_type, starter_action, deliverable) in enumerate(
-                daily_templates
+                daily_templates[:cycle_days]
             )
         ],
     )
@@ -661,6 +680,9 @@ def fallback_candidate(context: PlanningContext, mode: ReplanMode) -> PlanCandid
 
 def build_companion(candidate: PlanCandidate) -> CompanionMessageCandidate:
     return CompanionMessageCandidate(
-        message=f"七天安排已经展开，今天先从“{candidate.tasks[0].title}”开始。",
+        message=(
+            f"本周期 {len(candidate.tasks)} 天安排已经展开，"
+            f"今天先从“{candidate.tasks[0].title}”开始。"
+        ),
         template_version="plan_ready_v1",
     )

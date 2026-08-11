@@ -1,5 +1,7 @@
 """Stage 1 service transaction and state tests."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,8 @@ def profile_payload() -> ProfilePutRequest:
         time_budget_minutes=120,
         skill_level=SkillLevel.INTERMEDIATE,
         skill_summary="FastAPI and RAG",
+        start_date=datetime.now(UTC).date(),
+        deadline=datetime.now(UTC).date() + timedelta(days=27),
     )
 
 

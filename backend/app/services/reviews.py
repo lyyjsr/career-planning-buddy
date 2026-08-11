@@ -19,12 +19,14 @@ from app.models.review import Review
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.memories import MemoryRepository
 from app.repositories.plans import PlanRepository
+from app.repositories.profiles import ProfileRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.enums import NextPlanAction, ReplanMode, RunStatus
 from app.schemas.reviews import (
     ReviewCreateRequest,
     ReviewListResponse,
     ReviewResponse,
+    ReviewUpdateRequest,
     StartNextPlanResponse,
 )
 from app.services.memory_candidate_distiller import (
@@ -48,6 +50,7 @@ class ReviewService:
         self._executor = executor
         self._reviews = ReviewRepository(session)
         self._plans = PlanRepository(session)
+        self._profiles = ProfileRepository(session)
         self._runs = AgentRunRepository(session)
         self._memories = MemoryRepository(session)
 
@@ -141,7 +144,7 @@ class ReviewService:
                     source_run_id=plan.source_run_id,
                     recent_blocker=(recent_reviews[0].blockers if recent_reviews else None),
                 )
-                return self._to_response(review, companion)
+                return self.to_response(review, companion)
         except IntegrityError as exc:
             raise AppError(
                 code="STATE_REVIEW_ALREADY_EXISTS",
@@ -180,6 +183,102 @@ class ReviewService:
                 items=[await self._response(review, user_id) for review in selected],
                 next_cursor=selected[-1].id if has_more and selected else None,
             )
+
+    async def get_review(self, *, review_id: UUID, user_id: UUID) -> ReviewResponse:
+        async with session_transaction(self._session):
+            review = await self._reviews.get_for_user(review_id, user_id)
+            if review is None:
+                raise AppError(
+                    code="NOT_FOUND_REVIEW",
+                    message="Review was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            return await self._response(review, user_id)
+
+    async def update_review(
+        self, *, review_id: UUID, user_id: UUID, payload: ReviewUpdateRequest
+    ) -> ReviewResponse:
+        async with session_transaction(self._session):
+            review = await self._reviews.get_for_user(review_id, user_id, for_update=True)
+            if review is None:
+                raise AppError(
+                    code="NOT_FOUND_REVIEW",
+                    message="Review was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            self._ensure_review_mutable(review)
+            if review.version != payload.version:
+                raise AppError(
+                    code="STATE_REVIEW_VERSION_CONFLICT",
+                    message="Review version does not match the current version",
+                    status_code=HTTPStatus.CONFLICT,
+                    details={"current_version": review.version},
+                )
+            for field in payload.model_fields_set - {"version"}:
+                setattr(review, field, getattr(payload, field))
+            review.version += 1
+            review.updated_at = datetime.now(UTC)
+            counts = await self._plans.task_state_counts(
+                user_id=user_id,
+                plan_id=review.plan_id,
+                scheduled_date=review.review_date,
+            )
+            recent = await self._reviews.recent_for_plan(
+                user_id, review.plan_id, before_date=review.review_date, limit=1
+            )
+            recent_task_states = await self._plans.recent_task_states(user_id, limit=2)
+            evaluation = ReviewCreateRequest(
+                plan_id=review.plan_id,
+                review_date=review.review_date,
+                mood=review.mood,
+                blockers=review.blockers,
+                adjustment_request=review.adjustment_request,
+                free_text=review.free_text,
+            )
+            review.suggested_replan, review.replan_reason = self._evaluate_replan(
+                evaluation,
+                recent_blocker=(recent[0].blockers if recent else None),
+                recent_task_states=recent_task_states,
+                abandoned_count=counts.get("abandoned", 0),
+            )
+            companion = self._companion(
+                completed_count=review.completed_count,
+                abandoned_count=review.abandoned_count,
+                action=(
+                    NextPlanAction.ADJUST
+                    if review.suggested_replan or review.adjustment_request
+                    else NextPlanAction.CONTINUE
+                ),
+            )
+            companion_row = await self._reviews.companion_for_review(review.id, user_id)
+            if companion_row is not None:
+                companion_row.message = companion
+            await self._memories.delete_pending_candidates_for_review(
+                user_id=user_id, review_id=review.id
+            )
+            await self._create_memory_candidates_best_effort(
+                user_id=user_id,
+                review=review,
+                source_run_id=None,
+                recent_blocker=(recent[0].blockers if recent else None),
+            )
+            await self._session.flush()
+            return self.to_response(review, companion)
+
+    async def delete_review(self, *, review_id: UUID, user_id: UUID) -> None:
+        async with session_transaction(self._session):
+            review = await self._reviews.get_for_user(review_id, user_id, for_update=True)
+            if review is None:
+                raise AppError(
+                    code="NOT_FOUND_REVIEW",
+                    message="Review was not found",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            self._ensure_review_mutable(review)
+            await self._memories.delete_pending_candidates_for_review(
+                user_id=user_id, review_id=review.id
+            )
+            await self._reviews.delete(review)
 
     async def start_next_plan(
         self,
@@ -229,6 +328,44 @@ class ReviewService:
                     raise AppError(
                         code="STATE_SOURCE_PLAN_ARCHIVED",
                         message="an archived Plan cannot start another next Plan Run",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                tasks = await self._plans.tasks_for_plan(source_plan.id, user_id)
+                settled = bool(tasks) and all(
+                    task.state in {"completed", "abandoned", "expired"} for task in tasks
+                )
+                cycle_end = min(
+                    source_plan.plan_date + timedelta(days=6), source_plan.horizon_end
+                )
+                if not settled and datetime.now(UTC).date() <= cycle_end:
+                    raise AppError(
+                        code="STATE_WEEKLY_CYCLE_OPEN",
+                        message=(
+                            "The fixed weekly cycle is still open; adjust pending Tasks "
+                            "instead of replacing the whole week"
+                        ),
+                        status_code=HTTPStatus.CONFLICT,
+                        details={
+                            "cycle_start": source_plan.plan_date.isoformat(),
+                            "cycle_end": cycle_end.isoformat(),
+                        },
+                    )
+                profile = await self._profiles.get_for_user(user_id)
+                next_cycle_start = source_plan.plan_date + timedelta(days=7)
+                if profile is not None and profile.start_date is not None:
+                    next_cycle_start = max(next_cycle_start, profile.start_date)
+                if (
+                    profile is None
+                    or profile.start_date is None
+                    or profile.deadline is None
+                    or next_cycle_start > profile.deadline
+                ):
+                    raise AppError(
+                        code="STATE_GOAL_DEADLINE_REACHED",
+                        message=(
+                            "The target date has been reached; complete the final review "
+                            "instead of generating another weekly cycle"
+                        ),
                         status_code=HTTPStatus.CONFLICT,
                     )
                 active_run = await self._runs.get_active_for_user(user_id)
@@ -284,7 +421,7 @@ class ReviewService:
 
     async def _response(self, review: Review, user_id: UUID) -> ReviewResponse:
         companion = await self._reviews.companion_for_review(review.id, user_id)
-        return self._to_response(review, companion.message if companion else "")
+        return self.to_response(review, companion.message if companion else "")
 
     async def _create_memory_candidates_best_effort(
         self,
@@ -337,7 +474,8 @@ class ReviewService:
             )
 
     @staticmethod
-    def _to_response(review: Review, companion_message: str) -> ReviewResponse:
+    def to_response(review: Review, companion_message: str) -> ReviewResponse:
+        """Build the public Review contract, including its derived fields."""
         action = (
             NextPlanAction.ADJUST
             if review.suggested_replan or review.adjustment_request
@@ -358,8 +496,19 @@ class ReviewService:
             next_plan_action=action,
             companion_message=companion_message,
             next_plan_run_id=review.next_plan_run_id,
+            version=review.version,
             created_at=review.created_at,
+            updated_at=review.updated_at,
         )
+
+    @staticmethod
+    def _ensure_review_mutable(review: Review) -> None:
+        if review.next_plan_run_id is not None:
+            raise AppError(
+                code="STATE_REVIEW_ALREADY_CONSUMED",
+                message="a Review used by a next Plan Run cannot be changed or deleted",
+                status_code=HTTPStatus.CONFLICT,
+            )
 
     @staticmethod
     def _evaluate_replan(
@@ -415,9 +564,9 @@ class ReviewService:
         if action == NextPlanAction.ADJUST:
             return (
                 f"今天完成了 {completed_count} 项、放弃了 {abandoned_count} 项；"
-                "下一版会保留成果并把阻碍拆小。"
+                "这些反馈会用于本周调整，并在周结算时带入下一周。"
             )
-        return f"今天完成了 {completed_count} 项；下一版会沿着当前方向继续推进。"
+        return f"今天完成了 {completed_count} 项；本周继续沿着当前重点推进。"
 
     @staticmethod
     def _next_plan_request(review: Review, mode: ReplanMode) -> str:
@@ -425,8 +574,8 @@ class ReviewService:
             text for text in (review.adjustment_request, review.blockers, review.free_text) if text
         )
         if not context:
-            context = "沿用当前方向，生成下一天的可执行任务"
-        return f"基于每日复盘生成下一版计划（{mode.value}）：{context}"
+            context = "沿用当前方向，生成下一个固定七天周期"
+        return f"基于本周结算生成下一周计划（{mode.value}）：{context}"
 
     @staticmethod
     def _start_response(run: AgentRun) -> StartNextPlanResponse:

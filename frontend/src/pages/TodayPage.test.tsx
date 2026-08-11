@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -63,7 +64,7 @@ afterEach(() => {
 });
 
 describe("TodayPage", () => {
-  it("refreshes a completed replan and previews when the next task opens", async () => {
+  it("refreshes a completed replan but only renders today's tasks", async () => {
     const completed = task({});
     const next = task({
       task_id: "task-2",
@@ -122,11 +123,28 @@ describe("TodayPage", () => {
     vi.mocked(useRunEventStream).mockReturnValue({} as ReturnType<typeof useRunEventStream>);
     vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
 
-    render(<MemoryRouter initialEntries={["/today?run_id=run-2"]}><TodayPage /></MemoryRouter>);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/today?run_id=run-2"]}><TodayPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
 
-    expect(screen.getByText("下一项将在 2026-08-11 自动开放")).toBeInTheDocument();
-    expect(screen.getByText("不用手动解锁；到排期日期后，它会自动成为“今天”的可执行任务。")).toBeInTheDocument();
-    expect(screen.getAllByText("1. 写背景；2. 补技术取舍；3. 压缩成三条要点").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "今天的计划" })).toBeInTheDocument();
+    expect(screen.getByText("已完成 1/1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /完成项目验收/ })).toHaveAttribute(
+      "href",
+      "/journey/plan-new/day/2026-08-10",
+    );
+    expect(screen.queryByText("整理简历项目表达")).not.toBeInTheDocument();
+    expect(screen.queryByText("本周每日计划")).not.toBeInTheDocument();
+    expect(screen.queryByText("这一步在路线中的位置")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /查看本周路线/ })).toHaveAttribute(
+      "href",
+      "/journey/plan-new",
+    );
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
   });
 

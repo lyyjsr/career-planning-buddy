@@ -21,6 +21,10 @@ class ReviewRepository:
         await self._session.refresh(review)
         return review
 
+    async def delete(self, review: Review) -> None:
+        await self._session.delete(review)
+        await self._session.flush()
+
     async def get_for_user(
         self,
         review_id: UUID,

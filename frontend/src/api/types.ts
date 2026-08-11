@@ -73,6 +73,7 @@ export interface ProfileResponse {
   time_budget_minutes: number;
   skill_level: SkillLevel;
   skill_summary: string | null;
+  start_date: string | null;
   deadline: string | null;
   preferences: ProfilePreferences;
   version: number;
@@ -84,7 +85,8 @@ export interface ProfilePutRequest {
   time_budget_minutes: number;
   skill_level: SkillLevel;
   skill_summary?: string | null;
-  deadline?: string | null;
+  start_date: string;
+  deadline: string;
   preferences?: ProfilePreferencesInput;
 }
 
@@ -95,6 +97,7 @@ export interface ProfilePatchRequest {
   time_budget_minutes?: number;
   skill_level?: SkillLevel;
   skill_summary?: string | null;
+  start_date?: string | null;
   deadline?: string | null;
   preferences?: ProfilePreferencesInput;
 }
@@ -124,6 +127,48 @@ export interface TaskResponse {
   started_at: string | null;
   completed_at: string | null;
   abandoned_at: string | null;
+  created_at: string;
+}
+
+export interface TaskDetailResponse {
+  task: TaskResponse;
+  week_focus: string;
+  week_success_signal: string;
+  editable: boolean;
+  edit_reason: string | null;
+}
+
+export interface TaskEditFields {
+  title?: string;
+  starter_action?: string;
+  deliverable?: string;
+  rationale?: string;
+  estimated_minutes?: number;
+}
+
+export interface TaskEditRequest extends TaskEditFields {
+  version: number;
+}
+
+export interface TaskEditResponse {
+  task: TaskResponse;
+  adjustment_id: string;
+  companion_message: string;
+}
+
+export interface TaskAdjustmentProposalResponse {
+  adjustment_id: string;
+  plan_id: string;
+  task_id: string;
+  status: "pending" | "applied" | "rejected";
+  request_text: string;
+  original_task: Record<string, unknown>;
+  proposed_patch: TaskEditFields;
+  rationale: string;
+  generation_method: "manual" | "rule" | "model" | "rule_fallback";
+  model_id: string | null;
+  task_version: number;
+  version: number;
   created_at: string;
 }
 
@@ -299,13 +344,23 @@ export interface ReviewResponse {
   next_plan_action: NextPlanAction;
   companion_message: string;
   next_plan_run_id: string | null;
+  version: number;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ReviewCreateRequest {
   plan_id: string;
   review_date: string;
   mood: number;
+  blockers?: string | null;
+  adjustment_request?: string | null;
+  free_text?: string | null;
+}
+
+export interface ReviewUpdateRequest {
+  version: number;
+  mood?: number;
   blockers?: string | null;
   adjustment_request?: string | null;
   free_text?: string | null;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useMe } from "@/api/auth";
@@ -15,6 +15,24 @@ import { GOAL_LABELS, SKILL_LABELS, STAGE_LABELS } from "@/lib/labels";
 
 const TIME_OPTIONS = [30, 45, 60, 90, 120];
 
+function dateInputValue(offsetDays: number): string {
+  const value = new Date();
+  value.setDate(value.getDate() + offsetDays);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: string, offsetDays: number): string {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function OnboardingPage(): JSX.Element {
   const me = useMe();
   const putProfile = usePutProfile();
@@ -25,7 +43,20 @@ export function OnboardingPage(): JSX.Element {
   const [timeBudget, setTimeBudget] = useState(60);
   const [skillLevel, setSkillLevel] = useState<SkillLevel>("intermediate");
   const [skillSummary, setSkillSummary] = useState("");
+  const [startDate, setStartDate] = useState("");
   const [deadline, setDeadline] = useState("");
+
+  useEffect(() => {
+    const existing = me.data?.profile;
+    if (existing === null || existing === undefined) return;
+    setGoalType(existing.goal_type);
+    setStage(existing.stage);
+    setTimeBudget(existing.time_budget_minutes);
+    setSkillLevel(existing.skill_level);
+    setSkillSummary(existing.skill_summary ?? "");
+    setStartDate(existing.start_date ?? "");
+    setDeadline(existing.deadline ?? "");
+  }, [me.data?.profile]);
 
   if (me.data === undefined || me.data === null) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">正在准备建档…</div>;
   if (me.data.profile_complete) return <Navigate to="/today" replace />;
@@ -33,14 +64,15 @@ export function OnboardingPage(): JSX.Element {
   const error = putProfile.error === null ? null : toUserFacingError(putProfile.error);
 
   function submit(): void {
-    if (putProfile.isPending) return;
+    if (putProfile.isPending || startDate.length === 0 || deadline.length === 0) return;
     const payload: ProfilePutRequest = {
       goal_type: goalType,
       stage,
       time_budget_minutes: timeBudget,
       skill_level: skillLevel,
       skill_summary: skillSummary.trim() || null,
-      deadline: deadline || null,
+      start_date: startDate,
+      deadline,
       preferences: {},
     };
     putProfile.mutate(
@@ -72,7 +104,7 @@ export function OnboardingPage(): JSX.Element {
               <div className="space-y-6">
                 <header><p className="text-sm font-medium text-primary">第 2 步 · 节奏</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">每天留多少时间更真实？</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">任务总时长不会超过这个预算，少一点也没关系。</p></header>
                 <div className="space-y-3"><Label>每天可投入时间</Label><div className="flex flex-wrap gap-2">{TIME_OPTIONS.map((minutes) => <Button key={minutes} type="button" size="sm" variant={timeBudget === minutes ? "default" : "outline"} onClick={() => setTimeBudget(minutes)}>{minutes} 分钟</Button>)}</div><Input aria-label="自定义每日分钟数" type="number" min={15} max={480} value={timeBudget} onChange={(event) => setTimeBudget(Number(event.target.value))} /></div>
-                <div className="space-y-2"><Label htmlFor="onboarding-deadline">目标日期（可选）</Label><Input id="onboarding-deadline" type="date" min={new Date().toISOString().slice(0, 10)} value={deadline} onChange={(event) => setDeadline(event.target.value)} /><p className="text-xs text-muted-foreground">没有明确日期可以先留空，之后随时调整。</p></div>
+                <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="onboarding-start-date">开始日期</Label><Input id="onboarding-start-date" type="date" required min={dateInputValue(0)} value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div><div className="space-y-2"><Label htmlFor="onboarding-deadline">结束日期</Label><Input id="onboarding-deadline" type="date" required min={startDate || dateInputValue(0)} max={startDate ? addDays(startDate, 55) : undefined} value={deadline} onChange={(event) => setDeadline(event.target.value)} /></div></div><p className="text-xs text-muted-foreground">请选择最长 8 周的执行时间段，系统不会在开始日前或结束日后安排任务。</p>
               </div>
             )}
 
@@ -88,7 +120,7 @@ export function OnboardingPage(): JSX.Element {
 
             <div className="mt-8 flex items-center justify-between gap-3 border-t pt-5">
               <Button type="button" variant="ghost" disabled={step === 1 || putProfile.isPending} onClick={() => setStep((value) => Math.max(1, value - 1))}><ArrowLeft className="h-4 w-4" />上一步</Button>
-              {step < 3 ? <Button type="button" disabled={step === 2 && (timeBudget < 15 || timeBudget > 480)} onClick={() => setStep((value) => Math.min(3, value + 1))}>继续 <ArrowRight className="h-4 w-4" /></Button> : <Button type="button" disabled={putProfile.isPending} onClick={submit}>{putProfile.isPending ? "保存中…" : "保存并开始"}<ArrowRight className="h-4 w-4" /></Button>}
+              {step < 3 ? <Button type="button" disabled={step === 2 && (timeBudget < 15 || timeBudget > 480 || startDate.length === 0 || deadline.length === 0 || startDate > deadline)} onClick={() => setStep((value) => Math.min(3, value + 1))}>继续 <ArrowRight className="h-4 w-4" /></Button> : <Button type="button" disabled={putProfile.isPending || startDate.length === 0 || deadline.length === 0 || startDate > deadline} onClick={submit}>{putProfile.isPending ? "保存中…" : "保存并开始"}<ArrowRight className="h-4 w-4" /></Button>}
             </div>
           </CardContent>
         </Card>
