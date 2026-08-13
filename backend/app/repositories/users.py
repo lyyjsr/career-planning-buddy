@@ -50,3 +50,7 @@ class UserRepository:
         if existing_user is None:
             raise RuntimeError("guest device conflict did not resolve to a user")
         return existing_user, False
+
+    async def delete(self, user: User) -> None:
+        await self._session.delete(user)
+        await self._session.flush()

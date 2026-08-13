@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.core.time import product_today
 from app.models.plan import Plan, Task
 from app.repositories.evidence import EvidenceRepository
 from app.repositories.plans import PlanRepository
@@ -132,7 +133,7 @@ class PlanQueryService:
         async with session_transaction(self._session):
             tasks = await self._plans.list_tasks(
                 user_id,
-                scheduled_date=scheduled_date or datetime.now(UTC).date(),
+                scheduled_date=scheduled_date or product_today(),
                 state=state,
                 plan_id=plan_id,
                 limit=limit,
@@ -505,7 +506,7 @@ class PlanQueryService:
         return plan.status == "archived" and fixed_cycle_contains(
             plan_date=plan.plan_date,
             horizon_end=plan.horizon_end,
-            target=datetime.now(UTC).date(),
+            target=product_today(),
         )
 
     @staticmethod

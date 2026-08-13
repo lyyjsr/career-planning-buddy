@@ -14,12 +14,15 @@ from app.schemas.enums import (
     PlanStatus,
     ReplanMode,
     RunIntent,
+    RunKind,
     RunResultKind,
     RunStatus,
     SkillLevel,
     TaskStatus,
     TaskType,
 )
+from app.schemas.interviews import InterviewReportResultSummary, InterviewTurnResultSummary
+from app.schemas.resumes import ResumeAssessmentResultSummary
 
 
 class AgentRunCreatedResponse(StrictModel):
@@ -84,7 +87,15 @@ class SafeResponse(StrictModel):
     disclaimer: str = Field(min_length=1, max_length=500)
 
 
-TerminalResult = PlanResultSummary | ClarificationRequest | SafeResponse | NavigationResult
+TerminalResult = (
+    PlanResultSummary
+    | ClarificationRequest
+    | SafeResponse
+    | NavigationResult
+    | InterviewTurnResultSummary
+    | InterviewReportResultSummary
+    | ResumeAssessmentResultSummary
+)
 RunUserStatus = Literal[
     "queued",
     "generating",
@@ -99,6 +110,7 @@ RunUserStatus = Literal[
 
 class AgentRunResponse(StrictModel):
     run_id: UUID
+    run_kind: RunKind
     status: RunStatus
     user_status: RunUserStatus
     status_message: str = Field(min_length=1, max_length=200)
@@ -124,9 +136,7 @@ class RuntimeConfigSnapshot(StrictModel):
     # Keep prior snapshots readable while new runs are pinned to Stage 6B.
     feature_stage: Literal[3, 4, 5, 6] = 6
     available_tools: list[str] = Field(default_factory=list, max_length=3)
-    provider: Literal[
-        "mock", "openai", "zhipu", "deepseek", "openai_compatible"
-    ] = "mock"
+    provider: Literal["mock", "openai", "zhipu", "deepseek", "openai_compatible"] = "mock"
     model_alias: str
     prompt_versions: dict[str, str]
     max_llm_calls: int = Field(ge=1, le=7)
@@ -160,6 +170,7 @@ class RunRequestSnapshot(StrictModel):
     goal_type_override: GoalType | None
     source_plan_id: UUID | None
     source_review_id: UUID | None = None
+    source_interview_report_session_id: UUID | None = None
 
 
 class ProfileContext(StrictModel):
@@ -239,6 +250,8 @@ class PlanningContext(StrictModel):
     source_plan_version: int | None = None
     source_plan: PlanContext | None = None
     source_review: ReviewContext | None = None
+    source_interview_report_session_id: UUID | None = None
+    interview_training_actions: list[str] = Field(default_factory=list, max_length=3)
     recent_tasks: list[TaskContext] = Field(default_factory=list, max_length=30)
     recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
     completed_facts: list[str] = Field(default_factory=list, max_length=20)
@@ -258,6 +271,8 @@ class RunInputSnapshot(StrictModel):
     source_plan_version: int | None
     source_plan: PlanContext | None = None
     source_review: ReviewContext | None = None
+    source_interview_report_session_id: UUID | None = None
+    interview_training_actions: list[str] = Field(default_factory=list, max_length=3)
     recent_tasks: list[TaskContext] = Field(default_factory=list, max_length=30)
     recent_reviews: list[ReviewContext] = Field(default_factory=list, max_length=7)
     completed_facts: list[str] = Field(default_factory=list, max_length=20)
@@ -371,9 +386,7 @@ class CompanionMessageCandidate(StrictModel):
 
 class ProviderUsage(StrictModel):
     model_id: str
-    provider: Literal[
-        "mock", "openai", "zhipu", "deepseek", "openai_compatible"
-    ] = "mock"
+    provider: Literal["mock", "openai", "zhipu", "deepseek", "openai_compatible"] = "mock"
     request_id: str | None = None
     raw_output_hash: str | None = Field(default=None, min_length=64, max_length=64)
     tokens_in: int = Field(ge=0)

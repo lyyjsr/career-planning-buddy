@@ -1,6 +1,5 @@
 """Guest authentication and current-user HTTP endpoints."""
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
@@ -14,6 +13,7 @@ from app.api.dependencies import (
 from app.core.database import get_db_session
 from app.core.exceptions import AppError
 from app.core.security import AuthenticatedUser
+from app.core.time import product_today
 from app.repositories.agent_runs import AgentRunRepository
 from app.repositories.goal_briefs import GoalBriefRepository
 from app.repositories.reviews import ReviewRepository
@@ -85,7 +85,7 @@ async def get_me(
     if active_plan is not None:
         task_list = await plan_query.list_tasks(
             user_id=user_id,
-            scheduled_date=datetime.now(UTC).date(),
+            scheduled_date=product_today(),
             state=None,
             plan_id=active_plan.plan_id,
             limit=20,
@@ -116,12 +116,13 @@ async def get_me(
             companion.message if companion is not None else "",
         )
 
-    profile_complete = (
+    profile_complete = profile is not None
+    planning_window_valid = (
         profile is not None
         and profile.start_date is not None
         and profile.deadline is not None
         and profile.start_date <= profile.deadline
-        and profile.deadline >= datetime.now(UTC).date()
+        and profile.deadline >= product_today()
     )
     return MeResponse(
         user=UserSummary(
@@ -130,6 +131,7 @@ async def get_me(
             role="dev" if current_user.role == "dev" else "user",
         ),
         profile_complete=profile_complete,
+        planning_window_valid=planning_window_valid,
         profile=(
             ProfileResponse.model_validate(profile, from_attributes=True)
             if profile is not None
@@ -141,3 +143,11 @@ async def get_me(
         active_goal_brief=active_goal_brief,
         latest_review=latest_review,
     )
+
+
+@router.delete("/me", status_code=204)
+async def delete_me(
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> None:
+    await service.delete_current_user(current_user.id)

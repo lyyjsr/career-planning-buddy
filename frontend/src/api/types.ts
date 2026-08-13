@@ -44,8 +44,9 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
-export type RunResultKind = "plan" | "clarification" | "safe_response" | "navigation";
-export type RunIntent = "create_plan" | "replan" | "navigate" | "unsupported";
+export type RunResultKind = "plan" | "clarification" | "safe_response" | "navigation" | "interview_turn" | "interview_report" | "resume_assessment";
+export type RunIntent = "create_plan" | "replan" | "navigate" | "unsupported" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment";
+export type RunKind = "planning" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment";
 export type RunUserStatus =
   | "queued"
   | "generating"
@@ -249,15 +250,235 @@ export interface SafeResponsePayload {
   disclaimer: string;
 }
 
+export interface ResumeVersionResponse {
+  resume_version_id: string;
+  label: string;
+  source_type: "pasted_text" | "uploaded_file";
+  source_text: string;
+  structured: Record<string, unknown>;
+  content_hash: string;
+  parent_version_id: string | null;
+  created_at: string;
+}
+
+export interface ResumeDocumentExtractResponse {
+  filename: string;
+  media_type: "application/pdf" | "application/vnd.openxmlformats-officedocument.wordprocessingml.document" | "text/plain";
+  character_count: number;
+  source_text: string;
+}
+
+export interface JobTargetResponse {
+  job_target_id: string;
+  title: string;
+  company: string | null;
+  jd_text: string;
+  requirements: Record<string, unknown>;
+  content_hash: string;
+  created_at: string;
+}
+
+export interface QuestionSource {
+  kind: "resume" | "job_target" | "answer";
+  ref: string;
+  excerpt: string;
+}
+
+export interface TurnAnalysis {
+  covered_key_points: string[];
+  missing_key_points: string[];
+  factual_findings: Array<{
+    claim: string;
+    verdict: "correct" | "incorrect" | "partially_correct" | "insufficient_evidence";
+    severity: "low" | "medium" | "high";
+    confidence: number;
+    rationale: string;
+    evidence_refs: string[];
+  }>;
+  answer_structure: Record<string, unknown>;
+  improvement_actions: string[];
+  suggested_outline: string[];
+  followup_reason: string | null;
+  limitations: string[];
+}
+
+export interface AudioAnalysis {
+  transcript: string;
+  segments: Array<{ text: string; start_seconds: number; end_seconds: number }>;
+  duration_seconds: number | null;
+  effective_words_per_minute: number | null;
+  long_pause_count: number | null;
+  preparation_seconds: number | null;
+  filler_count: number;
+  repeated_phrase_count: number;
+  asr_confidence: number | null;
+  timestamps_reliable: boolean;
+  limitations: string[];
+}
+
+export interface InterviewTurnResponse {
+  turn_id: string;
+  ordinal: number;
+  parent_turn_id: string | null;
+  topic_key: string;
+  question_type: "technical" | "project" | "resume_claim" | "followup";
+  question_text: string;
+  question_sources: QuestionSource[];
+  answer_text: string | null;
+  answer_status: "pending" | "submitted" | "skipped";
+  analysis_status: "not_started" | "running" | "ready" | "failed";
+  analysis: TurnAnalysis | null;
+  audio_analysis: AudioAnalysis | null;
+  version: number;
+  answered_at: string | null;
+  created_at: string;
+}
+
+export interface InterviewWeakness {
+  weakness_key: string;
+  topic: string;
+  dimension: string;
+  severity: "low" | "medium" | "high";
+  confidence: number;
+  evidence_turn_ids: string[];
+  status: "observed" | "repeated" | "improving";
+}
+
+export interface WeaknessComparison {
+  weakness_key: string;
+  topic: string;
+  dimension: string;
+  status: "improved" | "unchanged" | "regressed" | "insufficient_comparable_evidence";
+  baseline_severity: "low" | "medium" | "high";
+  current_severity: "low" | "medium" | "high" | null;
+  baseline_evidence_turn_ids: string[];
+  current_evidence_turn_ids: string[];
+}
+
+export interface InterviewComparison {
+  baseline_session_id: string;
+  current_session_id: string;
+  items: WeaknessComparison[];
+}
+
+export interface InterviewReport {
+  overall_summary: string;
+  strengths: string[];
+  weaknesses: InterviewWeakness[];
+  dimension_summary: Array<Record<string, unknown>>;
+  recommended_training_actions: Array<{
+    title: string;
+    starter_action: string;
+    deliverable: string;
+    estimated_minutes: number;
+    source_weakness_keys: string[];
+  }>;
+  comparison: InterviewComparison | null;
+  limitations: string[];
+}
+
+export interface InterviewSessionResponse {
+  interview_id: string;
+  resume_version_id: string;
+  job_target_id: string;
+  interview_type: "role_focused" | "resume_deep_dive";
+  status: "draft" | "active" | "report_generating" | "completed" | "aborted";
+  question_limit: number;
+  followup_limit: number;
+  asked_question_count: number;
+  followup_count: number;
+  current_turn_id: string | null;
+  active_run: {
+    run_id: string;
+    run_kind: "interview_start" | "interview_answer" | "interview_report";
+    status: "pending" | "running";
+    events_url: string;
+  } | null;
+  turns: InterviewTurnResponse[];
+  report_status: "not_requested" | "generating" | "ready" | "failed";
+  report: InterviewReport | null;
+  comparison_session_id: string | null;
+  retest_weakness_keys: string[];
+  version: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterviewRunResponse {
+  interview_id: string;
+  run_id: string;
+  status: "pending";
+  events_url: string;
+}
+
+export interface ResumeClaimFinding {
+  claim_id: string;
+  claim_text: string;
+  verdict: "supported" | "partially_supported" | "unsupported" | "insufficient_evidence";
+  rationale: string;
+  requirement_ids: string[];
+  evidence_turn_ids: string[];
+  suggested_rewrite: string | null;
+}
+
+export interface ResumeAssessmentResponse {
+  assessment_id: string;
+  resume_version_id: string;
+  job_target_id: string;
+  interview_session_id: string;
+  claims: ResumeClaimFinding[];
+  limitations: string[];
+  created_at: string;
+}
+
+export interface TrainingActionsPreviewResponse {
+  interview_id: string;
+  mode: "task_adjustment" | "replan";
+  items: Array<{
+    action_index: number;
+    action: InterviewReport["recommended_training_actions"][number];
+    task_id: string | null;
+  }>;
+  confirmation_required: true;
+}
+
+export interface TrainingActionsConfirmResponse {
+  interview_id: string;
+  mode: "task_adjustment" | "replan";
+  adjustment_ids: string[];
+  run: { run_id: string; status: "pending"; events_url: string } | null;
+}
+
+export interface InterviewTurnResultSummary {
+  interview_id: string;
+  turn_id: string;
+  session_status: string;
+  next_turn_id: string | null;
+}
+
+export interface InterviewReportResultSummary {
+  interview_id: string;
+  report_version: number;
+  status: "ready";
+}
+
+export interface ResumeAssessmentResultSummary {
+  assessment_id: string;
+  claim_count: number;
+}
+
 export interface AgentRunResponse {
   run_id: string;
+  run_kind: RunKind;
   status: RunStatus;
   user_status: RunUserStatus;
   status_message: string;
   resolved_intent: RunIntent | null;
   replan_mode: ReplanMode | null;
   result_kind: RunResultKind | null;
-  result: PlanResultSummary | ClarificationRequestPayload | SafeResponsePayload | NavigationResultPayload | null;
+  result: PlanResultSummary | ClarificationRequestPayload | SafeResponsePayload | NavigationResultPayload | InterviewTurnResultSummary | InterviewReportResultSummary | ResumeAssessmentResultSummary | null;
   final_plan_id: string | null;
   fallback_reason: string | null;
   error_code: string | null;
@@ -324,6 +545,7 @@ export interface UserSummary {
 export interface MeResponse {
   user: UserSummary;
   profile_complete: boolean;
+  planning_window_valid: boolean;
   profile: ProfileResponse | null;
   active_plan: ActivePlanResponse | null;
   today_tasks: TaskResponse[];

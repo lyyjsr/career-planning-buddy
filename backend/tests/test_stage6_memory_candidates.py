@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.agent.executor import AgentRunExecutor
 from app.core.config import get_settings
+from app.core.time import product_today
 from app.models.evidence import MemoryCandidate
 from app.repositories.memories import MemoryRepository
 from app.schemas.reviews import ReviewCreateRequest
@@ -95,7 +96,7 @@ async def test_review_transaction_creates_pending_candidates_once(
     service = ReviewService(db_session, get_settings(), ManualExecutor())
     payload = ReviewCreateRequest(
         plan_id=plan.id,
-        review_date=datetime.now(UTC).date(),
+        review_date=product_today(),
         mood=3,
         blockers="环境配置问题",
         adjustment_request="明天任务少一点",
@@ -149,7 +150,7 @@ async def test_distiller_failure_does_not_rollback_review(
         user_id=user_id,
         payload=ReviewCreateRequest(
             plan_id=plan.id,
-            review_date=datetime.now(UTC).date(),
+            review_date=product_today(),
             mood=3,
             adjustment_request="减少任务",
         ),

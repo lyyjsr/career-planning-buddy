@@ -68,6 +68,10 @@ class EvidenceKind(StrEnum):
     # expected_citations strings (set on the Case) into the UUID form
     # that PlanCandidate.evidence_refs actually carries.
     EXPECTED_CITATIONS_MAP = "expected_citations_map"
+    INTERVIEW_QUESTION = "interview_question"
+    INTERVIEW_ANALYSIS = "interview_analysis"
+    INTERVIEW_REPORT = "interview_report"
+    RESUME_CLAIM_FINDING = "resume_claim_finding"
 
 
 @dataclass(frozen=True, slots=True)

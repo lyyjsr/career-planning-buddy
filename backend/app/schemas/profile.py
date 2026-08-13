@@ -1,9 +1,10 @@
 """User profile request and response contracts."""
 
-from datetime import UTC, date, datetime
+from datetime import date
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from app.core.time import product_today
 from app.schemas.base import StrictModel
 from app.schemas.enums import CareerStage, GoalType, SkillLevel
 
@@ -56,7 +57,7 @@ class ProfilePutRequest(ProfileFields):
     @field_validator("deadline")
     @classmethod
     def validate_deadline(cls, value: date) -> date:
-        today = datetime.now(UTC).date()
+        today = product_today()
         if value < today:
             raise ValueError("deadline cannot be earlier than today")
         return value
@@ -86,7 +87,7 @@ class ProfilePatchRequest(StrictModel):
     @field_validator("deadline")
     @classmethod
     def validate_deadline(cls, value: date | None) -> date | None:
-        today = datetime.now(UTC).date()
+        today = product_today()
         if value is not None and value < today:
             raise ValueError("deadline cannot be earlier than today")
         return value

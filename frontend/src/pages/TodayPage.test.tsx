@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCancelRun, useRun } from "@/api/agent-runs";
 import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
 import { useMe } from "@/api/auth";
+import { useInterviews } from "@/api/interviews";
 import { useRunEventStream } from "@/api/sse";
 import type { ActivePlanResponse, AgentRunResponse, TaskResponse } from "@/api/types";
 import { TodayPage } from "./TodayPage";
@@ -21,6 +22,7 @@ vi.mock("@/api/goal-briefs", () => ({
   useRefineGoalBrief: vi.fn(),
 }));
 vi.mock("@/api/auth", () => ({ useMe: vi.fn() }));
+vi.mock("@/api/interviews", () => ({ useInterviews: vi.fn() }));
 vi.mock("@/api/sse", () => ({ useRunEventStream: vi.fn() }));
 
 function task(overrides: Partial<TaskResponse>): TaskResponse {
@@ -63,6 +65,7 @@ beforeEach(() => {
   vi.mocked(useRefineGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useRefineGoalBrief>);
   vi.mocked(useConfirmGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useConfirmGoalBrief>);
   vi.mocked(useCancelGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useCancelGoalBrief>);
+  vi.mocked(useInterviews).mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useInterviews>);
 });
 
 afterEach(() => {

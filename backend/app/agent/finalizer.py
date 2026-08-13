@@ -14,6 +14,7 @@ from app.harness.events import EventRecorder
 from app.harness.evidence import evidence_refs_are_visible
 from app.harness.trace import TraceRecorder
 from app.models.agent_run import AgentRun, AgentStep
+from app.models.interview import InterviewSession
 from app.repositories.plans import PlanRepository
 from app.schemas.agent_runs import (
     ClarificationRequest,
@@ -24,6 +25,14 @@ from app.schemas.agent_runs import (
     PlanResultSummary,
     SafeResponse,
 )
+from app.schemas.interviews import (
+    InterviewAnswerCandidate,
+    InterviewQuestionCandidate,
+    InterviewReport,
+    InterviewReportResultSummary,
+    InterviewTurnResultSummary,
+)
+from app.services.interview_persistence import InterviewPersistenceService
 
 TERMINAL_STATUSES = {"completed", "degraded", "failed", "cancelled"}
 
@@ -228,6 +237,160 @@ class AgentRunFinalizer:
             )
             raise
 
+    async def finalize_interview(
+        self,
+        *,
+        run_id: UUID,
+        candidate: InterviewQuestionCandidate | InterviewAnswerCandidate | InterviewReport,
+        persist_step_id: UUID,
+    ) -> None:
+        if self._budget is None:
+            raise RuntimeError("interview finalization requires a valid RuntimeConfigSnapshot")
+        started = monotonic()
+        try:
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    run = await self._lock_active_run(session, run_id)
+                    self._ensure_can_persist(run)
+                    interview = await session.scalar(
+                        select(InterviewSession)
+                        .where(
+                            InterviewSession.id == run.interview_session_id,
+                            InterviewSession.user_id == run.user_id,
+                        )
+                        .with_for_update()
+                    )
+                    if interview is None:
+                        raise PersistTransactionError("InterviewSession is missing")
+                    persistence = InterviewPersistenceService(session)
+                    event_type: str
+                    event_payload: dict[str, object]
+                    start_report = False
+                    result: InterviewTurnResultSummary | InterviewReportResultSummary
+                    if isinstance(candidate, InterviewQuestionCandidate):
+                        next_turn = await persistence.persist_question(
+                            run=run,
+                            interview=interview,
+                            candidate=candidate,
+                        )
+                        result = InterviewTurnResultSummary(
+                            interview_id=interview.id,
+                            turn_id=next_turn.id,
+                            session_status="active",
+                            next_turn_id=next_turn.id,
+                        )
+                        event_type = "interview.turn.ready"
+                        event_payload = {
+                            "interview_id": str(interview.id),
+                            "turn_id": str(next_turn.id),
+                        }
+                        result_kind = "interview_turn"
+                    elif isinstance(candidate, InterviewAnswerCandidate):
+                        current_turn, following_turn = await persistence.persist_answer(
+                            run=run,
+                            interview=interview,
+                            candidate=candidate,
+                        )
+                        result = InterviewTurnResultSummary(
+                            interview_id=interview.id,
+                            turn_id=current_turn.id,
+                            session_status=(
+                                "report_generating"
+                                if candidate.next_action == "finish"
+                                else "active"
+                            ),
+                            next_turn_id=(
+                                following_turn.id if following_turn is not None else None
+                            ),
+                        )
+                        event_type = "interview.answer.ready"
+                        event_payload = {
+                            "interview_id": str(interview.id),
+                            "turn_id": str(current_turn.id),
+                            "next_turn_id": (
+                                str(following_turn.id) if following_turn is not None else None
+                            ),
+                            "next_action": candidate.next_action,
+                        }
+                        start_report = candidate.next_action == "finish"
+                        result_kind = "interview_turn"
+                    else:
+                        if not isinstance(candidate, InterviewReport):
+                            raise PersistTransactionError(
+                                "interview candidate does not match the Run kind"
+                            )
+                        await persistence.persist_report(
+                            run=run,
+                            interview=interview,
+                            report=candidate,
+                        )
+                        result = InterviewReportResultSummary(
+                            interview_id=interview.id,
+                            report_version=interview.report_version or 1,
+                        )
+                        event_type = "interview.report.ready"
+                        event_payload = {
+                            "interview_id": str(interview.id),
+                            "report_version": interview.report_version or 1,
+                        }
+                        result_kind = "interview_report"
+                    persist_step = await session.get(AgentStep, persist_step_id)
+                    if persist_step is None:
+                        raise PersistTransactionError("interview persist step is missing")
+                    latency_ms = int((monotonic() - started) * 1000)
+                    await TraceRecorder(session).complete_step(
+                        persist_step,
+                        status="completed",
+                        latency_ms=latency_ms,
+                        trace_data=event_payload,
+                    )
+                    recorder = EventRecorder(session)
+                    await recorder.record(
+                        run_id,
+                        "node.completed",
+                        {
+                            "node_name": "interview_persist",
+                            "step_sequence": persist_step.sequence,
+                            "status": "completed",
+                            "latency_ms": latency_ms,
+                        },
+                    )
+                    await recorder.record(run_id, event_type, event_payload)
+                    run.status = "completed"
+                    self._clear_lease(run)
+                    run.result_kind = result_kind
+                    run.result_payload_json = result.model_dump(mode="json")
+                    run.fallback_reason = None
+                    run.error_code = None
+                    run.error_message = None
+                    run.total_tokens_in = self._budget.tokens_in
+                    run.total_tokens_out = self._budget.tokens_out
+                    run.finished_at = datetime.now(UTC)
+                    run.total_latency_ms = max(
+                        0,
+                        int((run.finished_at - run.created_at).total_seconds() * 1000),
+                    )
+                    await recorder.record(
+                        run_id,
+                        "run.completed",
+                        {"status": "completed", "result_kind": result_kind},
+                        allow_terminal_run=True,
+                    )
+                    if start_report:
+                        await session.flush()
+                        await persistence.create_auto_report_run(
+                            source_run=run, interview=interview
+                        )
+        except (AgentLeaseLostError, RunCancelledError):
+            raise
+        except Exception:
+            await self.finalize_failed(
+                run_id,
+                error_code="PERSIST_TRANSACTION_FAILED",
+                persist_step_id=persist_step_id,
+            )
+            raise
+
     async def finalize_degraded(
         self,
         *,
@@ -265,6 +428,7 @@ class AgentRunFinalizer:
                     0,
                     int((run.finished_at - run.created_at).total_seconds() * 1000),
                 )
+                await InterviewPersistenceService(session).mark_unsuccessful(run)
                 await recorder.record(
                     run_id,
                     "run.degraded",
@@ -352,6 +516,7 @@ class AgentRunFinalizer:
                     0,
                     int((run.finished_at - run.created_at).total_seconds() * 1000),
                 )
+                await InterviewPersistenceService(session).mark_unsuccessful(run)
                 await recorder.record(
                     run_id,
                     event_type,

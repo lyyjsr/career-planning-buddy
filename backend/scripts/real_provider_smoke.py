@@ -139,11 +139,11 @@ async def _run_in_transaction(
         )
         settled_at = datetime.now(UTC)
         for task in source_tasks:
-            task.state = "completed"
-            task.actual_minutes = task.estimated_minutes
-            task.started_at = settled_at
-            task.completed_at = settled_at
+            task.state = "expired"
+            task.expires_at = settled_at
         source_plan.status = "completed"
+        source_plan.plan_date = datetime.now(UTC).date() - timedelta(days=7)
+        source_plan.horizon_start = source_plan.plan_date
         source_plan.updated_at = settled_at
         await session.flush()
 

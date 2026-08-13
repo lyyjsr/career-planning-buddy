@@ -10,12 +10,14 @@ from app.models.evidence import (
     SearchSource,
 )
 from app.models.goal_brief import GoalBrief
+from app.models.interview import InterviewSession, InterviewTurn
 from app.models.plan import CompanionMessage, Plan, Task, TaskAdjustmentProposal
 from app.models.provider_call import (
     EvalProviderFixtureBundle,
     EvalProviderFixtureItem,
     ProviderCall,
 )
+from app.models.resume import JobTarget, ResumeAssessment, ResumeVersion
 from app.models.review import Review
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -35,9 +37,14 @@ __all__ = [
     "Memory",
     "MemoryCandidate",
     "GoalBrief",
+    "InterviewSession",
+    "InterviewTurn",
+    "JobTarget",
     "Plan",
     "ProviderCall",
     "Review",
+    "ResumeVersion",
+    "ResumeAssessment",
     "SearchSource",
     "Task",
     "TaskAdjustmentProposal",

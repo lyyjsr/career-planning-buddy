@@ -1,6 +1,6 @@
 """Fixed Stage 4 planning/replanning graph topology and node orchestration."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
@@ -27,6 +27,7 @@ from app.agent.nodes import (
 )
 from app.agent.ports import PlanningResultPort
 from app.core.database import session_transaction
+from app.core.time import product_today
 from app.harness.budget import BudgetGuard
 from app.harness.evidence import build_evidence_visibility
 from app.harness.snapshots import SnapshotService
@@ -37,6 +38,7 @@ from app.models.user_profile import UserProfile
 from app.providers.embedding import EmbeddingProvider, MockEmbeddingProvider
 from app.providers.llm import PlanningProvider
 from app.repositories.evidence import EvidenceRepository
+from app.repositories.interviews import InterviewRepository
 from app.repositories.plans import PlanRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.agent_runs import (
@@ -403,6 +405,7 @@ class FixedPlanningGraph:
         completed_facts: list[str] = []
         blockers: list[str] = []
         selected_memories: list[MemoryContext] = []
+        interview_training_actions: list[str] = []
         async with self._session_factory() as session:
             async with session_transaction(session):
                 plans = PlanRepository(session)
@@ -456,6 +459,29 @@ class FixedPlanningGraph:
                 if source_review is not None and source_review.blockers:
                     blockers.insert(0, source_review.blockers)
                     blockers = list(dict.fromkeys(blockers))[:10]
+                report_session_id = state["request"].source_interview_report_session_id
+                if report_session_id is not None:
+                    report_session = await InterviewRepository(session).get_session(
+                        report_session_id, state["user_id"]
+                    )
+                    if report_session is None or report_session.report_json is None:
+                        raise StructuredOutputError(
+                            "source Interview Report must belong to the Run user"
+                        )
+                    raw_actions = report_session.report_json.get(
+                        "recommended_training_actions", []
+                    )
+                    actions = raw_actions if isinstance(raw_actions, list) else []
+                    interview_training_actions = [
+                        str(item.get("title")) + "：" + str(item.get("deliverable"))
+                        for item in actions
+                        if (
+                            isinstance(item, dict)
+                            and item.get("title")
+                            and item.get("deliverable")
+                            and str(item.get("title")) in state["request"].message
+                        )
+                    ][:3]
         memory_selection = MemorySelectionResult(
             selected=[],
             query_hash="",
@@ -511,7 +537,7 @@ class FixedPlanningGraph:
         planning_date = None
         if source_plan is not None:
             planning_date = max(
-                datetime.now(UTC).date(),
+                product_today(),
                 source_plan.plan_date + timedelta(days=7),
             )
         context = build_planning_context(
@@ -527,7 +553,15 @@ class FixedPlanningGraph:
             blockers=blockers,
             planning_date=planning_date,
         )
-        context = context.model_copy(update={"pinned_memories": selected_memories})
+        context = context.model_copy(
+            update={
+                "pinned_memories": selected_memories,
+                "source_interview_report_session_id": (
+                    state["request"].source_interview_report_session_id
+                ),
+                "interview_training_actions": interview_training_actions,
+            }
+        )
         compression = compress_context_history(
             context,
             recent_tasks_budget=config.context_recent_tasks_budget,
@@ -551,6 +585,8 @@ class FixedPlanningGraph:
             source_plan_version=context.source_plan_version,
             source_plan=context.source_plan,
             source_review=context.source_review,
+            source_interview_report_session_id=context.source_interview_report_session_id,
+            interview_training_actions=context.interview_training_actions,
             recent_tasks=context.recent_tasks,
             recent_reviews=context.recent_reviews,
             completed_facts=completed_facts,

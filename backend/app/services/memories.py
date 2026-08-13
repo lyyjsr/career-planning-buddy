@@ -142,15 +142,31 @@ class MemoryService:
                 if candidate.status != "pending":
                     raise self._candidate_conflict(candidate.status)
                 vector = await self._best_effort_embedding(candidate.summary)
-                memory = await self._repository.create_memory(
-                    user_id=user_id,
-                    memory_type=candidate.memory_type,
-                    summary=candidate.summary,
-                    content_json=candidate.content_json,
-                    sensitivity="sensitive",
-                    embedding=vector,
-                    source_run_id=candidate.proposed_by_run_id,
+                weakness_key = candidate.content_json.get("weakness_key")
+                memory = (
+                    await self._repository.get_active_weakness(user_id, weakness_key)
+                    if isinstance(weakness_key, str)
+                    else None
                 )
+                if memory is None:
+                    memory = await self._repository.create_memory(
+                        user_id=user_id,
+                        memory_type=candidate.memory_type,
+                        summary=candidate.summary,
+                        content_json=candidate.content_json,
+                        sensitivity="sensitive",
+                        embedding=vector,
+                        source_run_id=candidate.proposed_by_run_id,
+                    )
+                else:
+                    memory.summary = candidate.summary
+                    memory.content_json = self._merge_weakness_content(
+                        memory.content_json, candidate.content_json
+                    )
+                    memory.embedding = vector
+                    memory.source_run_id = candidate.proposed_by_run_id
+                    memory.version += 1
+                    memory.updated_at = datetime.now(UTC)
                 self._bind_decision(
                     candidate,
                     idempotency_key=idempotency_key,
@@ -275,6 +291,29 @@ class MemoryService:
             separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _merge_weakness_content(
+        current: dict[str, object], incoming: dict[str, object]
+    ) -> dict[str, object]:
+        merged = {**current, **incoming}
+        for field in ("evidence_session_ids", "evidence_turn_ids"):
+            current_values = current.get(field)
+            incoming_values = incoming.get(field)
+            values = [
+                str(value)
+                for value in [
+                    *(current_values if isinstance(current_values, list) else []),
+                    *(incoming_values if isinstance(incoming_values, list) else []),
+                ]
+            ]
+            merged[field] = list(dict.fromkeys(values))[:20]
+        merged_turns = merged.get("evidence_turn_ids")
+        merged["observation_count"] = len(merged_turns) if isinstance(merged_turns, list) else 0
+        merged["first_observed_at"] = current.get("first_observed_at") or incoming.get(
+            "first_observed_at"
+        )
+        return merged
 
     @staticmethod
     def _idempotency_conflict() -> AppError:

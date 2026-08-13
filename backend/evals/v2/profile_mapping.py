@@ -13,12 +13,13 @@ populated ``ProfilePutRequest`` from an ``EvalScenario``. ``stage`` and
 passed through unchanged.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from types import MappingProxyType
 
+from app.core.time import product_today
 from app.schemas.enums import CareerStage, GoalType, SkillLevel
 from app.schemas.profile import ProfilePutRequest
-from evals.v2.contracts import EvalScenario
+from evals.v2.contracts import EvalScenarioUnion, PlanningEvalScenario
 
 MAPPING_VERSION = "goal-type-mapping-v1"
 
@@ -44,7 +45,7 @@ def map_goal_type(eval_goal_type: str) -> GoalType:
         ) from exc
 
 
-def scenario_to_profile_payload(scenario: EvalScenario) -> ProfilePutRequest:
+def scenario_to_profile_payload(scenario: EvalScenarioUnion) -> ProfilePutRequest:
     """Build a Runtime ``ProfilePutRequest`` from a V2 ``EvalScenario``.
 
     The V2 Adapter guarantees ``stage`` / ``skill_level`` literals share their
@@ -52,7 +53,7 @@ def scenario_to_profile_payload(scenario: EvalScenario) -> ProfilePutRequest:
     ``goal_type`` requires the explicit frozen mapping.
     """
 
-    if scenario.profile is None:
+    if not isinstance(scenario, PlanningEvalScenario) or scenario.profile is None:
         raise ValueError("scenario has no profile to map")
     profile = scenario.profile
     return ProfilePutRequest(
@@ -61,6 +62,6 @@ def scenario_to_profile_payload(scenario: EvalScenario) -> ProfilePutRequest:
         time_budget_minutes=profile.time_budget_minutes,
         skill_level=SkillLevel(profile.skill_level),
         skill_summary=f"eval-profile:{profile.goal_type}",
-        start_date=datetime.now(UTC).date(),
-        deadline=datetime.now(UTC).date() + timedelta(days=27),
+        start_date=product_today(),
+        deadline=product_today() + timedelta(days=27),
     )

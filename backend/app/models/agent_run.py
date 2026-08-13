@@ -37,17 +37,26 @@ class AgentRun(Base):
         ),
         CheckConstraint(
             "result_kind IS NULL OR "
-            "result_kind IN ('plan','clarification','safe_response','navigation')",
+            "result_kind IN ('plan','clarification','safe_response','navigation',"
+            "'interview_turn','interview_report','resume_assessment')",
             name="ck_agent_runs_result_kind",
         ),
         CheckConstraint(
-            "hint_intent IS NULL OR hint_intent IN ('create_plan','replan')",
+            "hint_intent IS NULL OR hint_intent IN "
+            "('create_plan','replan','interview_start','interview_answer','interview_report',"
+            "'resume_assessment')",
             name="ck_agent_runs_hint_intent",
         ),
         CheckConstraint(
             "resolved_intent IS NULL OR "
-            "resolved_intent IN ('create_plan','replan','navigate','unsupported')",
+            "resolved_intent IN ('create_plan','replan','navigate','unsupported',"
+            "'interview_start','interview_answer','interview_report','resume_assessment')",
             name="ck_agent_runs_resolved_intent",
+        ),
+        CheckConstraint(
+            "run_kind IN ('planning','interview_start','interview_answer','interview_report',"
+            "'resume_assessment')",
+            name="ck_agent_runs_run_kind",
         ),
         CheckConstraint(
             "replan_mode IS NULL OR replan_mode IN ('initial','continue','adjust')",
@@ -59,8 +68,9 @@ class AgentRun(Base):
         ),
         CheckConstraint(
             "(status <> 'completed') OR "
-            "(result_kind = 'plan' AND final_plan_id IS NOT NULL "
-            "AND fallback_reason IS NULL AND error_code IS NULL)",
+            "(((result_kind = 'plan' AND final_plan_id IS NOT NULL) OR "
+            "(result_kind IN ('interview_turn','interview_report','resume_assessment') "
+            "AND final_plan_id IS NULL)) AND fallback_reason IS NULL AND error_code IS NULL)",
             name="ck_agent_runs_completed_result",
         ),
         CheckConstraint(
@@ -108,6 +118,27 @@ class AgentRun(Base):
         ForeignKey("goal_briefs.id", ondelete="SET NULL"),
         unique=True,
     )
+    run_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="planning"
+    )
+    interview_session_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "interview_sessions.id",
+            name="fk_agent_runs_interview_session",
+            use_alter=True,
+            ondelete="CASCADE",
+        ),
+    )
+    interview_turn_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "interview_turns.id",
+            name="fk_agent_runs_interview_turn",
+            use_alter=True,
+            ondelete="SET NULL",
+        ),
+    )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     request_text: Mapped[str] = mapped_column(Text, nullable=False)
     hint_intent: Mapped[str | None] = mapped_column(String(32))
@@ -129,6 +160,15 @@ class AgentRun(Base):
             "reviews.id",
             name="fk_agent_runs_source_review_id",
             use_alter=True,
+        ),
+    )
+    source_interview_report_session_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "interview_sessions.id",
+            name="fk_agent_runs_source_interview_report_session_id",
+            use_alter=True,
+            ondelete="SET NULL",
         ),
     )
     replay_of_run_id: Mapped[UUID | None] = mapped_column(

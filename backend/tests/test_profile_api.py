@@ -1,10 +1,15 @@
 """Guest authentication and profile API contract tests."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from http import HTTPStatus
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.time import product_today
+from app.models.user_profile import UserProfile
 
 
 async def guest_login(
@@ -28,8 +33,8 @@ def profile_body(time_budget_minutes: int = 120) -> dict[str, object]:
         "time_budget_minutes": time_budget_minutes,
         "skill_level": "intermediate",
         "skill_summary": "FastAPI and RAG",
-        "start_date": datetime.now(UTC).date().isoformat(),
-        "deadline": (datetime.now(UTC).date() + timedelta(days=34)).isoformat(),
+        "start_date": product_today().isoformat(),
+        "deadline": (product_today() + timedelta(days=34)).isoformat(),
         "preferences": {
             "target_companies": ["Example Company"],
             "preferred_time_slot": "evening",
@@ -70,7 +75,33 @@ async def test_me_reports_incomplete_then_complete_profile(api_client: AsyncClie
     assert created.status_code == HTTPStatus.OK
     assert created.json()["version"] == 1
     assert after.json()["profile_complete"] is True
+    assert after.json()["planning_window_valid"] is True
     assert after.json()["profile"]["goal_type"] == "agent_app"
+
+
+@pytest.mark.asyncio
+async def test_expired_planning_window_does_not_make_product_profile_incomplete(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token, user_id, _ = await guest_login(api_client)
+    await api_client.put(
+        "/api/v1/profile",
+        json=profile_body(),
+        headers={**bearer(token), "Idempotency-Key": "expired-window-profile"},
+    )
+    profile = await db_session.scalar(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    )
+    assert profile is not None
+    profile.start_date = product_today() - timedelta(days=30)
+    profile.deadline = product_today() - timedelta(days=1)
+    await db_session.flush()
+
+    response = await api_client.get("/api/v1/me", headers=bearer(token))
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["profile_complete"] is True
+    assert response.json()["planning_window_valid"] is False
 
 
 @pytest.mark.asyncio
@@ -165,3 +196,21 @@ async def test_profile_request_rejects_user_id_and_missing_idempotency_key(
     assert with_user_id.json()["error"]["code"] == "VALIDATION_PROFILE_INVALID"
     assert without_key.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
     assert without_key.json()["error"]["code"] == "VALIDATION_PROFILE_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_delete_me_removes_current_guest_and_invalidates_its_token(
+    api_client: AsyncClient,
+) -> None:
+    token, _, _ = await guest_login(api_client)
+    await api_client.put(
+        "/api/v1/profile",
+        json=profile_body(),
+        headers={**bearer(token), "Idempotency-Key": "profile-before-account-delete"},
+    )
+
+    deleted = await api_client.delete("/api/v1/me", headers=bearer(token))
+    after = await api_client.get("/api/v1/me", headers=bearer(token))
+
+    assert deleted.status_code == HTTPStatus.NO_CONTENT
+    assert after.status_code == HTTPStatus.UNAUTHORIZED

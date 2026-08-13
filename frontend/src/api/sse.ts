@@ -178,6 +178,9 @@ export function useRunEventStream(runId: string | undefined): RunStreamState {
                 if (typeof message === "string") setProgressMessage(message);
               }
               if (event.type === "plan.ready") invalidatePlanState();
+              if (event.type.startsWith("interview.")) {
+                void queryClient.invalidateQueries({ queryKey: ["interviews"] });
+              }
               if (TERMINAL_EVENTS.has(event.type)) {
                 terminalReceived = true;
                 invalidatePlanState();

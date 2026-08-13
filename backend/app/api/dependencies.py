@@ -16,6 +16,7 @@ from app.harness.pairwise_sweep_executor import (
     PairwiseSweepExecutor,
     pairwise_sweep_executor,
 )
+from app.providers.asr import ASRProvider
 from app.providers.embedding import EmbeddingProvider
 from app.providers.goal_understanding import GoalUnderstandingProvider
 from app.providers.registry import RuntimeProviderRegistry
@@ -26,9 +27,15 @@ from app.services.auth import AuthService
 from app.services.dev import DevTraceService
 from app.services.evals import EvalService
 from app.services.goal_briefs import GoalBriefService
+from app.services.interview_audio import InterviewAudioService
+from app.services.interview_coaching import InterviewCoachingService
+from app.services.interviews import InterviewService
 from app.services.memories import MemoryService
 from app.services.plans import PlanQueryService
 from app.services.profiles import ProfileService
+from app.services.resume_assessments import ResumeAssessmentService
+from app.services.resume_documents import ResumeDocumentService
+from app.services.resumes import ResumeService
 from app.services.reviews import ReviewService
 from app.services.task_adjustments import TaskAdjustmentService
 
@@ -49,6 +56,11 @@ def get_goal_understanding_provider(request: Request) -> GoalUnderstandingProvid
 def get_task_adjustment_provider(request: Request) -> TaskAdjustmentProvider:
     providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
     return providers.task_adjustment
+
+
+def get_asr_provider(request: Request) -> ASRProvider:
+    providers = cast(RuntimeProviderRegistry, request.app.state.runtime_providers)
+    return providers.asr
 
 
 def get_token_service(settings: Annotated[Settings, Depends(get_settings)]) -> TokenService:
@@ -86,6 +98,49 @@ def get_agent_run_service(
     executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> AgentRunService:
     return AgentRunService(session, settings, executor)
+
+
+def get_resume_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+) -> ResumeService:
+    return ResumeService(session)
+
+
+def get_resume_document_service() -> ResumeDocumentService:
+    return ResumeDocumentService()
+
+
+def get_resume_assessment_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+) -> ResumeAssessmentService:
+    return ResumeAssessmentService(session)
+
+
+def get_interview_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
+) -> InterviewService:
+    return InterviewService(session, settings, executor)
+
+
+def get_interview_coaching_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
+) -> InterviewCoachingService:
+    return InterviewCoachingService(session, settings, executor)
+
+
+def get_interview_audio_service(
+    session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    provider: Annotated[ASRProvider, Depends(get_asr_provider)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
+) -> InterviewAudioService:
+    return InterviewAudioService(
+        session, settings, provider, InterviewService(session, settings, executor)
+    )
 
 
 def get_goal_brief_service(

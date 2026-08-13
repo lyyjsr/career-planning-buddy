@@ -135,6 +135,10 @@ async def collect_evidence(
     outcome: RunOutcome,
     case: EvalCase,
 ) -> list[EvidenceItem]:
+    from evals.v2.contracts import PlanningEvalScenario
+
+    if not isinstance(case.scenario, PlanningEvalScenario):
+        raise TypeError("planning evidence collector requires a planning scenario")
     """Freeze the per-Trial evidence catalog the Graders will see."""
 
     del run  # outcome already aggregates Run fields; we only reach back for events/steps

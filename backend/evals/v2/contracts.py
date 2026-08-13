@@ -45,7 +45,10 @@ class EvalProfile(StrictModel):
     skill_level: Literal["beginner", "intermediate", "advanced"]
 
 
-class EvalScenario(StrictModel):
+class PlanningEvalScenario(StrictModel):
+    @property
+    def scenario_type(self) -> Literal["planning"]:
+        return "planning"
     user_request: Annotated[str, Field(min_length=1, max_length=10_000)]
     profile: EvalProfile | None
     hint_intent: Literal["create_plan", "replan"] | None = None
@@ -60,8 +63,89 @@ class EvalScenario(StrictModel):
     planning_date: date
 
 
+class NonPlanningEvalScenario(StrictModel):
+    """Shared read-only projections; these are not serialized scenario fields."""
+
+    scenario_type: str
+
+    @property
+    def user_request(self) -> str:
+        return str(self.scenario_type)
+
+    @property
+    def profile(self) -> None:
+        return None
+
+    @property
+    def hint_intent(self) -> None:
+        return None
+
+    @property
+    def replan_mode(self) -> None:
+        return None
+
+    @property
+    def planning_date(self) -> date:
+        return date(2026, 8, 1)
+
+    @property
+    def provider_fixtures(self) -> dict[str, JsonValue]:
+        return {}
+
+
+class InterviewQuestionScenario(NonPlanningEvalScenario):
+    scenario_type: Literal["interview_question"] = "interview_question"
+    resume_text: str = Field(min_length=1, max_length=50_000)
+    jd_text: str = Field(min_length=1, max_length=50_000)
+    interview_type: Literal["role_focused", "resume_deep_dive"] = "role_focused"
+    asked_question_count: int = Field(default=0, ge=0, le=6)
+
+
+class InterviewAnswerScenario(NonPlanningEvalScenario):
+    scenario_type: Literal["interview_answer"] = "interview_answer"
+    question_text: str = Field(min_length=1, max_length=1000)
+    answer_text: str = Field(min_length=1, max_length=10_000)
+    parent_is_followup: bool = False
+    followup_count: int = Field(default=0, ge=0, le=2)
+    asked_question_count: int = Field(default=1, ge=1, le=6)
+
+
+class InterviewReportScenario(NonPlanningEvalScenario):
+    scenario_type: Literal["interview_report"] = "interview_report"
+    answers: list[str] = Field(min_length=1, max_length=6)
+
+
+class ResumeClaimScenario(NonPlanningEvalScenario):
+    scenario_type: Literal["resume_claim"] = "resume_claim"
+    claim_text: str = Field(min_length=1, max_length=1000)
+    jd_requirement: str = Field(min_length=1, max_length=1000)
+    interview_answer: str = Field(min_length=1, max_length=10_000)
+    expected_verdict: Literal[
+        "supported", "partially_supported", "unsupported", "insufficient_evidence"
+    ]
+
+
+EvalScenarioUnion = Annotated[
+    PlanningEvalScenario
+    | InterviewQuestionScenario
+    | InterviewAnswerScenario
+    | InterviewReportScenario
+    | ResumeClaimScenario,
+    Field(union_mode="left_to_right"),
+]
+EvalScenario = PlanningEvalScenario
+
+
 class ExpectedOutcome(StrictModel):
-    result_kind: Literal["plan", "clarification", "safe_response", "navigation"]
+    result_kind: Literal[
+        "plan",
+        "clarification",
+        "safe_response",
+        "navigation",
+        "interview_turn",
+        "interview_report",
+        "resume_assessment",
+    ]
     allowed_run_statuses: list[Literal["completed", "degraded", "failed", "cancelled"]]
 
 
@@ -94,7 +178,7 @@ class EvalCase(StrictModel):
     schema_version: Literal["2"]
     dataset_id: Annotated[str, Field(min_length=1, max_length=64)]
     dataset_version: NonEmptyVersion
-    scenario: EvalScenario
+    scenario: EvalScenarioUnion
     expected_outcome: ExpectedOutcome
     trajectory_policy: TrajectoryPolicy
     rubric: EvalRubric
@@ -106,10 +190,20 @@ class EvalCase(StrictModel):
     variant: Annotated[str, Field(min_length=1, max_length=64)] | None = None
     fault_plan: EvalFaultPlan | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_legacy_scenario_type(cls, value: object) -> object:
+        if isinstance(value, dict) and isinstance(value.get("scenario"), dict):
+            scenario = dict(value["scenario"])
+            if scenario.get("scenario_type") == "planning":
+                scenario.pop("scenario_type")
+            return {**value, "scenario": scenario}
+        return value
+
     def fixture_payload(self) -> dict[str, object]:
         """Return all versioned Case content covered by ``fixture_hash``."""
-
-        return self.model_dump(mode="json", exclude={"fixture_hash"})
+        payload = self.model_dump(mode="json", exclude={"fixture_hash"})
+        return payload
 
     @model_validator(mode="after")
     def validate_fixture_hash(self) -> Self:

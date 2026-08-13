@@ -41,6 +41,7 @@ class MeResponse(StrictModel):
 
     user: UserSummary
     profile_complete: bool
+    planning_window_valid: bool
     profile: ProfileResponse | None
     active_plan: ActivePlanResponse | None = None
     today_tasks: list[TaskResponse] = Field(default_factory=list)

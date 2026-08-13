@@ -12,6 +12,7 @@ from app.agent.executor import AgentRunExecutor
 from app.core.config import Settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.core.time import product_today
 from app.harness.events import EventRecorder
 from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
@@ -73,7 +74,7 @@ class ReviewService:
                         message="Plan was not found",
                         status_code=HTTPStatus.NOT_FOUND,
                     )
-                if payload.review_date > datetime.now(UTC).date():
+                if payload.review_date > product_today():
                     raise AppError(
                         code="VALIDATION_REVIEW_DATE_FUTURE",
                         message="review_date cannot be in the future",
@@ -333,7 +334,7 @@ class ReviewService:
                 cycle_end = min(
                     source_plan.plan_date + timedelta(days=6), source_plan.horizon_end
                 )
-                if datetime.now(UTC).date() <= cycle_end:
+                if product_today() <= cycle_end:
                     raise AppError(
                         code="STATE_WEEKLY_CYCLE_OPEN",
                         message=(

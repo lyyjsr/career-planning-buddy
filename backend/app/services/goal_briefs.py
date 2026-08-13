@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.errors import AgentError
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.core.time import product_today
 from app.models.goal_brief import GoalBrief
 from app.models.user_profile import UserProfile
 from app.providers.goal_understanding import (
@@ -117,7 +118,7 @@ class GoalBriefService:
                 profile.start_date is None
                 or profile.deadline is None
                 or profile.start_date > profile.deadline
-                or profile.deadline < datetime.now(UTC).date()
+                or profile.deadline < product_today()
             ):
                 raise AppError(
                     code="VALIDATION_PROFILE_DEADLINE_REQUIRED",
@@ -238,7 +239,7 @@ class GoalBriefService:
                     or profile.start_date is None
                     or profile.deadline is None
                     or profile.start_date > profile.deadline
-                    or profile.deadline < datetime.now(UTC).date()
+                    or profile.deadline < product_today()
                 ):
                     raise AppError(
                         code="VALIDATION_PROFILE_DEADLINE_REQUIRED",
@@ -497,7 +498,7 @@ class GoalBriefService:
     def _profile_window(profile: UserProfile) -> tuple[date, date, int, int]:
         if profile.start_date is None or profile.deadline is None:
             raise ValueError("profile planning dates are required")
-        planning_start = max(datetime.now(UTC).date(), profile.start_date)
+        planning_start = max(product_today(), profile.start_date)
         planning_end = profile.deadline
         planning_days = max((planning_end - planning_start).days + 1, 1)
         duration = max(1, min(8, (planning_days + 6) // 7))

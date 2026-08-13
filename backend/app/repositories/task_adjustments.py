@@ -41,3 +41,14 @@ class TaskAdjustmentRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def list_by_prefix(
+        self, user_id: UUID, prefix: str
+    ) -> list[TaskAdjustmentProposal]:
+        result = await self._session.execute(
+            select(TaskAdjustmentProposal).where(
+                TaskAdjustmentProposal.user_id == user_id,
+                TaskAdjustmentProposal.idempotency_key.like(f"{prefix}%"),
+            )
+        )
+        return list(result.scalars())

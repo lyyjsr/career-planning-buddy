@@ -89,6 +89,10 @@ def _not_applicable(name: str, evidence_ids: list[UUID], rationale: str) -> Grad
 
 
 async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -> list[GradeResult]:
+    from evals.v2.contracts import PlanningEvalScenario
+
+    if not isinstance(expected.scenario, PlanningEvalScenario):
+        raise TypeError("planning model grader requires a planning scenario")
     metrics = view.first(EvidenceKind.RUN_METRICS)
     metrics_id = metrics.id if metrics is not None else None
     repair = view.first(EvidenceKind.REPAIR_SIGNAL)
@@ -235,7 +239,12 @@ def _evidence_citation_grades(
     emits two N/A rows instead so consumers see a deterministic count.
     """
 
-    no_expected = expected.scenario.provider_fixtures.get("expected_citations")
+    from evals.v2.contracts import PlanningEvalScenario
+
+    scenario = expected.scenario
+    if not isinstance(scenario, PlanningEvalScenario):
+        raise TypeError("citation grader requires a planning scenario")
+    no_expected = scenario.provider_fixtures.get("expected_citations")
     if not isinstance(no_expected, list) or not no_expected:
         return [
             _not_applicable(

@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import product_today
 from app.models.plan import CompanionMessage, Plan, Task
 
 
@@ -41,7 +42,7 @@ class PlanRepository:
         today. This read-only compatibility branch recovers legacy data where an
         early completion archived the current cycle and created a future Plan.
         """
-        today = datetime.now(UTC).date()
+        today = product_today()
         cycle_end = func.least(Plan.plan_date + 6, Plan.horizon_end)
         result = await self._session.execute(
             select(Plan)

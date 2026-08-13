@@ -1,6 +1,6 @@
 """Stage 3 Task, Review, and deterministic replanning acceptance tests."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from http import HTTPStatus
 from uuid import UUID
 
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from app.agent.executor import AgentRunExecutor
 from app.core.config import get_settings
 from app.core.exceptions import AppError
+from app.core.time import product_today
 from app.models.agent_run import AgentEvent, AgentRun
 from app.models.plan import Plan, Task
 from app.models.review import Review
@@ -61,7 +62,7 @@ async def generated_plan(
 def review_payload(plan_id: UUID, **values: object) -> ReviewCreateRequest:
     return ReviewCreateRequest(
         plan_id=plan_id,
-        review_date=datetime.now(UTC).date(),
+        review_date=product_today(),
         mood=3,
         **values,
     )
@@ -97,18 +98,10 @@ async def settle_week(
 
 def close_fixed_cycle(monkeypatch: pytest.MonkeyPatch, plan: Plan) -> None:
     """Advance only the Review use-case clock beyond the fixed cycle boundary."""
-    cycle_closed_at = datetime.combine(
-        plan.plan_date + timedelta(days=7),
-        datetime.min.time(),
-        tzinfo=UTC,
+    monkeypatch.setattr(
+        "app.services.reviews.product_today",
+        lambda: plan.plan_date + timedelta(days=7),
     )
-
-    class CycleClosedDateTime(datetime):
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return cycle_closed_at if tz is not None else cycle_closed_at.replace(tzinfo=None)
-
-    monkeypatch.setattr("app.services.reviews.datetime", CycleClosedDateTime)
 
 
 def test_task_update_schema_rejects_state_specific_field_mismatches() -> None:
@@ -723,7 +716,7 @@ async def test_stage3_http_contract_and_identity_isolation(
         "/api/v1/reviews",
         json={
             "plan_id": str(plan.id),
-            "review_date": str(datetime.now(UTC).date()),
+            "review_date": str(product_today()),
             "mood": 4,
         },
         headers={**bearer(token), "Idempotency-Key": "stage3-api-review"},

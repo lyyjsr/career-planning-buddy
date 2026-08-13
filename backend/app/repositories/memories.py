@@ -45,6 +45,34 @@ class MemoryRepository:
         memory = await self._session.scalar(statement)
         return memory if isinstance(memory, Memory) else None
 
+    async def get_active_weakness(self, user_id: UUID, weakness_key: str) -> Memory | None:
+        memory = await self._session.scalar(
+            select(Memory)
+            .where(
+                Memory.user_id == user_id,
+                Memory.status == "active",
+                Memory.content_json["weakness_key"].as_string() == weakness_key,
+            )
+            .order_by(Memory.updated_at.desc())
+            .limit(1)
+        )
+        return memory if isinstance(memory, Memory) else None
+
+    async def get_pending_weakness_candidate(
+        self, user_id: UUID, weakness_key: str
+    ) -> MemoryCandidate | None:
+        candidate = await self._session.scalar(
+            select(MemoryCandidate)
+            .where(
+                MemoryCandidate.user_id == user_id,
+                MemoryCandidate.status == "pending",
+                MemoryCandidate.content_json["weakness_key"].as_string() == weakness_key,
+            )
+            .order_by(MemoryCandidate.created_at.desc())
+            .limit(1)
+        )
+        return candidate if isinstance(candidate, MemoryCandidate) else None
+
     async def delete_memory(self, memory: Memory) -> None:
         await self._session.delete(memory)
         await self._session.flush()

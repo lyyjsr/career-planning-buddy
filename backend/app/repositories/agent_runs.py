@@ -50,12 +50,44 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_for_interview(
+        self,
+        *,
+        session_id: UUID,
+        user_id: UUID,
+        run_kind: str,
+        turn_id: UUID | None = None,
+    ) -> AgentRun | None:
+        statement = select(AgentRun).where(
+            AgentRun.interview_session_id == session_id,
+            AgentRun.user_id == user_id,
+            AgentRun.run_kind == run_kind,
+        )
+        if turn_id is not None:
+            statement = statement.where(AgentRun.interview_turn_id == turn_id)
+        result = await self._session.execute(statement.order_by(AgentRun.created_at.desc()))
+        return result.scalar_one_or_none()
+
     async def get_active_for_user(self, user_id: UUID) -> AgentRun | None:
         result = await self._session.execute(
             select(AgentRun).where(
                 AgentRun.user_id == user_id,
                 AgentRun.status.in_(ACTIVE_STATUSES),
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_for_interview(
+        self, session_id: UUID, user_id: UUID
+    ) -> AgentRun | None:
+        result = await self._session.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.interview_session_id == session_id,
+                AgentRun.user_id == user_id,
+                AgentRun.status.in_(ACTIVE_STATUSES),
+            )
+            .order_by(AgentRun.created_at.desc())
         )
         return result.scalar_one_or_none()
 

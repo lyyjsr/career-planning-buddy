@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
+from app.core.time import product_today
 from app.models.plan import Plan, Task, TaskAdjustmentProposal
 from app.providers.task_adjustment import TaskAdjustmentProvider
 from app.repositories.plans import PlanRepository
@@ -334,7 +335,7 @@ class TaskAdjustmentService:
         legacy_current_cycle = plan.status == "archived" and fixed_cycle_contains(
             plan_date=plan.plan_date,
             horizon_end=plan.horizon_end,
-            target=datetime.now(UTC).date(),
+            target=product_today(),
         )
         if plan.status not in {"generated", "active"} and not legacy_current_cycle:
             return False, "Only the current weekly cycle can be edited"

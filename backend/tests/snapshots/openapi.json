@@ -299,6 +299,15 @@
                 "$ref": "#/components/schemas/NavigationResult"
               },
               {
+                "$ref": "#/components/schemas/InterviewTurnResultSummary"
+              },
+              {
+                "$ref": "#/components/schemas/InterviewReportResultSummary"
+              },
+              {
+                "$ref": "#/components/schemas/ResumeAssessmentResultSummary"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -329,6 +338,9 @@
             "format": "uuid",
             "title": "Run Id",
             "type": "string"
+          },
+          "run_kind": {
+            "$ref": "#/components/schemas/RunKind"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -376,6 +388,7 @@
         },
         "required": [
           "run_id",
+          "run_kind",
           "status",
           "user_status",
           "status_message",
@@ -396,6 +409,238 @@
           "cancel_requested_at"
         ],
         "title": "AgentRunResponse",
+        "type": "object"
+      },
+      "AnswerStructure": {
+        "additionalProperties": false,
+        "properties": {
+          "concision": {
+            "enum": [
+              "concise",
+              "balanced",
+              "verbose"
+            ],
+            "title": "Concision",
+            "type": "string"
+          },
+          "conclusion_first": {
+            "title": "Conclusion First",
+            "type": "boolean"
+          },
+          "logical_flow": {
+            "enum": [
+              "clear",
+              "mixed",
+              "unclear"
+            ],
+            "title": "Logical Flow",
+            "type": "string"
+          },
+          "specificity": {
+            "enum": [
+              "specific",
+              "mixed",
+              "vague"
+            ],
+            "title": "Specificity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conclusion_first",
+          "logical_flow",
+          "specificity",
+          "concision"
+        ],
+        "title": "AnswerStructure",
+        "type": "object"
+      },
+      "AudioAnalysis": {
+        "additionalProperties": false,
+        "properties": {
+          "asr_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asr Confidence"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "effective_words_per_minute": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Words Per Minute"
+          },
+          "filler_count": {
+            "title": "Filler Count",
+            "type": "integer"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "long_pause_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Pause Count"
+          },
+          "preparation_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preparation Seconds"
+          },
+          "repeated_phrase_count": {
+            "title": "Repeated Phrase Count",
+            "type": "integer"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/AudioSegment"
+            },
+            "maxItems": 500,
+            "title": "Segments",
+            "type": "array"
+          },
+          "timestamps_reliable": {
+            "title": "Timestamps Reliable",
+            "type": "boolean"
+          },
+          "transcript": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transcript",
+          "filler_count",
+          "repeated_phrase_count",
+          "timestamps_reliable"
+        ],
+        "title": "AudioAnalysis",
+        "type": "object"
+      },
+      "AudioSegment": {
+        "additionalProperties": false,
+        "properties": {
+          "end_seconds": {
+            "minimum": 0.0,
+            "title": "End Seconds",
+            "type": "number"
+          },
+          "start_seconds": {
+            "minimum": 0.0,
+            "title": "Start Seconds",
+            "type": "number"
+          },
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "start_seconds",
+          "end_seconds"
+        ],
+        "title": "AudioSegment",
+        "type": "object"
+      },
+      "Body_extract_resume_document_api_v1_resume_versions_extract_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_extract_resume_document_api_v1_resume_versions_extract_post",
+        "type": "object"
+      },
+      "Body_submit_interview_audio_answer_api_v1_interviews__interview_id__audio_answers_post": {
+        "properties": {
+          "audio": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Audio",
+            "type": "string"
+          },
+          "fallback_text": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Text"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_id",
+          "version",
+          "audio"
+        ],
+        "title": "Body_submit_interview_audio_answer_api_v1_interviews__interview_id__audio_answers_post",
         "type": "object"
       },
       "CareerStage": {
@@ -1907,6 +2152,65 @@
         "title": "EvalStartResponse",
         "type": "object"
       },
+      "FactualFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Claim",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "rationale": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "correct",
+              "incorrect",
+              "partially_correct",
+              "insufficient_evidence"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim",
+          "verdict",
+          "severity",
+          "confidence",
+          "rationale"
+        ],
+        "title": "FactualFinding",
+        "type": "object"
+      },
       "GoalBriefConfirmResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2294,6 +2598,984 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InterviewActiveRun": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_kind": {
+            "enum": [
+              "interview_start",
+              "interview_answer",
+              "interview_report"
+            ],
+            "title": "Run Kind",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_kind",
+          "status",
+          "events_url"
+        ],
+        "title": "InterviewActiveRun",
+        "type": "object"
+      },
+      "InterviewAnswerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "answer_text": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Answer Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answer_text",
+          "turn_id",
+          "version"
+        ],
+        "title": "InterviewAnswerRequest",
+        "type": "object"
+      },
+      "InterviewComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_session_id": {
+            "format": "uuid",
+            "title": "Baseline Session Id",
+            "type": "string"
+          },
+          "current_session_id": {
+            "format": "uuid",
+            "title": "Current Session Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeaknessComparison"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "baseline_session_id",
+          "current_session_id",
+          "items"
+        ],
+        "title": "InterviewComparison",
+        "type": "object"
+      },
+      "InterviewCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "followup_limit": {
+            "default": 2,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Followup Limit",
+            "type": "integer"
+          },
+          "interview_type": {
+            "enum": [
+              "role_focused",
+              "resume_deep_dive"
+            ],
+            "title": "Interview Type",
+            "type": "string"
+          },
+          "job_target_id": {
+            "format": "uuid",
+            "title": "Job Target Id",
+            "type": "string"
+          },
+          "question_limit": {
+            "default": 4,
+            "maximum": 6.0,
+            "minimum": 4.0,
+            "title": "Question Limit",
+            "type": "integer"
+          },
+          "resume_version_id": {
+            "format": "uuid",
+            "title": "Resume Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resume_version_id",
+          "job_target_id",
+          "interview_type"
+        ],
+        "title": "InterviewCreateRequest",
+        "type": "object"
+      },
+      "InterviewListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InterviewSessionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "InterviewListResponse",
+        "type": "object"
+      },
+      "InterviewMemoryCandidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Weakness Keys",
+            "type": "array"
+          }
+        },
+        "title": "InterviewMemoryCandidateRequest",
+        "type": "object"
+      },
+      "InterviewMemoryCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_candidate_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Created Candidate Ids",
+            "type": "array"
+          },
+          "eligible_weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Eligible Weakness Keys",
+            "type": "array"
+          },
+          "skipped_weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Skipped Weakness Keys",
+            "type": "array"
+          }
+        },
+        "title": "InterviewMemoryCandidateResponse",
+        "type": "object"
+      },
+      "InterviewReport": {
+        "additionalProperties": false,
+        "properties": {
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dimension_summary": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 6,
+            "title": "Dimension Summary",
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overall_summary": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Overall Summary",
+            "type": "string"
+          },
+          "recommended_training_actions": {
+            "items": {
+              "$ref": "#/components/schemas/TrainingAction"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Recommended Training Actions",
+            "type": "array"
+          },
+          "strengths": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Strengths",
+            "type": "array"
+          },
+          "weaknesses": {
+            "items": {
+              "$ref": "#/components/schemas/InterviewWeakness"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Weaknesses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "overall_summary",
+          "weaknesses",
+          "recommended_training_actions"
+        ],
+        "title": "InterviewReport",
+        "type": "object"
+      },
+      "InterviewReportResultSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "report_version": {
+            "title": "Report Version",
+            "type": "integer"
+          },
+          "status": {
+            "const": "ready",
+            "default": "ready",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interview_id",
+          "report_version"
+        ],
+        "title": "InterviewReportResultSummary",
+        "type": "object"
+      },
+      "InterviewRetestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "followup_limit": {
+            "default": 2,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Followup Limit",
+            "type": "integer"
+          },
+          "job_target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Target Id"
+          },
+          "question_limit": {
+            "default": 4,
+            "maximum": 6.0,
+            "minimum": 4.0,
+            "title": "Question Limit",
+            "type": "integer"
+          },
+          "resume_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Version Id"
+          },
+          "weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Weakness Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "weakness_keys"
+        ],
+        "title": "InterviewRetestRequest",
+        "type": "object"
+      },
+      "InterviewRunReference": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "events_url"
+        ],
+        "title": "InterviewRunReference",
+        "type": "object"
+      },
+      "InterviewRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interview_id",
+          "run_id",
+          "events_url"
+        ],
+        "title": "InterviewRunResponse",
+        "type": "object"
+      },
+      "InterviewSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewActiveRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "asked_question_count": {
+            "title": "Asked Question Count",
+            "type": "integer"
+          },
+          "comparison_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Session Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Turn Id"
+          },
+          "followup_count": {
+            "title": "Followup Count",
+            "type": "integer"
+          },
+          "followup_limit": {
+            "title": "Followup Limit",
+            "type": "integer"
+          },
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "interview_type": {
+            "enum": [
+              "role_focused",
+              "resume_deep_dive"
+            ],
+            "title": "Interview Type",
+            "type": "string"
+          },
+          "job_target_id": {
+            "format": "uuid",
+            "title": "Job Target Id",
+            "type": "string"
+          },
+          "question_limit": {
+            "title": "Question Limit",
+            "type": "integer"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report_status": {
+            "enum": [
+              "not_requested",
+              "generating",
+              "ready",
+              "failed"
+            ],
+            "title": "Report Status",
+            "type": "string"
+          },
+          "resume_version_id": {
+            "format": "uuid",
+            "title": "Resume Version Id",
+            "type": "string"
+          },
+          "retest_weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Retest Weakness Keys",
+            "type": "array"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "report_generating",
+              "completed",
+              "aborted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/InterviewTurnResponse"
+            },
+            "title": "Turns",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interview_id",
+          "resume_version_id",
+          "job_target_id",
+          "interview_type",
+          "status",
+          "question_limit",
+          "followup_limit",
+          "asked_question_count",
+          "followup_count",
+          "current_turn_id",
+          "turns",
+          "report_status",
+          "report",
+          "comparison_session_id",
+          "version",
+          "started_at",
+          "completed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InterviewSessionResponse",
+        "type": "object"
+      },
+      "InterviewTurnResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "analysis_status": {
+            "enum": [
+              "not_started",
+              "running",
+              "ready",
+              "failed"
+            ],
+            "title": "Analysis Status",
+            "type": "string"
+          },
+          "answer_status": {
+            "enum": [
+              "pending",
+              "submitted",
+              "skipped"
+            ],
+            "title": "Answer Status",
+            "type": "string"
+          },
+          "answer_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Text"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "audio_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "parent_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Turn Id"
+          },
+          "question_sources": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionSource"
+            },
+            "title": "Question Sources",
+            "type": "array"
+          },
+          "question_text": {
+            "title": "Question Text",
+            "type": "string"
+          },
+          "question_type": {
+            "enum": [
+              "technical",
+              "project",
+              "resume_claim",
+              "followup"
+            ],
+            "title": "Question Type",
+            "type": "string"
+          },
+          "topic_key": {
+            "title": "Topic Key",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_id",
+          "ordinal",
+          "parent_turn_id",
+          "topic_key",
+          "question_type",
+          "question_text",
+          "question_sources",
+          "answer_text",
+          "answer_status",
+          "analysis_status",
+          "analysis",
+          "version",
+          "answered_at",
+          "created_at"
+        ],
+        "title": "InterviewTurnResponse",
+        "type": "object"
+      },
+      "InterviewTurnResultSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "next_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Turn Id"
+          },
+          "session_status": {
+            "enum": [
+              "draft",
+              "active",
+              "report_generating",
+              "completed",
+              "aborted"
+            ],
+            "title": "Session Status",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interview_id",
+          "turn_id",
+          "session_status",
+          "next_turn_id"
+        ],
+        "title": "InterviewTurnResultSummary",
+        "type": "object"
+      },
+      "InterviewVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "InterviewVersionRequest",
+        "type": "object"
+      },
+      "InterviewWeakness": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dimension": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Dimension",
+            "type": "string"
+          },
+          "evidence_turn_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Evidence Turn Ids",
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "default": "observed",
+            "enum": [
+              "observed",
+              "repeated",
+              "improving"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "topic": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          },
+          "weakness_key": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Weakness Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weakness_key",
+          "topic",
+          "dimension",
+          "severity",
+          "confidence",
+          "evidence_turn_ids"
+        ],
+        "title": "InterviewWeakness",
+        "type": "object"
+      },
+      "JobTargetCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "jd_text": {
+            "maxLength": 50000,
+            "minLength": 20,
+            "title": "Jd Text",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "jd_text"
+        ],
+        "title": "JobTargetCreateRequest",
+        "type": "object"
+      },
+      "JobTargetListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobTargetResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "JobTargetListResponse",
+        "type": "object"
+      },
+      "JobTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "jd_text": {
+            "title": "Jd Text",
+            "type": "string"
+          },
+          "job_target_id": {
+            "format": "uuid",
+            "title": "Job Target Id",
+            "type": "string"
+          },
+          "requirements": {
+            "additionalProperties": true,
+            "title": "Requirements",
+            "type": "object"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_target_id",
+          "title",
+          "company",
+          "jd_text",
+          "requirements",
+          "content_hash",
+          "created_at"
+        ],
+        "title": "JobTargetResponse",
+        "type": "object"
+      },
       "JsonValue": {},
       "MeResponse": {
         "additionalProperties": false,
@@ -2339,6 +3621,10 @@
               }
             ]
           },
+          "planning_window_valid": {
+            "title": "Planning Window Valid",
+            "type": "boolean"
+          },
           "profile": {
             "anyOf": [
               {
@@ -2367,6 +3653,7 @@
         "required": [
           "user",
           "profile_complete",
+          "planning_window_valid",
           "profile"
         ],
         "title": "MeResponse",
@@ -3884,6 +5171,39 @@
         "title": "ProfileResponse",
         "type": "object"
       },
+      "QuestionSource": {
+        "additionalProperties": false,
+        "properties": {
+          "excerpt": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "resume",
+              "job_target",
+              "answer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref",
+          "excerpt"
+        ],
+        "title": "QuestionSource",
+        "type": "object"
+      },
       "ReadinessCheck": {
         "additionalProperties": false,
         "properties": {
@@ -3998,6 +5318,377 @@
           "execution_kind"
         ],
         "title": "ReplayResponse",
+        "type": "object"
+      },
+      "ResumeAssessmentCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "interview_session_id": {
+            "format": "uuid",
+            "title": "Interview Session Id",
+            "type": "string"
+          },
+          "job_target_id": {
+            "format": "uuid",
+            "title": "Job Target Id",
+            "type": "string"
+          },
+          "resume_version_id": {
+            "format": "uuid",
+            "title": "Resume Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resume_version_id",
+          "job_target_id",
+          "interview_session_id"
+        ],
+        "title": "ResumeAssessmentCreateRequest",
+        "type": "object"
+      },
+      "ResumeAssessmentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "format": "uuid",
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeClaimFinding"
+            },
+            "maxItems": 80,
+            "minItems": 1,
+            "title": "Claims",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "interview_session_id": {
+            "format": "uuid",
+            "title": "Interview Session Id",
+            "type": "string"
+          },
+          "job_target_id": {
+            "format": "uuid",
+            "title": "Job Target Id",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "resume_version_id": {
+            "format": "uuid",
+            "title": "Resume Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "resume_version_id",
+          "job_target_id",
+          "interview_session_id",
+          "claims",
+          "created_at"
+        ],
+        "title": "ResumeAssessmentResponse",
+        "type": "object"
+      },
+      "ResumeAssessmentResultSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "format": "uuid",
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "claim_count": {
+            "maximum": 80.0,
+            "minimum": 1.0,
+            "title": "Claim Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "claim_count"
+        ],
+        "title": "ResumeAssessmentResultSummary",
+        "type": "object"
+      },
+      "ResumeClaimFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "pattern": "^claim_[0-9a-f]{16}$",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Claim Text",
+            "type": "string"
+          },
+          "evidence_turn_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Evidence Turn Ids",
+            "type": "array"
+          },
+          "rationale": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "requirement_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "suggested_rewrite": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Rewrite"
+          },
+          "verdict": {
+            "enum": [
+              "supported",
+              "partially_supported",
+              "unsupported",
+              "insufficient_evidence"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_text",
+          "verdict",
+          "rationale",
+          "evidence_turn_ids"
+        ],
+        "title": "ResumeClaimFinding",
+        "type": "object"
+      },
+      "ResumeDocumentExtractResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "character_count": {
+            "maximum": 50000.0,
+            "minimum": 20.0,
+            "title": "Character Count",
+            "type": "integer"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "media_type": {
+            "enum": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "text/plain"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "source_text": {
+            "maxLength": 50000,
+            "minLength": 20,
+            "title": "Source Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "media_type",
+          "character_count",
+          "source_text"
+        ],
+        "title": "ResumeDocumentExtractResponse",
+        "type": "object"
+      },
+      "ResumeVersionCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version Id"
+          },
+          "source_filename": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Filename"
+          },
+          "source_media_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "application/pdf",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  "text/plain"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Media Type"
+          },
+          "source_text": {
+            "maxLength": 50000,
+            "minLength": 20,
+            "title": "Source Text",
+            "type": "string"
+          },
+          "source_type": {
+            "default": "pasted_text",
+            "enum": [
+              "pasted_text",
+              "uploaded_file"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "source_text"
+        ],
+        "title": "ResumeVersionCreateRequest",
+        "type": "object"
+      },
+      "ResumeVersionListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ResumeVersionListResponse",
+        "type": "object"
+      },
+      "ResumeVersionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version Id"
+          },
+          "resume_version_id": {
+            "format": "uuid",
+            "title": "Resume Version Id",
+            "type": "string"
+          },
+          "source_text": {
+            "title": "Source Text",
+            "type": "string"
+          },
+          "source_type": {
+            "enum": [
+              "pasted_text",
+              "uploaded_file"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "structured": {
+            "additionalProperties": true,
+            "title": "Structured",
+            "type": "object"
+          }
+        },
+        "required": [
+          "resume_version_id",
+          "label",
+          "source_type",
+          "source_text",
+          "structured",
+          "content_hash",
+          "parent_version_id",
+          "created_at"
+        ],
+        "title": "ResumeVersionResponse",
         "type": "object"
       },
       "ReviewCreateRequest": {
@@ -4306,9 +5997,24 @@
           "create_plan",
           "replan",
           "navigate",
-          "unsupported"
+          "unsupported",
+          "interview_start",
+          "interview_answer",
+          "interview_report",
+          "resume_assessment"
         ],
         "title": "RunIntent",
+        "type": "string"
+      },
+      "RunKind": {
+        "enum": [
+          "planning",
+          "interview_start",
+          "interview_answer",
+          "interview_report",
+          "resume_assessment"
+        ],
+        "title": "RunKind",
         "type": "string"
       },
       "RunResultKind": {
@@ -4316,7 +6022,10 @@
           "plan",
           "clarification",
           "safe_response",
-          "navigation"
+          "navigation",
+          "interview_turn",
+          "interview_report",
+          "resume_assessment"
         ],
         "title": "RunResultKind",
         "type": "string"
@@ -5208,6 +6917,187 @@
         "title": "TerminalInvariant",
         "type": "object"
       },
+      "TrainingAction": {
+        "additionalProperties": false,
+        "properties": {
+          "deliverable": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Deliverable",
+            "type": "string"
+          },
+          "estimated_minutes": {
+            "maximum": 480.0,
+            "minimum": 5.0,
+            "title": "Estimated Minutes",
+            "type": "integer"
+          },
+          "source_weakness_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Source Weakness Keys",
+            "type": "array"
+          },
+          "starter_action": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Starter Action",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "starter_action",
+          "deliverable",
+          "estimated_minutes",
+          "source_weakness_keys"
+        ],
+        "title": "TrainingAction",
+        "type": "object"
+      },
+      "TrainingActionPreviewItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TrainingAction"
+          },
+          "action_index": {
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Action Index",
+            "type": "integer"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "action_index",
+          "action"
+        ],
+        "title": "TrainingActionPreviewItem",
+        "type": "object"
+      },
+      "TrainingActionsConfirmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustment_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Adjustment Ids",
+            "type": "array"
+          },
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "task_adjustment",
+              "replan"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewRunReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "interview_id",
+          "mode"
+        ],
+        "title": "TrainingActionsConfirmResponse",
+        "type": "object"
+      },
+      "TrainingActionsPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_required": {
+            "const": true,
+            "default": true,
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "interview_id": {
+            "format": "uuid",
+            "title": "Interview Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TrainingActionPreviewItem"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "task_adjustment",
+              "replan"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interview_id",
+          "mode",
+          "items"
+        ],
+        "title": "TrainingActionsPreviewResponse",
+        "type": "object"
+      },
+      "TrainingActionsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_indexes": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Action Indexes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "action_indexes"
+        ],
+        "title": "TrainingActionsRequest",
+        "type": "object"
+      },
       "TrialStatusSummary": {
         "additionalProperties": false,
         "properties": {
@@ -5279,6 +7169,79 @@
           "error_code"
         ],
         "title": "TrialStatusSummary",
+        "type": "object"
+      },
+      "TurnAnalysis": {
+        "additionalProperties": false,
+        "properties": {
+          "answer_structure": {
+            "$ref": "#/components/schemas/AnswerStructure"
+          },
+          "covered_key_points": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Covered Key Points",
+            "type": "array"
+          },
+          "factual_findings": {
+            "items": {
+              "$ref": "#/components/schemas/FactualFinding"
+            },
+            "maxItems": 8,
+            "title": "Factual Findings",
+            "type": "array"
+          },
+          "followup_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Followup Reason"
+          },
+          "improvement_actions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Improvement Actions",
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "missing_key_points": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Missing Key Points",
+            "type": "array"
+          },
+          "suggested_outline": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Suggested Outline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "answer_structure"
+        ],
+        "title": "TurnAnalysis",
         "type": "object"
       },
       "UserSummary": {
@@ -5356,6 +7319,93 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WeaknessComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_evidence_turn_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Baseline Evidence Turn Ids",
+            "type": "array"
+          },
+          "baseline_severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Baseline Severity",
+            "type": "string"
+          },
+          "current_evidence_turn_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Current Evidence Turn Ids",
+            "type": "array"
+          },
+          "current_severity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Severity"
+          },
+          "dimension": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Dimension",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "improved",
+              "unchanged",
+              "regressed",
+              "insufficient_comparable_evidence"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "topic": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          },
+          "weakness_key": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Weakness Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weakness_key",
+          "topic",
+          "dimension",
+          "status",
+          "baseline_severity",
+          "baseline_evidence_turn_ids"
+        ],
+        "title": "WeaknessComparison",
         "type": "object"
       },
       "WeeklyFocusCandidate": {
@@ -7998,7 +10048,1044 @@
         ]
       }
     },
+    "/api/v1/interviews": {
+      "get": {
+        "operationId": "list_interviews_api_v1_interviews_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Interviews",
+        "tags": [
+          "interviews"
+        ]
+      },
+      "post": {
+        "operationId": "create_interview_api_v1_interviews_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Interview",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}": {
+      "delete": {
+        "operationId": "delete_interview_api_v1_interviews__interview_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Interview",
+        "tags": [
+          "interviews"
+        ]
+      },
+      "get": {
+        "operationId": "get_interview_api_v1_interviews__interview_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Interview",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/answers": {
+      "post": {
+        "operationId": "submit_interview_answer_api_v1_interviews__interview_id__answers_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewAnswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Interview Answer",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/audio-answers": {
+      "post": {
+        "operationId": "submit_interview_audio_answer_api_v1_interviews__interview_id__audio_answers_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_submit_interview_audio_answer_api_v1_interviews__interview_id__audio_answers_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Interview Audio Answer",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/comparison": {
+      "get": {
+        "operationId": "get_interview_comparison_api_v1_interviews__interview_id__comparison_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewComparison"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Interview Comparison",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/finish": {
+      "post": {
+        "operationId": "finish_interview_api_v1_interviews__interview_id__finish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Finish Interview",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/memory-candidates": {
+      "post": {
+        "operationId": "create_interview_memory_candidates_api_v1_interviews__interview_id__memory_candidates_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewMemoryCandidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewMemoryCandidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Interview Memory Candidates",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/report/retry": {
+      "post": {
+        "operationId": "retry_interview_report_api_v1_interviews__interview_id__report_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Interview Report",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/retest": {
+      "post": {
+        "operationId": "create_interview_retest_api_v1_interviews__interview_id__retest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewRetestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Interview Retest",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/start/retry": {
+      "post": {
+        "operationId": "retry_interview_start_api_v1_interviews__interview_id__start_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Interview Start",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/training-actions/confirm": {
+      "post": {
+        "operationId": "confirm_interview_training_actions_api_v1_interviews__interview_id__training_actions_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingActionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingActionsConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Interview Training Actions",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/training-actions/preview": {
+      "post": {
+        "operationId": "preview_interview_training_actions_api_v1_interviews__interview_id__training_actions_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingActionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingActionsPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Interview Training Actions",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/interviews/{interview_id}/turns/{turn_id}/skip": {
+      "post": {
+        "operationId": "skip_interview_turn_api_v1_interviews__interview_id__turns__turn_id__skip_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Skip Interview Turn",
+        "tags": [
+          "interviews"
+        ]
+      }
+    },
+    "/api/v1/job-targets": {
+      "get": {
+        "operationId": "list_job_targets_api_v1_job_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobTargetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Job Targets",
+        "tags": [
+          "job-targets"
+        ]
+      },
+      "post": {
+        "operationId": "create_job_target_api_v1_job_targets_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobTargetCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobTargetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Job Target",
+        "tags": [
+          "job-targets"
+        ]
+      }
+    },
+    "/api/v1/job-targets/{target_id}": {
+      "delete": {
+        "operationId": "delete_job_target_api_v1_job_targets__target_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Job Target",
+        "tags": [
+          "job-targets"
+        ]
+      }
+    },
     "/api/v1/me": {
+      "delete": {
+        "operationId": "delete_me_api_v1_me_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Me",
+        "tags": [
+          "auth"
+        ]
+      },
       "get": {
         "operationId": "get_me_api_v1_me_get",
         "responses": {
@@ -8947,6 +12034,283 @@
         "summary": "Put Profile",
         "tags": [
           "profile"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments": {
+      "post": {
+        "operationId": "create_resume_assessment_api_v1_resume_assessments_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeAssessmentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeAssessmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Resume Assessment",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments/{assessment_id}": {
+      "get": {
+        "operationId": "get_resume_assessment_api_v1_resume_assessments__assessment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeAssessmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Resume Assessment",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-versions": {
+      "get": {
+        "operationId": "list_resume_versions_api_v1_resume_versions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeVersionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Resume Versions",
+        "tags": [
+          "resume-versions"
+        ]
+      },
+      "post": {
+        "operationId": "create_resume_version_api_v1_resume_versions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Resume Version",
+        "tags": [
+          "resume-versions"
+        ]
+      }
+    },
+    "/api/v1/resume-versions/extract": {
+      "post": {
+        "operationId": "extract_resume_document_api_v1_resume_versions_extract_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extract_resume_document_api_v1_resume_versions_extract_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeDocumentExtractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Extract Resume Document",
+        "tags": [
+          "resume-versions"
+        ]
+      }
+    },
+    "/api/v1/resume-versions/{resume_id}": {
+      "delete": {
+        "operationId": "delete_resume_version_api_v1_resume_versions__resume_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resume_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Resume Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Resume Version",
+        "tags": [
+          "resume-versions"
         ]
       }
     },

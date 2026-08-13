@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     llm_goal_understanding_reasoning: Literal["off", "auto"] = "off"
     llm_evidence_distillation_reasoning: Literal["off", "auto"] = "off"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    asr_provider: Literal["mock", "openai_compatible"] = "mock"
+    asr_api_key: SecretStr | None = Field(default=None, min_length=1)
+    asr_base_url: AnyHttpUrl | None = None
+    asr_model: str = Field(default="whisper-1", min_length=1, max_length=128)
+    asr_timeout_seconds: float = Field(default=30, gt=0, le=60)
+    asr_max_audio_bytes: int = Field(default=5_000_000, ge=1024, le=20_000_000)
+    asr_max_duration_seconds: float = Field(default=120, gt=0, le=300)
     search_provider: Literal["mock", "baidu"] = "mock"
     baidu_search_api_key: SecretStr | None = Field(default=None, min_length=1)
     baidu_search_base_url: AnyHttpUrl = AnyHttpUrl(
@@ -170,6 +177,8 @@ class Settings(BaseSettings):
         "llm_planning_model",
         "llm_goal_understanding_model",
         "llm_evidence_distillation_model",
+        "asr_api_key",
+        "asr_base_url",
         "judge_llm_api_key",
         "judge_llm_base_url",
         "judge_llm_model",
@@ -215,6 +224,16 @@ class Settings(BaseSettings):
                     "openai_compatible judge requires configured "
                     + ", ".join(judge_missing)
                 )
+        if self.asr_provider == "openai_compatible":
+            asr_missing: list[str] = []
+            if self.asr_api_key is None:
+                asr_missing.append("ASR_API_KEY")
+            if self.asr_base_url is None:
+                asr_missing.append("ASR_BASE_URL")
+            if asr_missing:
+                raise ValueError(
+                    "openai_compatible ASR requires configured " + ", ".join(asr_missing)
+                )
         if self.embedding_provider == "local":
             if self.embedding_model_path is None:
                 raise ValueError("local embedding requires EMBEDDING_MODEL_PATH")
@@ -231,6 +250,7 @@ class Settings(BaseSettings):
                     ("LLM_PROVIDER", self.llm_provider == "mock"),
                     ("SEARCH_PROVIDER", self.search_provider == "mock"),
                     ("EMBEDDING_PROVIDER", self.embedding_provider == "mock"),
+                    ("ASR_PROVIDER", self.asr_provider == "mock"),
                 )
                 if is_mock
             ]

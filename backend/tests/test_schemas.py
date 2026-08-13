@@ -47,6 +47,9 @@ def test_stage_one_enums_match_contract_values() -> None:
         "clarification",
         "safe_response",
         "navigation",
+        "interview_turn",
+        "interview_report",
+        "resume_assessment",
     ]
     assert [item.value for item in PlanStatus] == [
         "generated",
@@ -136,6 +139,7 @@ def test_profile_response_can_read_an_expired_historical_deadline() -> None:
         version=1,
     )
 
+    assert response.deadline is not None
     assert response.deadline < datetime.now(UTC).date()
 
 

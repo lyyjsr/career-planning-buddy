@@ -30,7 +30,7 @@ from app.repositories.plans import PlanRepository
 from app.repositories.reviews import ReviewRepository
 from app.services.auth import AuthService
 from app.services.profiles import ProfileService
-from evals.v2.contracts import EvalScenario
+from evals.v2.contracts import PlanningEvalScenario
 from evals.v2.profile_mapping import scenario_to_profile_payload
 
 PLANNING_DATE = date(2026, 8, 1)
@@ -45,7 +45,7 @@ class FixtureLoader:
         self._session = session
         self._settings = settings
 
-    async def prepare_user(self, scenario: EvalScenario) -> UUID:
+    async def prepare_user(self, scenario: PlanningEvalScenario) -> UUID:
         """Create an isolated guest user and seed the V2 profile when present."""
 
         from app.core.security import TokenService
@@ -187,7 +187,9 @@ class FixtureLoader:
         )
         return plan, review_row
 
-    async def _seed_memory_if_requested(self, scenario: EvalScenario, user_id: UUID) -> None:
+    async def _seed_memory_if_requested(
+        self, scenario: PlanningEvalScenario, user_id: UUID
+    ) -> None:
         """Plant Memory rows for PR-8 counterfactual Memory / Evidence cases.
 
         Each entry under ``scenario.confirmed_memories`` is treated as a

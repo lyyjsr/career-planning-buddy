@@ -57,7 +57,7 @@ class Plan(Base):
     )
     source_run_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("agent_runs.id"),
+        ForeignKey("agent_runs.id", name="plans_source_run_id_fkey", use_alter=True),
         unique=True,
         nullable=False,
     )

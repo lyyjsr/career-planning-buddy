@@ -20,6 +20,7 @@ from app.agent.errors import (
 )
 from app.agent.finalizer import AgentRunFinalizer
 from app.agent.graph import GraphFactory, load_profile
+from app.agent.interview_graph import InterviewGraph
 from app.agent.node_runner import NodeRunner
 from app.core.database import AsyncSessionFactory, session_transaction
 from app.core.telemetry import bind_telemetry_context
@@ -31,6 +32,7 @@ from app.providers.evidence_distillation import (
     EvidenceDistillationProvider,
     MockEvidenceDistillationProvider,
 )
+from app.providers.interview import InterviewProvider, MockInterviewProvider
 from app.providers.llm import MockPlanningProvider, PlanningProvider
 from app.schemas.agent_runs import (
     PlanningState,
@@ -54,6 +56,7 @@ class AgentRunExecutor:
         tool_registry: ToolRegistry | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         evidence_distillation_provider: EvidenceDistillationProvider | None = None,
+        interview_provider: InterviewProvider | None = None,
         managed_resources: list[object] | None = None,
         poll_interval_seconds: float = 0.25,
         heartbeat_seconds: float = 10,
@@ -63,6 +66,7 @@ class AgentRunExecutor:
     ) -> None:
         self._session_factory = session_factory
         self._provider = provider or MockPlanningProvider()
+        self._interview_provider = interview_provider or MockInterviewProvider()
         self._tool_registry = tool_registry or ToolRegistry()
         self._embedding_provider = embedding_provider or MockEmbeddingProvider()
         self._evidence_distillation_provider = (
@@ -124,6 +128,11 @@ class AgentRunExecutor:
         if any(not task.done() for task in self._tasks.values()):
             raise RuntimeError("cannot replace Provider while Agent Runs are active")
         self._provider = provider
+
+    def set_interview_provider(self, provider: InterviewProvider) -> None:
+        if any(not task.done() for task in self._tasks.values()):
+            raise RuntimeError("cannot replace Interview Provider while Runs are active")
+        self._interview_provider = provider
 
     def set_tool_registry(self, registry: ToolRegistry) -> None:
         if any(not task.done() for task in self._tasks.values()):
@@ -202,20 +211,39 @@ class AgentRunExecutor:
             worker_id=self._worker_id,
             attempt_count=run.attempt_count,
         )
-        graph = GraphFactory(
-            self._session_factory,
-            self._provider,
-            self._tool_registry,
-            self._embedding_provider,
-        ).build(
-            node_runner=runner,
-            finalizer=finalizer,
-            budget=budget,
-        )
         try:
             if run.cancel_requested_at is not None:
                 await finalizer.finalize_cancelled(run_id)
                 return
+            if run.run_kind.startswith("interview_"):
+                if run.interview_session_id is None:
+                    raise RuntimeError("Interview Run is missing its Session")
+                await InterviewGraph(
+                    session_factory=self._session_factory,
+                    provider=self._interview_provider,
+                    node_runner=runner,
+                    finalizer=finalizer,
+                    budget=budget,
+                ).execute(
+                    {
+                        "run_id": run.id,
+                        "user_id": run.user_id,
+                        "run_kind": run.run_kind,
+                        "interview_session_id": run.interview_session_id,
+                        "interview_turn_id": run.interview_turn_id,
+                    }
+                )
+                return
+            graph = GraphFactory(
+                self._session_factory,
+                self._provider,
+                self._tool_registry,
+                self._embedding_provider,
+            ).build(
+                node_runner=runner,
+                finalizer=finalizer,
+                budget=budget,
+            )
             profile = await load_profile(self._session_factory, run.user_id)
             state: PlanningState = {
                 "run_id": run.id,
@@ -236,12 +264,19 @@ class AgentRunExecutor:
                     ),
                     source_plan_id=run.source_plan_id,
                     source_review_id=run.source_review_id,
+                    source_interview_report_session_id=(
+                        run.source_interview_report_session_id
+                    ),
                 ),
                 "runtime_config": config,
                 "profile": profile,
                 "server_replan_mode": (
                     ReplanMode(run.replan_mode)
-                    if run.source_review_id is not None and run.replan_mode is not None
+                    if (
+                        run.source_review_id is not None
+                        or run.source_interview_report_session_id is not None
+                    )
+                    and run.replan_mode is not None
                     else None
                 ),
                 "repair_count": 0,
@@ -340,6 +375,7 @@ class AgentRunExecutor:
     async def close_resources(self) -> None:
         resources = [
             self._provider,
+            self._interview_provider,
             self._tool_registry,
             self._embedding_provider,
             self._evidence_distillation_provider,

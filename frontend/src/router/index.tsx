@@ -37,6 +37,12 @@ const MyPage = lazy(async () => ({
 const ProfileSettingsPage = lazy(async () => ({
   default: (await import("@/pages/ProfileSettingsPage")).ProfileSettingsPage,
 }));
+const InterviewPage = lazy(async () => ({ default: (await import("@/pages/InterviewPage")).InterviewPage }));
+const InterviewSetupPage = lazy(async () => ({ default: (await import("@/pages/InterviewSetupPage")).InterviewSetupPage }));
+const InterviewRoomPage = lazy(async () => ({ default: (await import("@/pages/InterviewRoomPage")).InterviewRoomPage }));
+const InterviewReportPage = lazy(async () => ({ default: (await import("@/pages/InterviewReportPage")).InterviewReportPage }));
+const MaterialsPage = lazy(async () => ({ default: (await import("@/pages/MaterialsPage")).MaterialsPage }));
+const GrowthPage = lazy(async () => ({ default: (await import("@/pages/GrowthPage")).GrowthPage }));
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
@@ -51,6 +57,12 @@ export const router = createBrowserRouter([
             element: <AppLayout />,
             children: [
               { path: "/today", element: <TodayPage /> },
+              { path: "/interviews", element: <InterviewPage /> },
+              { path: "/interviews/new", element: <InterviewSetupPage /> },
+              { path: "/interviews/:interviewId", element: <InterviewRoomPage /> },
+              { path: "/interviews/:interviewId/report", element: <InterviewReportPage /> },
+              { path: "/materials", element: <MaterialsPage /> },
+              { path: "/growth", element: <GrowthPage /> },
               { path: "/journey", element: <PlansPage /> },
               { path: "/journey/:planId", element: <PlanDetailPage /> },
               { path: "/journey/:planId/day/:date", element: <DayPlanPage /> },

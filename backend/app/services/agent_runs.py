@@ -29,7 +29,9 @@ from app.schemas.agent_runs import (
     SafeResponse,
     TerminalResult,
 )
-from app.schemas.enums import ReplanMode, RunIntent, RunResultKind, RunStatus
+from app.schemas.enums import ReplanMode, RunIntent, RunKind, RunResultKind, RunStatus
+from app.schemas.interviews import InterviewReportResultSummary, InterviewTurnResultSummary
+from app.schemas.resumes import ResumeAssessmentResultSummary
 
 TERMINAL_STATUSES = {"completed", "degraded", "failed", "cancelled"}
 
@@ -281,9 +283,16 @@ class AgentRunService:
                 result = SafeResponse.model_validate(run.result_payload_json)
             elif run.result_kind == "navigation":
                 result = NavigationResult.model_validate(run.result_payload_json)
+            elif run.result_kind == "interview_turn":
+                result = InterviewTurnResultSummary.model_validate(run.result_payload_json)
+            elif run.result_kind == "interview_report":
+                result = InterviewReportResultSummary.model_validate(run.result_payload_json)
+            elif run.result_kind == "resume_assessment":
+                result = ResumeAssessmentResultSummary.model_validate(run.result_payload_json)
         user_status, status_message = AgentRunService._user_status(run)
         return AgentRunResponse(
             run_id=run.id,
+            run_kind=RunKind(run.run_kind),
             status=RunStatus(run.status),
             user_status=user_status,
             status_message=status_message,

@@ -232,6 +232,7 @@ frontend/dist/
 .vite/
 test-results/
 pytest-cache-files-*/
+**/.pytest-tmp-*/
 backend/evals/artifacts/*.json
 backend/evals/bad_cases/*.jsonl
 

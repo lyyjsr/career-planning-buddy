@@ -19,6 +19,7 @@ from app.agent.node_runner import NodeOutput, NodeRunner
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.core.security import TokenService
+from app.core.time import product_today
 from app.harness.budget import BudgetGuard, CancellationToken
 from app.models.agent_run import AgentEvent, AgentRun, AgentStep
 from app.models.plan import Plan, Task
@@ -65,8 +66,8 @@ async def create_user(session: AsyncSession, *, with_profile: bool = True) -> UU
                 time_budget_minutes=90,
                 skill_level=SkillLevel.INTERMEDIATE,
                 skill_summary="FastAPI and PostgreSQL",
-                start_date=datetime.now(UTC).date(),
-                deadline=datetime.now(UTC).date() + timedelta(days=34),
+                start_date=product_today(),
+                deadline=product_today() + timedelta(days=34),
             ),
             idempotency_key=f"profile-{user.id}",
         )
@@ -692,7 +693,7 @@ async def test_idempotency_active_conflict_sse_resume_and_user_isolation(
         await PlanQueryService(db_session).get_active(user_b)
     other_tasks = await PlanQueryService(db_session).list_tasks(
         user_id=user_b,
-        scheduled_date=datetime.now(UTC).date(),
+        scheduled_date=product_today(),
         state=None,
         plan_id=None,
         limit=50,

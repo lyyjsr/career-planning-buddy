@@ -46,3 +46,15 @@ export function useMe() {
     retry: false,
   });
 }
+
+export function useDeleteMe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiRequest<void>("/api/v1/me", { method: "DELETE" }),
+    onSuccess: () => {
+      setAuthToken(null);
+      localStorage.removeItem(DEVICE_KEY);
+      qc.clear();
+    },
+  });
+}

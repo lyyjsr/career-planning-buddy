@@ -17,6 +17,7 @@ from app.agent.nodes import (
     validate_candidate,
 )
 from app.core.config import get_settings
+from app.core.time import product_today
 from app.harness.budget import BudgetGuard, CancellationToken
 from app.harness.snapshots import SnapshotService
 from app.schemas.agent_runs import (
@@ -105,9 +106,9 @@ def candidate() -> tuple[PlanCandidate, PlanningContext]:
 def test_run_schema_is_strict_and_weekly_focus_is_contiguous() -> None:
     with pytest.raises(ValidationError):
         PlanCandidate(
-            plan_date=datetime.now(UTC).date(),
-            horizon_start=datetime.now(UTC).date(),
-            horizon_end=datetime.now(UTC).date() + timedelta(days=7),
+            plan_date=product_today(),
+            horizon_start=product_today(),
+            horizon_end=product_today() + timedelta(days=7),
             overall_direction="方向",
             weekly_focus=[
                 WeeklyFocusCandidate(week_index=2, focus="错误周序号", success_signal="产物")
@@ -118,7 +119,7 @@ def test_run_schema_is_strict_and_weekly_focus_is_contiguous() -> None:
                 TaskCandidate(
                     title="任务",
                     task_type=TaskType.OTHER,
-                    scheduled_date=datetime.now(UTC).date(),
+                    scheduled_date=product_today(),
                     starter_action="开始",
                     deliverable="产物",
                     estimated_minutes=15,

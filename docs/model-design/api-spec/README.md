@@ -7,6 +7,7 @@
 | 健康与就绪探针 | [health.md](./health.md) |
 | Guest 登录与当前用户 | [auth.md](./auth.md) |
 | 用户画像 | [profile.md](./profile.md) |
+| 求职材料 | [resumes.md](./resumes.md) |
 | Agent Run 与 SSE | [agent-runs.md](./agent-runs.md) |
 | 计划 | [plans.md](./plans.md) |
 | 任务 | [tasks.md](./tasks.md) |

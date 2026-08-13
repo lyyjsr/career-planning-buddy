@@ -70,7 +70,7 @@ from app.services.reviews import ReviewService
 from app.tools.registry import build_tool_registry
 from evals.v2.collectors.evidence import collect_evidence
 from evals.v2.collectors.outcome import RunOutcome, collect_outcome
-from evals.v2.contracts import EvalCase, EvalScenario
+from evals.v2.contracts import EvalCase, EvalScenario, PlanningEvalScenario
 from evals.v2.experiment_runtime_context import ExperimentRuntimeContext
 from evals.v2.fixture_loader import FixtureLoader
 from evals.v2.scenario_adapter import RuntimeLaunch, adapt_scenario
@@ -163,6 +163,8 @@ class TrialRunner:
         )
         await self._mark_running(trial)
         scenario = case.scenario
+        if not isinstance(scenario, PlanningEvalScenario):
+            raise TypeError("standard TrialRunner only executes planning scenarios")
         # PR-8: capture provider_fixtures so the launched Run + ToolRegistry
         # honour per-Case counterfactual knobs (memory categories to exclude,
         # context compression budgets, available_tools allowlist, etc.).

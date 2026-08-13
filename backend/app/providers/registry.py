@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.providers.asr import ASRProvider, build_asr_provider
 from app.providers.embedding import EmbeddingProvider, build_embedding_provider
 from app.providers.evidence_distillation import (
     EvidenceDistillationProvider,
@@ -14,6 +15,7 @@ from app.providers.goal_understanding import (
     GoalUnderstandingProvider,
     build_goal_understanding_provider,
 )
+from app.providers.interview import InterviewProvider, build_interview_provider
 from app.providers.llm import PlanningProvider, build_planning_provider
 from app.providers.llm_client import LLMClient, build_llm_client
 from app.providers.search import SearchProvider, build_search_provider
@@ -29,6 +31,8 @@ class RuntimeProviderRegistry:
     """One coherent Provider graph shared by HTTP services and the Agent executor."""
 
     planning: PlanningProvider
+    interview: InterviewProvider
+    asr: ASRProvider
     goal_understanding: GoalUnderstandingProvider
     embedding: EmbeddingProvider
     search: SearchProvider
@@ -40,6 +44,7 @@ class RuntimeProviderRegistry:
     async def aclose(self) -> None:
         if self.llm_client is not None:
             await self.llm_client.aclose()
+        await self.asr.aclose()
 
 
 def build_runtime_provider_registry(
@@ -53,12 +58,12 @@ def build_runtime_provider_registry(
     llm_client = build_llm_client(settings) if settings.llm_provider != "mock" else None
     return RuntimeProviderRegistry(
         planning=build_planning_provider(settings, client=llm_client),
+        interview=build_interview_provider(settings, llm_client),
+        asr=build_asr_provider(settings),
         goal_understanding=build_goal_understanding_provider(settings, client=llm_client),
         embedding=embedding,
         search=search,
-        evidence_distillation=build_evidence_distillation_provider(
-            settings, client=llm_client
-        ),
+        evidence_distillation=build_evidence_distillation_provider(settings, client=llm_client),
         task_adjustment=build_task_adjustment_provider(settings, llm_client),
         tools=build_tool_registry(
             settings=settings,

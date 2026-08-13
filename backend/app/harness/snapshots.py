@@ -23,6 +23,10 @@ NODE_TIMEOUTS: dict[str, float] = {
     "revise_or_fallback": 12,
     "companion_response": 2,
     "persist": 8,
+    "interview_context": 5,
+    "interview_generate": 30,
+    "interview_validate": 3,
+    "interview_persist": 8,
 }
 
 
@@ -40,6 +44,7 @@ class SnapshotService:
             llm_node_timeout = float(settings.agent_deadline_seconds)
             node_timeouts["career_planning_agent"] = llm_node_timeout
             node_timeouts["revise_or_fallback"] = llm_node_timeout
+            node_timeouts["interview_generate"] = llm_node_timeout
         return RuntimeConfigSnapshot(
             graph_version=identity.graph_version,
             feature_stage=identity.feature_stage,
@@ -68,6 +73,30 @@ class SnapshotService:
         )
 
     @staticmethod
+    def build_interview_config(settings: Settings) -> RuntimeConfigSnapshot:
+        """Allow one generation and one bounded repair within an Interview Run."""
+        config = SnapshotService.build_config(settings)
+        if settings.llm_provider != "openai_compatible":
+            return config
+        deadline = min(
+            300,
+            max(config.deadline_seconds, int(settings.llm_timeout_seconds * 3 + 30)),
+        )
+        repair_budget = 3 * (
+            config.max_input_tokens_per_call + config.max_output_tokens_per_call
+        )
+        timeouts = dict(config.node_timeouts_seconds)
+        timeouts["interview_generate"] = float(deadline)
+        timeouts["interview_validate"] = float(deadline)
+        return config.model_copy(
+            update={
+                "deadline_seconds": deadline,
+                "max_total_tokens": max(config.max_total_tokens, repair_budget),
+                "node_timeouts_seconds": timeouts,
+            }
+        )
+
+    @staticmethod
     async def write_input_once(
         session: AsyncSession, run_id: UUID, snapshot: RunInputSnapshot
     ) -> bool:
@@ -75,6 +104,18 @@ class SnapshotService:
             update(AgentRun)
             .where(AgentRun.id == run_id, AgentRun.input_snapshot_json.is_(None))
             .values(input_snapshot_json=snapshot.model_dump(mode="json"))
+            .returning(AgentRun.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    async def write_interview_input_once(
+        session: AsyncSession, run_id: UUID, snapshot: dict[str, object]
+    ) -> bool:
+        result = await session.execute(
+            update(AgentRun)
+            .where(AgentRun.id == run_id, AgentRun.input_snapshot_json.is_(None))
+            .values(input_snapshot_json=snapshot)
             .returning(AgentRun.id)
         )
         return result.scalar_one_or_none() is not None

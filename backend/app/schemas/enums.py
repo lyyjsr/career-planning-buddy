@@ -39,6 +39,9 @@ class RunResultKind(StrEnum):
     CLARIFICATION = "clarification"
     SAFE_RESPONSE = "safe_response"
     NAVIGATION = "navigation"
+    INTERVIEW_TURN = "interview_turn"
+    INTERVIEW_REPORT = "interview_report"
+    RESUME_ASSESSMENT = "resume_assessment"
 
 
 class PlanStatus(StrEnum):
@@ -84,6 +87,18 @@ class RunIntent(StrEnum):
     REPLAN = "replan"
     NAVIGATE = "navigate"
     UNSUPPORTED = "unsupported"
+    INTERVIEW_START = "interview_start"
+    INTERVIEW_ANSWER = "interview_answer"
+    INTERVIEW_REPORT = "interview_report"
+    RESUME_ASSESSMENT = "resume_assessment"
+
+
+class RunKind(StrEnum):
+    PLANNING = "planning"
+    INTERVIEW_START = "interview_start"
+    INTERVIEW_ANSWER = "interview_answer"
+    INTERVIEW_REPORT = "interview_report"
+    RESUME_ASSESSMENT = "resume_assessment"
 
 
 class ReplanMode(StrEnum):

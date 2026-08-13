@@ -233,6 +233,7 @@ export function ReviewsPage(): JSX.Element {
   const resolvedPlan = me.data?.active_plan ?? activePlan.data;
   const hasPlan =
     me.data?.profile_complete === true &&
+    me.data?.planning_window_valid !== false &&
     resolvedPlan !== null &&
     resolvedPlan !== undefined;
   const canSettlePlan = resolvedPlan === null || resolvedPlan === undefined
@@ -273,8 +274,8 @@ export function ReviewsPage(): JSX.Element {
       {!hasPlan && me.data?.profile_complete === true && (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            需要先生成至少一份计划才能开始复盘。
-            <Link to="/today" className="ml-2 text-primary hover:underline">去生成 →</Link>
+            {me.data?.planning_window_valid === false ? "规划周期已经结束，请先更新日期。" : "需要先生成至少一份计划才能开始复盘。"}
+            <Link to={me.data?.planning_window_valid === false ? "/settings/profile" : "/today"} className="ml-2 text-primary hover:underline">去处理 →</Link>
           </CardContent>
         </Card>
       )}

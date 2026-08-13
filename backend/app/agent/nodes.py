@@ -1,10 +1,11 @@
 """Deterministic controlled Stage 4 graph nodes."""
 
 import re
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
 
+from app.core.time import product_today
 from app.harness.evidence import evidence_refs_are_visible
 from app.schemas.agent_runs import (
     ClarificationRequest,
@@ -396,7 +397,7 @@ def build_planning_context(
     blockers: list[str] | None = None,
     planning_date: date | None = None,
 ) -> PlanningContext:
-    today = planning_date or datetime.now(UTC).date()
+    today = planning_date or product_today()
     if profile.start_date is not None:
         today = max(today, profile.start_date)
     if profile.deadline is not None:

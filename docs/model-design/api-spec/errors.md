@@ -23,6 +23,11 @@
 | VALIDATION_PROFILE_INVALID | 422 | 画像字段错误 |
 | VALIDATION_RUN_INVALID | 422 | Run 请求错误 |
 | VALIDATION_REPLAN_SOURCE_UNAVAILABLE | 422 | replan 没有可用来源计划 |
+| RESUME_FILE_FORMAT_UNSUPPORTED | 422 | 简历文件格式不支持或扩展名与媒体类型不匹配 |
+| RESUME_FILE_SIZE_INVALID | 413 | 简历文件为空或超过上传/解压安全限制 |
+| RESUME_FILE_PARSE_FAILED | 422 | 简历文件损坏、加密或无法解析 |
+| RESUME_FILE_TEXT_EMPTY | 422 | PDF/DOCX 未包含足够的可提取文本 |
+| RESUME_FILE_TEXT_TOO_LONG | 422 | 抽取文本超过 50000 字符 |
 | STRUCTURED_OUTPUT_INVALID | 内部 | 模型结构化格式错误 |
 | PLAN_RULE_VALIDATION_FAILED | 内部 | 计划规则不通过 |
 | TOOL_NOT_ALLOWED | 内部 | Tool 未注册、Stage/意图不允许 |

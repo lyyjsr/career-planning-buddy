@@ -118,6 +118,10 @@ def _deliverable(tasks: list[dict[str, object]]) -> bool:
 
 
 async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -> list[GradeResult]:
+    from evals.v2.contracts import PlanningEvalScenario
+
+    if not isinstance(expected.scenario, PlanningEvalScenario):
+        raise TypeError("planning task grader requires a planning scenario")
     expected_outcome = expected.expected_outcome
     scenario = expected.scenario
     profile_item = view.first(EvidenceKind.PROFILE_PROJECTION)

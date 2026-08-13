@@ -1,8 +1,9 @@
 import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, Settings2, ShieldCheck, Target } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useMe } from "@/api/auth";
+import { useDeleteMe, useMe } from "@/api/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { GOAL_LABELS, SKILL_LABELS, STAGE_LABELS } from "@/lib/labels";
 
 function MenuLink({
@@ -35,6 +36,7 @@ function MenuLink({
 
 export function MyPage(): JSX.Element {
   const me = useMe();
+  const deleteMe = useDeleteMe();
   const profile = me.data?.profile;
 
   if (profile === null || profile === undefined) {
@@ -47,7 +49,7 @@ export function MyPage(): JSX.Element {
         <p className="text-sm font-medium text-primary">我的搭子设置</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">让计划更懂你的节奏</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          目标、时间和记忆都由你控制，随时可以调整。
+          目标、时间和记忆都由你控制。当前是访客身份，数据只可在这个浏览器中恢复。
         </p>
       </header>
 
@@ -91,10 +93,10 @@ export function MyPage(): JSX.Element {
           description="查看、停用或删除长期记忆"
         />
         <MenuLink
-          to="/memories"
+          to="/materials"
           icon={ShieldCheck}
           title="隐私与数据控制"
-          description="敏感信息只有确认后才会保留"
+          description="移除求职材料；面试记录可在面试页删除"
         />
         {me.data?.user.role === "dev" && (
           <>
@@ -113,6 +115,7 @@ export function MyPage(): JSX.Element {
           </>
         )}
       </Card>
+      <Card className="border-destructive/25"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><p className="font-medium">删除全部个人数据</p><p className="mt-1 text-sm text-muted-foreground">永久删除当前访客的画像、计划、材料、面试、报告和记忆，无法恢复。</p></div><Button variant="destructive" disabled={deleteMe.isPending} onClick={() => window.confirm("确定永久删除当前访客的全部数据？此操作无法撤销。") && deleteMe.mutate(undefined, { onSuccess: () => window.location.assign("/login") })}>{deleteMe.isPending ? "正在删除…" : "删除全部数据"}</Button>{deleteMe.isError && <p className="w-full text-sm text-destructive">删除失败，数据未被清除，请稍后重试。</p>}</CardContent></Card>
     </div>
   );
 }

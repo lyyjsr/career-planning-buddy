@@ -44,7 +44,7 @@ export class ApiError extends Error {
 
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: unknown;
+  body?: unknown | FormData;
   idempotencyKey?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -68,7 +68,7 @@ export async function apiRequest<T>(
   if (token !== null) {
     headers.Authorization = `Bearer ${token}`;
   }
-  if (body !== undefined) {
+  if (body !== undefined && !(body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
   if (idempotencyKey !== undefined) {
@@ -88,7 +88,7 @@ export async function apiRequest<T>(
     response = await fetch(`${apiBaseUrl()}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       signal: requestController.signal,
     });
   } catch (err) {

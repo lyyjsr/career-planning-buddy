@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from hashlib import sha256
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,3 +45,9 @@ class AuthService:
             expires_in=self._tokens.expires_in_seconds,
             created=created,
         )
+
+    async def delete_current_user(self, user_id: UUID) -> None:
+        async with session_transaction(self._session):
+            user = await self._users.get_by_id(user_id)
+            if user is not None:
+                await self._users.delete(user)
