@@ -2,18 +2,24 @@
 
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http import HTTPStatus
 from uuid import UUID
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.executor import AgentRunExecutor
+from app.core.config import Settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.harness.events import EventRecorder
+from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
 from app.models.interview import InterviewTurn
-from app.models.resume import ResumeAssessment
+from app.models.resume import ResumeAssessment, ResumeRewriteDecision, ResumeVersion
 from app.repositories.interviews import InterviewRepository
 from app.repositories.resumes import ResumeRepository
 from app.schemas.interviews import TurnAnalysis
@@ -23,15 +29,126 @@ from app.schemas.resumes import (
     ResumeAssessmentResponse,
     ResumeClaim,
     ResumeClaimFinding,
+    ResumeOptimizationRunResponse,
+    ResumeRewriteApplyResponse,
+    ResumeRewriteBatchApplyRequest,
+    ResumeRewriteBatchApplyResponse,
+    ResumeRewriteDecisionRequest,
+    ResumeRewriteDecisionResponse,
+    ResumeVersionResponse,
 )
 from app.services.resumes import stable_text_items
 
 
 class ResumeAssessmentService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings | None = None,
+        executor: AgentRunExecutor | None = None,
+    ) -> None:
         self._session = session
+        self._settings = settings
+        self._executor = executor
         self._materials = ResumeRepository(session)
         self._interviews = InterviewRepository(session)
+
+    async def optimize(
+        self,
+        *,
+        user_id: UUID,
+        payload: ResumeAssessmentCreateRequest,
+        idempotency_key: str,
+    ) -> ResumeOptimizationRunResponse:
+        """Create a durable asynchronous Agent Run after validating frozen ownership."""
+        if self._settings is None or self._executor is None:
+            raise RuntimeError("Resume Agent runtime dependencies are not configured")
+        config = SnapshotService.build_resume_optimization_config(self._settings)
+        created = False
+        try:
+            async with session_transaction(self._session):
+                existing = await self._session.scalar(
+                    select(AgentRun).where(
+                        AgentRun.user_id == user_id,
+                        AgentRun.idempotency_key == idempotency_key,
+                    )
+                )
+                if existing is not None:
+                    if (
+                        existing.run_kind != "resume_optimization"
+                        or existing.interview_session_id != payload.interview_session_id
+                    ):
+                        raise AppError(
+                            code="STATE_IDEMPOTENCY_KEY_REUSED",
+                            message="Idempotency-Key was already used with another request",
+                            status_code=HTTPStatus.CONFLICT,
+                        )
+                    run = existing
+                else:
+                    resume = await self._materials.get_resume(
+                        payload.resume_version_id, user_id, include_deleted=True
+                    )
+                    target = await self._materials.get_job_target(
+                        payload.job_target_id, user_id, include_deleted=True
+                    )
+                    interview = await self._interviews.get_session(
+                        payload.interview_session_id, user_id
+                    )
+                    if resume is None or target is None or interview is None:
+                        raise _not_found()
+                    if (
+                        interview.resume_version_id != resume.id
+                        or interview.job_target_id != target.id
+                        or interview.report_status != "ready"
+                    ):
+                        raise AppError(
+                            code="STATE_RESUME_ASSESSMENT_INVALID",
+                            message=(
+                                "optimization requires the completed interview "
+                                "for this Resume/JD pair"
+                            ),
+                            status_code=HTTPStatus.CONFLICT,
+                        )
+                    run = AgentRun(
+                        user_id=user_id,
+                        run_kind="resume_optimization",
+                        interview_session_id=interview.id,
+                        idempotency_key=idempotency_key,
+                        request_text=(
+                            "Optimize frozen Resume claims against JD and interview evidence"
+                        ),
+                        hint_intent="resume_optimization",
+                        resolved_intent="resume_optimization",
+                        status="pending",
+                        graph_version=config.graph_version,
+                        config_snapshot_json=config.model_dump(mode="json"),
+                        deadline_at=datetime.now(UTC)
+                        + timedelta(seconds=config.deadline_seconds),
+                    )
+                    self._session.add(run)
+                    await self._session.flush()
+                    await EventRecorder(self._session).record(
+                        run.id,
+                        "run.created",
+                        {
+                            "status": "pending",
+                            "graph_version": run.graph_version,
+                            "run_kind": "resume_optimization",
+                        },
+                    )
+                    created = True
+        except IntegrityError as exc:
+            raise AppError(
+                code="STATE_RUN_ALREADY_ACTIVE",
+                message="another Agent Run is already active",
+                status_code=HTTPStatus.CONFLICT,
+            ) from exc
+        if created:
+            self._executor.submit(run.id)
+        return ResumeOptimizationRunResponse(
+            run_id=run.id,
+            events_url=f"/api/v1/agent-runs/{run.id}/events",
+        )
 
     async def create(
         self,
@@ -50,7 +167,7 @@ class ResumeAssessmentService:
                         message="Idempotency-Key was already used with another request",
                         status_code=HTTPStatus.CONFLICT,
                     )
-                return _response(existing)
+                return await self._response(existing)
             resume = await self._materials.get_resume(
                 payload.resume_version_id, user_id, include_deleted=True
             )
@@ -135,14 +252,266 @@ class ResumeAssessmentService:
                 },
                 allow_terminal_run=True,
             )
-            return _response(row)
+            return await self._response(row)
 
     async def get(self, assessment_id: UUID, user_id: UUID) -> ResumeAssessmentResponse:
         async with session_transaction(self._session):
             row = await self._materials.get_assessment(assessment_id, user_id)
             if row is None:
                 raise _not_found()
-            return _response(row)
+            return await self._response(row)
+
+    async def list(self, user_id: UUID) -> list[ResumeAssessmentResponse]:
+        async with session_transaction(self._session):
+            rows = await self._materials.list_assessments(user_id)
+            return [await self._response(row) for row in rows]
+
+    async def decide_rewrite(
+        self,
+        *,
+        assessment_id: UUID,
+        claim_id: str,
+        user_id: UUID,
+        payload: ResumeRewriteDecisionRequest,
+    ) -> ResumeRewriteDecisionResponse:
+        async with session_transaction(self._session):
+            assessment = await self._materials.get_assessment(assessment_id, user_id)
+            if assessment is None:
+                raise _not_found()
+            existing = await self._materials.get_rewrite_decision(
+                assessment_id, claim_id, user_id
+            )
+            if existing is not None:
+                requested_text = payload.rewrite_text.strip() if payload.rewrite_text else None
+                if existing.status == payload.status and existing.rewrite_text == requested_text:
+                    return _decision_response(existing)
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_ALREADY_DECIDED",
+                    message="this rewrite already has a human decision",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            finding = _finding_by_id(assessment, claim_id)
+            if finding.suggested_rewrite is None:
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_UNAVAILABLE",
+                    message="this supported claim has no rewrite suggestion",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            row = await self._materials.create_rewrite_decision(
+                ResumeRewriteDecision(
+                    user_id=user_id,
+                    assessment_id=assessment.id,
+                    claim_id=claim_id,
+                    status=payload.status,
+                    original_suggestion=finding.suggested_rewrite,
+                    rewrite_text=(payload.rewrite_text.strip() if payload.rewrite_text else None),
+                )
+            )
+            return _decision_response(row)
+
+    async def apply_rewrite(
+        self, *, assessment_id: UUID, claim_id: str, user_id: UUID
+    ) -> ResumeRewriteApplyResponse:
+        async with session_transaction(self._session):
+            assessment = await self._materials.get_assessment(assessment_id, user_id)
+            decision = await self._materials.get_rewrite_decision(
+                assessment_id, claim_id, user_id
+            )
+            if assessment is None:
+                raise _not_found()
+            if decision is None:
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_NOT_ACCEPTED",
+                    message="accept the rewrite before applying it",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if decision.status == "applied" and decision.applied_resume_version_id is not None:
+                applied = await self._materials.get_resume(
+                    decision.applied_resume_version_id, user_id, include_deleted=True
+                )
+                if applied is not None:
+                    return ResumeRewriteApplyResponse(
+                        decision=_decision_response(decision),
+                        resume_version=_resume_response(applied),
+                    )
+            if decision.status != "accepted" or decision.rewrite_text is None:
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_NOT_ACCEPTED",
+                    message="accept the rewrite before applying it",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            source = await self._materials.get_resume(
+                assessment.resume_version_id, user_id, include_deleted=True
+            )
+            if source is None:
+                raise _not_found()
+            finding = _finding_by_id(assessment, claim_id)
+            if finding.claim_text not in source.source_text:
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_SOURCE_MISMATCH",
+                    message="the assessed claim no longer matches the frozen ResumeVersion",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            rewritten = source.source_text.replace(
+                finding.claim_text, decision.rewrite_text, 1
+            )
+            idempotency_key = f"rewrite-{assessment.id.hex[:16]}-{claim_id[-8:]}"
+            request_payload = {
+                "source_resume_version_id": str(source.id),
+                "assessment_id": str(assessment.id),
+                "claim_id": claim_id,
+                "rewrite_text": decision.rewrite_text,
+            }
+            version = await self._materials.create_resume(
+                ResumeVersion(
+                    user_id=user_id,
+                    label=f"{source.label} · AI 优化版",
+                    source_type="pasted_text",
+                    source_text=rewritten,
+                    structured_json={"claims": stable_text_items(rewritten, prefix="claim")},
+                    content_hash=sha256(rewritten.encode()).hexdigest(),
+                    parent_version_id=source.id,
+                    idempotency_key=idempotency_key,
+                    request_hash=_hash(request_payload),
+                )
+            )
+            decision.status = "applied"
+            decision.applied_resume_version_id = version.id
+            decision.applied_at = datetime.now(UTC)
+            await self._session.flush()
+            return ResumeRewriteApplyResponse(
+                decision=_decision_response(decision),
+                resume_version=_resume_response(version),
+            )
+
+    async def apply_rewrites_batch(
+        self,
+        *,
+        assessment_id: UUID,
+        user_id: UUID,
+        payload: ResumeRewriteBatchApplyRequest,
+    ) -> ResumeRewriteBatchApplyResponse:
+        """Merge accepted non-overlapping rewrites into exactly one child version."""
+        async with session_transaction(self._session):
+            assessment = await self._materials.get_assessment(
+                assessment_id, user_id, for_update=True
+            )
+            if assessment is None:
+                raise _not_found()
+            decisions = []
+            findings = []
+            for claim_id in payload.claim_ids:
+                decision = await self._materials.get_rewrite_decision(
+                    assessment_id, claim_id, user_id, for_update=True
+                )
+                if decision is None or decision.status not in {"accepted", "applied"}:
+                    raise AppError(
+                        code="STATE_RESUME_REWRITE_NOT_ACCEPTED",
+                        message="all selected rewrites must be accepted before applying",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                decisions.append(decision)
+                findings.append(_finding_by_id(assessment, claim_id))
+            applied_ids = {
+                item.applied_resume_version_id
+                for item in decisions
+                if item.status == "applied"
+            }
+            if applied_ids:
+                if len(applied_ids) != 1 or any(item.status != "applied" for item in decisions):
+                    raise AppError(
+                        code="STATE_RESUME_REWRITE_BATCH_CONFLICT",
+                        message="selected rewrites were already applied in different versions",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                version = await self._materials.get_resume(
+                    next(iter(applied_ids)), user_id, include_deleted=True  # type: ignore[arg-type]
+                )
+                if version is None:
+                    raise _not_found()
+                return ResumeRewriteBatchApplyResponse(
+                    decisions=[_decision_response(item) for item in decisions],
+                    resume_version=_resume_response(version),
+                )
+            source = await self._materials.get_resume(
+                assessment.resume_version_id, user_id, include_deleted=True
+            )
+            if source is None:
+                raise _not_found()
+            replacements: list[tuple[int, int, str]] = []
+            for finding, decision in zip(findings, decisions, strict=True):
+                start = source.source_text.find(finding.claim_text)
+                if start < 0 or decision.rewrite_text is None:
+                    raise AppError(
+                        code="STATE_RESUME_REWRITE_SOURCE_MISMATCH",
+                        message="a selected claim no longer matches the frozen ResumeVersion",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                replacements.append(
+                    (start, start + len(finding.claim_text), decision.rewrite_text)
+                )
+            replacements.sort()
+            if any(
+                current[0] < previous[1]
+                for previous, current in zip(
+                    replacements, replacements[1:], strict=False
+                )
+            ):
+                raise AppError(
+                    code="STATE_RESUME_REWRITE_OVERLAP",
+                    message="selected claims overlap and cannot be merged safely",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            rewritten = source.source_text
+            for start, end, value in reversed(replacements):
+                rewritten = f"{rewritten[:start]}{value}{rewritten[end:]}"
+            fingerprint = _hash(
+                {
+                    "assessment_id": str(assessment.id),
+                    "claim_ids": sorted(payload.claim_ids),
+                    "rewrites": [item.rewrite_text for item in decisions],
+                }
+            )
+            version = await self._materials.create_resume(
+                ResumeVersion(
+                    user_id=user_id,
+                    label=f"{source.label} · AI 合并优化版",
+                    source_type="pasted_text",
+                    source_text=rewritten,
+                    structured_json={"claims": stable_text_items(rewritten, prefix="claim")},
+                    content_hash=sha256(rewritten.encode()).hexdigest(),
+                    parent_version_id=source.id,
+                    idempotency_key=f"rewrite-batch-{fingerprint[:50]}",
+                    request_hash=fingerprint,
+                )
+            )
+            now = datetime.now(UTC)
+            for decision in decisions:
+                decision.status = "applied"
+                decision.applied_resume_version_id = version.id
+                decision.applied_at = now
+            await self._session.flush()
+            return ResumeRewriteBatchApplyResponse(
+                decisions=[_decision_response(item) for item in decisions],
+                resume_version=_resume_response(version),
+            )
+
+    async def _response(self, row: ResumeAssessment) -> ResumeAssessmentResponse:
+        decisions = await self._materials.list_rewrite_decisions(row.id, row.user_id)
+        return ResumeAssessmentResponse(
+            assessment_id=row.id,
+            resume_version_id=row.resume_version_id,
+            job_target_id=row.job_target_id,
+            interview_session_id=row.interview_session_id,
+            claims=[ResumeClaimFinding.model_validate(item) for item in row.findings_json],
+            rewrite_decisions=[_decision_response(item) for item in decisions],
+            source_run_id=row.source_run_id,
+            context_manifest=(
+                row.context_manifest_json if row.context_manifest_json else None
+            ),
+            limitations=list(row.limitations_json),
+            created_at=row.created_at,
+        )
 
 
 def _claims(structured: dict[str, object], source_text: str) -> list[ResumeClaim]:
@@ -249,14 +618,40 @@ def _finding(
     )
 
 
-def _response(row: ResumeAssessment) -> ResumeAssessmentResponse:
-    return ResumeAssessmentResponse(
-        assessment_id=row.id,
-        resume_version_id=row.resume_version_id,
-        job_target_id=row.job_target_id,
-        interview_session_id=row.interview_session_id,
-        claims=[ResumeClaimFinding.model_validate(item) for item in row.findings_json],
-        limitations=list(row.limitations_json),
+def _finding_by_id(row: ResumeAssessment, claim_id: str) -> ResumeClaimFinding:
+    for value in row.findings_json:
+        finding = ResumeClaimFinding.model_validate(value)
+        if finding.claim_id == claim_id:
+            return finding
+    raise AppError(
+        code="NOT_FOUND_RESUME_CLAIM",
+        message="resume claim was not found in this assessment",
+        status_code=HTTPStatus.NOT_FOUND,
+    )
+
+
+def _decision_response(row: ResumeRewriteDecision) -> ResumeRewriteDecisionResponse:
+    return ResumeRewriteDecisionResponse(
+        assessment_id=row.assessment_id,
+        claim_id=row.claim_id,
+        status=row.status,
+        original_suggestion=row.original_suggestion,
+        rewrite_text=row.rewrite_text,
+        applied_resume_version_id=row.applied_resume_version_id,
+        decided_at=row.decided_at,
+        applied_at=row.applied_at,
+    )
+
+
+def _resume_response(row: ResumeVersion) -> ResumeVersionResponse:
+    return ResumeVersionResponse(
+        resume_version_id=row.id,
+        label=row.label,
+        source_type=row.source_type,
+        source_text=row.source_text,
+        structured=row.structured_json,
+        content_hash=row.content_hash,
+        parent_version_id=row.parent_version_id,
         created_at=row.created_at,
     )
 

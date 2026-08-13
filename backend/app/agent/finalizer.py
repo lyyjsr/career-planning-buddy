@@ -15,7 +15,9 @@ from app.harness.evidence import evidence_refs_are_visible
 from app.harness.trace import TraceRecorder
 from app.models.agent_run import AgentRun, AgentStep
 from app.models.interview import InterviewSession
+from app.models.resume import ResumeAssessment
 from app.repositories.plans import PlanRepository
+from app.repositories.resumes import ResumeRepository
 from app.schemas.agent_runs import (
     ClarificationRequest,
     CompanionMessageCandidate,
@@ -31,6 +33,11 @@ from app.schemas.interviews import (
     InterviewReport,
     InterviewReportResultSummary,
     InterviewTurnResultSummary,
+)
+from app.schemas.resumes import (
+    ResumeAssessmentResultSummary,
+    ResumeOptimizationCandidate,
+    ResumeOptimizationInputSnapshot,
 )
 from app.services.interview_persistence import InterviewPersistenceService
 
@@ -381,6 +388,113 @@ class AgentRunFinalizer:
                         await persistence.create_auto_report_run(
                             source_run=run, interview=interview
                         )
+        except (AgentLeaseLostError, RunCancelledError):
+            raise
+        except Exception:
+            await self.finalize_failed(
+                run_id,
+                error_code="PERSIST_TRANSACTION_FAILED",
+                persist_step_id=persist_step_id,
+            )
+            raise
+
+    async def finalize_resume_optimization(
+        self,
+        *,
+        run_id: UUID,
+        candidate: ResumeOptimizationCandidate,
+        snapshot: ResumeOptimizationInputSnapshot,
+        persist_step_id: UUID,
+    ) -> None:
+        """Atomically persist the evidence-bound candidate and terminal Run event."""
+        if self._budget is None:
+            raise RuntimeError("Resume finalization requires a valid RuntimeConfigSnapshot")
+        started = monotonic()
+        try:
+            async with self._session_factory() as session:
+                async with session_transaction(session):
+                    run = await self._lock_active_run(session, run_id)
+                    self._ensure_can_persist(run)
+                    materials = ResumeRepository(session)
+                    existing = await materials.assessment_by_source_run(run_id, run.user_id)
+                    if existing is None:
+                        assessment = await materials.create_assessment(
+                            ResumeAssessment(
+                                user_id=run.user_id,
+                                resume_version_id=snapshot.resume_version_id,
+                                job_target_id=snapshot.job_target_id,
+                                interview_session_id=snapshot.interview_session_id,
+                                source_run_id=run.id,
+                                findings_json=[
+                                    item.model_dump(mode="json") for item in candidate.claims
+                                ],
+                                limitations_json=candidate.limitations,
+                                context_manifest_json=(
+                                    snapshot.context_manifest.model_dump(mode="json")
+                                ),
+                                idempotency_key=f"run-{run.id}",
+                                request_hash=snapshot.resume_hash,
+                            )
+                        )
+                    else:
+                        assessment = existing
+                    persist_step = await session.get(AgentStep, persist_step_id)
+                    if persist_step is None:
+                        raise PersistTransactionError("Resume persist step is missing")
+                    latency_ms = int((monotonic() - started) * 1000)
+                    trace = {
+                        "assessment_id": str(assessment.id),
+                        "claim_count": len(candidate.claims),
+                        "selected_evidence_count": len(
+                            snapshot.context_manifest.selected_evidence_refs
+                        ),
+                    }
+                    await TraceRecorder(session).complete_step(
+                        persist_step,
+                        status="completed",
+                        latency_ms=latency_ms,
+                        trace_data=trace,
+                    )
+                    recorder = EventRecorder(session)
+                    await recorder.record(
+                        run_id,
+                        "node.completed",
+                        {
+                            "node_name": "resume_candidate_persist",
+                            "step_sequence": persist_step.sequence,
+                            "status": "completed",
+                            "latency_ms": latency_ms,
+                        },
+                    )
+                    await recorder.record(run_id, "resume.optimization.ready", trace)
+                    result = ResumeAssessmentResultSummary(
+                        assessment_id=assessment.id,
+                        claim_count=len(candidate.claims),
+                    )
+                    run.status = "completed"
+                    self._clear_lease(run)
+                    run.result_kind = "resume_optimization"
+                    run.result_payload_json = result.model_dump(mode="json")
+                    run.fallback_reason = None
+                    run.error_code = None
+                    run.error_message = None
+                    run.total_tokens_in = self._budget.tokens_in
+                    run.total_tokens_out = self._budget.tokens_out
+                    run.finished_at = datetime.now(UTC)
+                    run.total_latency_ms = max(
+                        0,
+                        int((run.finished_at - run.created_at).total_seconds() * 1000),
+                    )
+                    await recorder.record(
+                        run_id,
+                        "run.completed",
+                        {
+                            "status": "completed",
+                            "result_kind": "resume_optimization",
+                            "assessment_id": str(assessment.id),
+                        },
+                        allow_terminal_run=True,
+                    )
         except (AgentLeaseLostError, RunCancelledError):
             raise
         except Exception:

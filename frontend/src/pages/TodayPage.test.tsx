@@ -7,6 +7,7 @@ import { useCancelRun, useRun } from "@/api/agent-runs";
 import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
 import { useMe } from "@/api/auth";
 import { useInterviews } from "@/api/interviews";
+import { useJobTargets, useResumeVersions } from "@/api/resumes";
 import { useRunEventStream } from "@/api/sse";
 import type { ActivePlanResponse, AgentRunResponse, TaskResponse } from "@/api/types";
 import { TodayPage } from "./TodayPage";
@@ -23,6 +24,7 @@ vi.mock("@/api/goal-briefs", () => ({
 }));
 vi.mock("@/api/auth", () => ({ useMe: vi.fn() }));
 vi.mock("@/api/interviews", () => ({ useInterviews: vi.fn() }));
+vi.mock("@/api/resumes", () => ({ useResumeVersions: vi.fn(), useJobTargets: vi.fn() }));
 vi.mock("@/api/sse", () => ({ useRunEventStream: vi.fn() }));
 
 function task(overrides: Partial<TaskResponse>): TaskResponse {
@@ -66,6 +68,8 @@ beforeEach(() => {
   vi.mocked(useConfirmGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useConfirmGoalBrief>);
   vi.mocked(useCancelGoalBrief).mockReturnValue({ isPending: false, mutate: vi.fn() } as unknown as ReturnType<typeof useCancelGoalBrief>);
   vi.mocked(useInterviews).mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useInterviews>);
+  vi.mocked(useResumeVersions).mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useResumeVersions>);
+  vi.mocked(useJobTargets).mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useJobTargets>);
 });
 
 afterEach(() => {
@@ -152,9 +156,9 @@ describe("TodayPage", () => {
     expect(screen.queryByText("整理简历项目表达")).not.toBeInTheDocument();
     expect(screen.queryByText("本周每日计划")).not.toBeInTheDocument();
     expect(screen.queryByText("这一步在路线中的位置")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /查看本周路线/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /回到工作台/ })).toHaveAttribute(
       "href",
-      "/journey/plan-new",
+      "/workspace",
     );
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
   });
@@ -195,7 +199,14 @@ describe("TodayPage", () => {
     vi.mocked(useRunEventStream).mockReturnValue({} as ReturnType<typeof useRunEventStream>);
     vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
 
-    render(<MemoryRouter initialEntries={["/today?run_id=run-navigation"]}><TodayPage /></MemoryRouter>);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/today?run_id=run-navigation"]}><TodayPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
 
     expect(screen.getByText("这个请求不需要重新生成计划，可以直接查看今天的任务。")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看今日任务" })).toHaveAttribute("href", "/today");
@@ -230,7 +241,14 @@ describe("TodayPage", () => {
     } as ReturnType<typeof useRunEventStream>);
     vi.mocked(useCancelRun).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useCancelRun>);
 
-    render(<MemoryRouter initialEntries={["/today?run_id=run-stopping"]}><TodayPage /></MemoryRouter>);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/today?run_id=run-stopping"]}><TodayPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
 
     expect(screen.getByText("正在安全停止本次生成。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "正在停止…" })).toBeDisabled();

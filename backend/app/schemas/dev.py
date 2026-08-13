@@ -105,7 +105,19 @@ class ReplayResponse(StrictModel):
     replay_of_run_id: UUID
     status: str
     deterministic: bool
-    execution_kind: Literal["legacy_trace_clone"]
+    execution_kind: Literal["legacy_trace_clone", "replay_v2"]
+
+
+class ReplayDiff(StrictModel):
+    source_run_id: UUID
+    replay_run_id: UUID
+    source_status: str
+    replay_status: str
+    input_snapshot_equal: bool
+    result_equal: bool
+    source_result_sha256: str | None
+    replay_result_sha256: str | None
+    changed_fields: list[str]
 
 
 class EvalDatasetSummary(StrictModel):

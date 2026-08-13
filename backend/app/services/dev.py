@@ -1,6 +1,6 @@
 """Developer Trace inspection and isolated offline Replay use cases."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from http import HTTPStatus
@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.executor import AgentRunExecutor
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.harness.redaction import redact, redacted_snapshot
@@ -21,6 +22,7 @@ from app.schemas.dev import (
     DevSnapshot,
     DevStepTrace,
     DevToolTrace,
+    ReplayDiff,
     ReplayResponse,
     TerminalInvariant,
 )
@@ -29,8 +31,9 @@ TERMINAL_EVENTS = {"run.completed", "run.degraded", "run.failed", "run.cancelled
 
 
 class DevTraceService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, executor: AgentRunExecutor | None = None) -> None:
         self._session = session
+        self._executor = executor
         self._repo = DevTraceRepository(session)
 
     async def list_runs(
@@ -304,6 +307,136 @@ class DevTraceService:
             deterministic=tool_mode == "fixture",
             execution_kind="legacy_trace_clone",
         )
+
+    async def replay_v2(self, run_id: UUID, *, tool_mode: str) -> ReplayResponse:
+        """Execute a new Resume graph from the frozen source snapshot."""
+        if self._executor is None:
+            raise RuntimeError("Replay V2 executor is not configured")
+        async with session_transaction(self._session):
+            source = await self._repo.get_run(run_id)
+            if source is None:
+                raise self._not_found()
+            if source.status not in {"completed", "degraded", "failed", "cancelled"}:
+                raise AppError(
+                    code="REPLAY_SOURCE_NOT_TERMINAL",
+                    message="only terminal Runs can be replayed",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if source.run_kind != "resume_optimization":
+                raise AppError(
+                    code="REPLAY_KIND_UNSUPPORTED",
+                    message="Replay V2 currently requires a Resume optimization Run",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            if source.input_snapshot_json is None:
+                raise AppError(
+                    code="REPLAY_SNAPSHOT_MISSING",
+                    message="the frozen input snapshot is missing",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            if tool_mode == "fixture":
+                _steps, source_tools, _events = await self._repo.get_trace(run_id)
+                if not source_tools or any(
+                    row.result_json is None or not row.success for row in source_tools
+                ):
+                    raise AppError(
+                        code="REPLAY_FIXTURE_MISSING",
+                        message="complete successful Tool fixtures are required",
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+            config = dict(source.config_snapshot_json)
+            config.update(
+                {
+                    "execution_kind": "replay_v2",
+                    "replay_tool_mode": tool_mode,
+                }
+            )
+            replay = AgentRun(
+                user_id=source.user_id,
+                run_kind=source.run_kind,
+                interview_session_id=source.interview_session_id,
+                idempotency_key=f"replay-v2-{uuid4().hex}",
+                request_text=source.request_text,
+                hint_intent=source.hint_intent,
+                resolved_intent=source.resolved_intent,
+                replay_of_run_id=source.id,
+                status="pending",
+                graph_version=source.graph_version,
+                input_snapshot_json=source.input_snapshot_json,
+                config_snapshot_json=config,
+                deadline_at=datetime.now(UTC)
+                + timedelta(seconds=int(config.get("deadline_seconds", 45))),
+            )
+            self._session.add(replay)
+            await self._session.flush()
+            self._session.add(
+                AgentEvent(
+                    run_id=replay.id,
+                    sequence=1,
+                    event_type="run.created",
+                    payload_json={
+                        "status": "pending",
+                        "replay_of_run_id": str(source.id),
+                        "execution_kind": "replay_v2",
+                        "tool_mode": tool_mode,
+                    },
+                )
+            )
+            replay.next_event_sequence = 2
+            replay_id = replay.id
+        self._executor.submit(replay_id)
+        return ReplayResponse(
+            run_id=replay_id,
+            replay_of_run_id=run_id,
+            status="pending",
+            deterministic=tool_mode == "fixture",
+            execution_kind="replay_v2",
+        )
+
+    async def replay_diff(self, replay_run_id: UUID) -> ReplayDiff:
+        async with session_transaction(self._session):
+            replay = await self._repo.get_run(replay_run_id)
+            if replay is None or replay.replay_of_run_id is None:
+                raise self._not_found()
+            source = await self._repo.get_run(replay.replay_of_run_id)
+            if source is None:
+                raise self._not_found()
+        source_result = self._digest(source.result_payload_json)
+        replay_result = self._digest(replay.result_payload_json)
+        changed: list[str] = []
+        if source.status != replay.status:
+            changed.append("status")
+        if source.result_kind != replay.result_kind:
+            changed.append("result_kind")
+        if source_result != replay_result:
+            changed.append("result_payload")
+        return ReplayDiff(
+            source_run_id=source.id,
+            replay_run_id=replay.id,
+            source_status=source.status,
+            replay_status=replay.status,
+            input_snapshot_equal=self._digest(source.input_snapshot_json)
+            == self._digest(replay.input_snapshot_json),
+            result_equal=source_result == replay_result,
+            source_result_sha256=source_result,
+            replay_result_sha256=replay_result,
+            changed_fields=changed,
+        )
+
+    @staticmethod
+    def _digest(value: object | None) -> str | None:
+        if value is None:
+            return None
+        import json
+
+        return sha256(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
 
     @staticmethod
     def _summary(run: AgentRun) -> DevRunSummary:

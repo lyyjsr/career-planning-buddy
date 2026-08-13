@@ -162,6 +162,8 @@ class RuntimeConfigSnapshot(StrictModel):
     context_recent_reviews_budget: int = Field(default=2, ge=0, le=10)
     tool_required: bool = False
     expected_citations: list[str] = Field(default_factory=list, max_length=20)
+    execution_kind: Literal["live", "replay_v2"] = "live"
+    replay_tool_mode: Literal["fixture", "live"] | None = None
 
 
 class RunRequestSnapshot(StrictModel):

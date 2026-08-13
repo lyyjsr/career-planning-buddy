@@ -27,6 +27,11 @@ NODE_TIMEOUTS: dict[str, float] = {
     "interview_generate": 30,
     "interview_validate": 3,
     "interview_persist": 8,
+    "resume_context_builder": 8,
+    "resume_domain_tools": 12,
+    "resume_rewrite_generator": 30,
+    "resume_faithfulness_validator": 15,
+    "resume_candidate_persist": 8,
 }
 
 
@@ -93,6 +98,24 @@ class SnapshotService:
                 "deadline_seconds": deadline,
                 "max_total_tokens": max(config.max_total_tokens, repair_budget),
                 "node_timeouts_seconds": timeouts,
+            }
+        )
+
+    @staticmethod
+    def build_resume_optimization_config(settings: Settings) -> RuntimeConfigSnapshot:
+        """Freeze a domain-specific budget and tool allow-list for Resume Runs."""
+        config = SnapshotService.build_interview_config(settings)
+        return config.model_copy(
+            update={
+                "available_tools": [
+                    "interview_evidence_retrieve",
+                    "resume_gap_analyze",
+                ],
+                "model_alias": (
+                    model_for_operation(settings, "planning")
+                    if settings.llm_provider == "openai_compatible"
+                    else "mock-resume-optimizer-v1"
+                ),
             }
         )
 

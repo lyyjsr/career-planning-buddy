@@ -20,19 +20,29 @@ from app.providers.search import SearchProvider
 from app.schemas.enums import RunIntent
 from app.tools.contracts import (
     EvidenceItem,
+    InterviewEvidenceRetrieveInput,
+    InterviewEvidenceRetrieveOutput,
     MemoryLookupInput,
     MemoryLookupOutput,
     ModelToolSpec,
     RagRetrieveInput,
     RagRetrieveOutput,
     RegisteredTool,
+    ResumeGapAnalyzeInput,
+    ResumeGapAnalyzeOutput,
     ToolContext,
     ToolExecutionResult,
     ToolResult,
     WebSearchInput,
     WebSearchOutput,
 )
-from app.tools.executors import MemoryLookupHandler, RagRetrieveHandler, WebSearchHandler
+from app.tools.executors import (
+    InterviewEvidenceRetrieveHandler,
+    MemoryLookupHandler,
+    RagRetrieveHandler,
+    ResumeGapAnalyzeHandler,
+    WebSearchHandler,
+)
 
 
 class ToolRegistry:
@@ -77,16 +87,26 @@ class ToolRegistry:
         intent: RunIntent = RunIntent.CREATE_PLAN,
         requires_fresh_information: bool = False,
     ) -> list[ModelToolSpec]:
-        allowed_intent = intent in {RunIntent.CREATE_PLAN, RunIntent.REPLAN}
+        allowed_intent = intent in {
+            RunIntent.CREATE_PLAN,
+            RunIntent.REPLAN,
+            RunIntent.RESUME_OPTIMIZATION,
+        }
         if not allowed_intent:
             return []
         override = self._available_tools_override
+        domain_tools = {"interview_evidence_retrieve", "resume_gap_analyze"}
         return [
             tool.spec
             for tool in self._tools.values()
             if tool.stage <= self._feature_stage
             and (tool.spec.name != "web_search" or requires_fresh_information)
             and (override is None or tool.spec.name in override)
+            and (
+                tool.spec.name in domain_tools
+                if intent == RunIntent.RESUME_OPTIMIZATION
+                else tool.spec.name not in domain_tools
+            )
         ]
 
     async def execute(
@@ -101,12 +121,22 @@ class ToolRegistry:
         if self._sessions is None:
             raise RuntimeError("ToolRegistry execution requires a session factory")
         tool = self._tools.get(tool_name)
-        intent_allowed = context.intent in {RunIntent.CREATE_PLAN, RunIntent.REPLAN}
+        intent_allowed = context.intent in {
+            RunIntent.CREATE_PLAN,
+            RunIntent.REPLAN,
+            RunIntent.RESUME_OPTIMIZATION,
+        }
+        domain_allowed = (
+            tool_name in {"interview_evidence_retrieve", "resume_gap_analyze"}
+            if context.intent == RunIntent.RESUME_OPTIMIZATION
+            else tool_name not in {"interview_evidence_retrieve", "resume_gap_analyze"}
+        )
         fresh_allowed = tool_name != "web_search" or context.requires_fresh_information
         if (
             tool is None
             or tool.stage > self._feature_stage
             or not intent_allowed
+            or not domain_allowed
             or not fresh_allowed
         ):
             return await self._record_immediate_failure(
@@ -143,6 +173,33 @@ class ToolRegistry:
                 )
         args_json = validated_input.model_dump(mode="json")
         args_hash = self._hash(args_json)
+        if context.replay_fixture_run_id is not None and context.fixture_only:
+            fixture = await self._fixture(
+                tool_name,
+                tool.spec.contract_version,
+                args_hash,
+                context.replay_fixture_run_id,
+            )
+            if fixture is None:
+                return await self._record_immediate_failure(
+                    tool_name=tool_name,
+                    contract_version=tool.spec.contract_version,
+                    arguments=args_json,
+                    context=context,
+                    step_id=step_id,
+                    round_number=round_number,
+                    error_code="REPLAY_FIXTURE_MISSING",
+                )
+            tool_call_id = await self._record_called(
+                tool=tool,
+                args_json=args_json,
+                args_hash=args_hash,
+                context=context,
+                step_id=step_id,
+                round_number=round_number,
+            )
+            await self._record_returned(tool_call_id, fixture, monotonic(), "fixture")
+            return ToolExecutionResult(success=True, result=fixture, reused=True)
         reused = await self._reuse(tool_name, args_hash, context.run_id)
         if reused is not None:
             return ToolExecutionResult(success=True, result=reused, reused=True)
@@ -196,6 +253,31 @@ class ToolRegistry:
                 .where(
                     ToolCall.run_id == run_id,
                     ToolCall.tool_name == tool_name,
+                    ToolCall.args_hash == args_hash,
+                    ToolCall.success.is_(True),
+                )
+                .order_by(ToolCall.created_at)
+                .limit(1)
+            )
+            if row is None or row.result_json is None:
+                return None
+            return ToolResult.model_validate(row.result_json)
+
+    async def _fixture(
+        self,
+        tool_name: str,
+        contract_version: str,
+        args_hash: str,
+        source_run_id: UUID,
+    ) -> ToolResult | None:
+        assert self._sessions is not None
+        async with self._sessions() as session:
+            row = await session.scalar(
+                select(ToolCall)
+                .where(
+                    ToolCall.run_id == source_run_id,
+                    ToolCall.tool_name == tool_name,
+                    ToolCall.tool_contract_version == contract_version,
                     ToolCall.args_hash == args_hash,
                     ToolCall.success.is_(True),
                 )
@@ -466,6 +548,34 @@ def build_tool_registry(
             handler=WebSearchHandler(session_factory, search_provider),
             timeout_seconds=settings.tool_timeout_seconds,
             provider=search_provider.provider_name,
+        ),
+        RegisteredTool(
+            spec=ModelToolSpec(
+                name="interview_evidence_retrieve",
+                description=(
+                    "Retrieve evidence-bearing answers from the selected completed interview."
+                ),
+                input_json_schema=InterviewEvidenceRetrieveInput.model_json_schema(),
+                contract_version="1.0",
+            ),
+            input_model=InterviewEvidenceRetrieveInput,
+            output_model=InterviewEvidenceRetrieveOutput,
+            handler=InterviewEvidenceRetrieveHandler(session_factory),
+            timeout_seconds=settings.tool_timeout_seconds,
+            provider="local",
+        ),
+        RegisteredTool(
+            spec=ModelToolSpec(
+                name="resume_gap_analyze",
+                description="Analyze Resume claim coverage against the frozen target JD.",
+                input_json_schema=ResumeGapAnalyzeInput.model_json_schema(),
+                contract_version="1.0",
+            ),
+            input_model=ResumeGapAnalyzeInput,
+            output_model=ResumeGapAnalyzeOutput,
+            handler=ResumeGapAnalyzeHandler(session_factory),
+            timeout_seconds=settings.tool_timeout_seconds,
+            provider="local",
         ),
     ]
     for registration in registrations:

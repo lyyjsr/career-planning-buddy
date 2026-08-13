@@ -26,6 +26,8 @@ class ToolContext(StrictModel):
     intent: RunIntent = RunIntent.CREATE_PLAN
     requires_fresh_information: bool = False
     remaining_deadline_ms: int = Field(ge=0)
+    replay_fixture_run_id: UUID | None = None
+    fixture_only: bool = False
 
 
 class ToolResult(StrictModel):
@@ -40,7 +42,14 @@ ToolHandler = Callable[[BaseModel, ToolContext], Awaitable[BaseModel]]
 
 
 class EvidenceItem(StrictModel):
-    kind: Literal["memory", "experience_atom", "search_source"]
+    kind: Literal[
+        "memory",
+        "experience_atom",
+        "search_source",
+        "interview_turn",
+        "resume_claim",
+        "job_requirement",
+    ]
     id: UUID
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1, max_length=2000)
@@ -103,6 +112,45 @@ class WebSearchItem(StrictModel):
 
 class WebSearchOutput(StrictModel):
     items: list[WebSearchItem]
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+
+
+class InterviewEvidenceRetrieveInput(StrictModel):
+    interview_session_id: UUID
+    claim_id: str = Field(pattern=r"^claim_[0-9a-f]{16}$")
+    claim_text: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=5, ge=1, le=6)
+
+
+class InterviewEvidenceRetrieveItem(StrictModel):
+    turn_id: UUID
+    question: str
+    answer: str
+    relevance: float = Field(ge=0, le=1)
+    reliability: float = Field(ge=0, le=1)
+    explicit_conflict: bool = False
+
+
+class InterviewEvidenceRetrieveOutput(StrictModel):
+    items: list[InterviewEvidenceRetrieveItem]
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+
+
+class ResumeGapAnalyzeInput(StrictModel):
+    resume_version_id: UUID
+    job_target_id: UUID
+    claim_ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class ResumeGapItem(StrictModel):
+    claim_id: str
+    requirement_ids: list[str] = Field(max_length=5)
+    coverage_score: float = Field(ge=0, le=1)
+    gap: Literal["covered", "partial", "uncovered"]
+
+
+class ResumeGapAnalyzeOutput(StrictModel):
+    items: list[ResumeGapItem]
     evidence: list[EvidenceItem] = Field(default_factory=list)
 
 

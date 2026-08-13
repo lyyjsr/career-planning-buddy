@@ -18,6 +18,10 @@ from app.providers.goal_understanding import (
 from app.providers.interview import InterviewProvider, build_interview_provider
 from app.providers.llm import PlanningProvider, build_planning_provider
 from app.providers.llm_client import LLMClient, build_llm_client
+from app.providers.resume_optimization import (
+    ResumeOptimizationProvider,
+    build_resume_optimization_provider,
+)
 from app.providers.search import SearchProvider, build_search_provider
 from app.providers.task_adjustment import (
     TaskAdjustmentProvider,
@@ -32,6 +36,7 @@ class RuntimeProviderRegistry:
 
     planning: PlanningProvider
     interview: InterviewProvider
+    resume_optimization: ResumeOptimizationProvider
     asr: ASRProvider
     goal_understanding: GoalUnderstandingProvider
     embedding: EmbeddingProvider
@@ -59,6 +64,7 @@ def build_runtime_provider_registry(
     return RuntimeProviderRegistry(
         planning=build_planning_provider(settings, client=llm_client),
         interview=build_interview_provider(settings, llm_client),
+        resume_optimization=build_resume_optimization_provider(settings, llm_client),
         asr=build_asr_provider(settings),
         goal_understanding=build_goal_understanding_provider(settings, client=llm_client),
         embedding=embedding,

@@ -9,18 +9,29 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.errors import AgentError, ProviderUnavailableError
+from app.agent.resume_context_selection import lexical_similarity, requirement_matches
 from app.core.database import session_transaction
 from app.providers.embedding import EmbeddingProvider
 from app.providers.search import SearchProvider
 from app.repositories.evidence import EvidenceRepository
+from app.repositories.interviews import InterviewRepository
+from app.repositories.resumes import ResumeRepository
+from app.schemas.resumes import JobRequirement, ResumeClaim
+from app.services.resumes import stable_text_items
 from app.tools.contracts import (
     EvidenceItem,
+    InterviewEvidenceRetrieveInput,
+    InterviewEvidenceRetrieveItem,
+    InterviewEvidenceRetrieveOutput,
     MemoryLookupInput,
     MemoryLookupItem,
     MemoryLookupOutput,
     RagEvidenceItem,
     RagRetrieveInput,
     RagRetrieveOutput,
+    ResumeGapAnalyzeInput,
+    ResumeGapAnalyzeOutput,
+    ResumeGapItem,
     ToolContext,
     WebSearchInput,
     WebSearchItem,
@@ -214,6 +225,122 @@ class WebSearchHandler:
                         )
                     )
         return WebSearchOutput(items=items, evidence=evidence)
+
+
+class InterviewEvidenceRetrieveHandler:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = session_factory
+
+    async def __call__(
+        self, payload: BaseModel, context: ToolContext
+    ) -> InterviewEvidenceRetrieveOutput:
+        request = InterviewEvidenceRetrieveInput.model_validate(payload)
+        async with self._sessions() as session:
+            repository = InterviewRepository(session)
+            interview = await repository.get_session(
+                request.interview_session_id, context.user_id
+            )
+            if interview is None:
+                raise ValueError("interview not found")
+            turns = [
+                turn for turn in await repository.list_turns(interview.id, context.user_id)
+                if turn.answer_status == "submitted" and turn.answer_text
+            ]
+        ranked: list[InterviewEvidenceRetrieveItem] = []
+        for turn in turns:
+            content = f"{turn.question_text} {turn.answer_text or ''}"
+            relevance = lexical_similarity(request.claim_text, content)
+            explicit_conflict = any(
+                isinstance(item, dict)
+                and item.get("verdict") == "incorrect"
+                and lexical_similarity(request.claim_text, str(item.get("claim", ""))) > 0
+                for item in (
+                    turn.analysis_json.get("factual_findings", [])
+                    if isinstance(turn.analysis_json, dict)
+                    else []
+                )
+            )
+            ranked.append(
+                InterviewEvidenceRetrieveItem(
+                    turn_id=turn.id,
+                    question=turn.question_text,
+                    answer=turn.answer_text or "",
+                    relevance=relevance,
+                    reliability=0.9 if turn.analysis_json else 0.72,
+                    explicit_conflict=explicit_conflict,
+                )
+            )
+        items = sorted(ranked, key=lambda item: (-item.relevance, str(item.turn_id)))[
+            : request.limit
+        ]
+        return InterviewEvidenceRetrieveOutput(
+            items=items,
+            evidence=[
+                EvidenceItem(
+                    kind="interview_turn", id=item.turn_id,
+                    title=f"面试回答 {item.turn_id}",
+                    content=f"{item.question}\n{item.answer}",
+                    reliability=item.reliability,
+                )
+                for item in items
+            ],
+        )
+
+
+class ResumeGapAnalyzeHandler:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = session_factory
+
+    async def __call__(self, payload: BaseModel, context: ToolContext) -> ResumeGapAnalyzeOutput:
+        request = ResumeGapAnalyzeInput.model_validate(payload)
+        async with self._sessions() as session:
+            repository = ResumeRepository(session)
+            resume = await repository.get_resume(request.resume_version_id, context.user_id)
+            target = await repository.get_job_target(request.job_target_id, context.user_id)
+            if resume is None or target is None:
+                raise ValueError("resume or target not found")
+        claims = [
+            ResumeClaim.model_validate(item)
+            for item in resume.structured_json.get(
+                "claims", stable_text_items(resume.source_text, prefix="claim")
+            )
+            if isinstance(item, dict)
+        ]
+        requirements = [
+            JobRequirement.model_validate(item)
+            for item in target.requirements_json.get(
+                "requirements", stable_text_items(target.jd_text, prefix="req")
+            )
+            if isinstance(item, dict)
+        ]
+        selected = [claim for claim in claims if claim.claim_id in request.claim_ids]
+        matches = requirement_matches(selected, requirements)
+        items: list[ResumeGapItem] = []
+        for claim in selected:
+            linked = sorted(
+                [item for item in matches if item.claim_id == claim.claim_id],
+                key=lambda item: -item.final_score,
+            )
+            score = linked[0].final_score if linked else 0.0
+            items.append(
+                ResumeGapItem(
+                    claim_id=claim.claim_id,
+                    requirement_ids=[
+                        item.requirement_id
+                        for item in linked
+                        if item.final_score >= 0.08
+                    ],
+                    coverage_score=score,
+                    gap=(
+                        "covered"
+                        if score >= 0.45
+                        else "partial"
+                        if score >= 0.12
+                        else "uncovered"
+                    ),
+                )
+            )
+        return ResumeGapAnalyzeOutput(items=items)
 
 
 def _clean(value: str, limit: int) -> str:

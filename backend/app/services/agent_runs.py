@@ -287,7 +287,7 @@ class AgentRunService:
                 result = InterviewTurnResultSummary.model_validate(run.result_payload_json)
             elif run.result_kind == "interview_report":
                 result = InterviewReportResultSummary.model_validate(run.result_payload_json)
-            elif run.result_kind == "resume_assessment":
+            elif run.result_kind in {"resume_assessment", "resume_optimization"}:
                 result = ResumeAssessmentResultSummary.model_validate(run.result_payload_json)
         user_status, status_message = AgentRunService._user_status(run)
         return AgentRunResponse(

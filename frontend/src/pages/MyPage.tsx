@@ -1,4 +1,4 @@
-import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, Settings2, ShieldCheck, Target } from "lucide-react";
+import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, Network, Settings2, ShieldCheck, Target } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDeleteMe, useMe } from "@/api/auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -100,6 +100,12 @@ export function MyPage(): JSX.Element {
         />
         {me.data?.user.role === "dev" && (
           <>
+            <MenuLink
+              to="/dev/architecture"
+              icon={Network}
+              title="Agent 技术路线"
+              description="产品闭环、Runtime、工具、记忆和安全边界"
+            />
             <MenuLink
               to="/dev/runs"
               icon={Code2}

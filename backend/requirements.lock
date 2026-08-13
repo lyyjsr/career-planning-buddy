@@ -136,6 +136,8 @@ python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
+python-multipart==0.0.20
+    # via career-planning-buddy-backend (backend/pyproject.toml)
 pyyaml==6.0.3
     # via
     #   langchain-core

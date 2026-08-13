@@ -32,6 +32,7 @@ registered_models = (
     application_models.InterviewSession,
     application_models.InterviewTurn,
     application_models.ResumeAssessment,
+    application_models.ResumeRewriteDecision,
     application_models.Plan,
     application_models.Task,
     application_models.CompanionMessage,

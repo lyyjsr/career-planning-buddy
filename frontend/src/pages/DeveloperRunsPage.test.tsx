@@ -31,7 +31,7 @@ describe("DeveloperRunsPage", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
-    expect(await screen.findByText("Runs")).toBeInTheDocument();
+    expect(await screen.findByText("运行记录")).toBeInTheDocument();
     expect(screen.queryByLabelText("Developer JWT")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/dev/runs",
@@ -82,9 +82,9 @@ describe("DeveloperRunsPage", () => {
     }));
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /completed/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /create_plan/ }));
 
-    expect(await screen.findByText("valid")).toBeInTheDocument();
+    expect(await screen.findByText("通过")).toBeInTheDocument();
     expect(screen.getByText(/risk_gate/)).toBeInTheDocument();
     expect(screen.getByText(/run.completed/)).toBeInTheDocument();
   });

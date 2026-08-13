@@ -22,6 +22,7 @@ from app.agent.finalizer import AgentRunFinalizer
 from app.agent.graph import GraphFactory, load_profile
 from app.agent.interview_graph import InterviewGraph
 from app.agent.node_runner import NodeRunner
+from app.agent.resume_optimization_graph import ResumeOptimizationGraph
 from app.core.database import AsyncSessionFactory, session_transaction
 from app.core.telemetry import bind_telemetry_context
 from app.harness.budget import BudgetGuard, CancellationToken
@@ -34,6 +35,10 @@ from app.providers.evidence_distillation import (
 )
 from app.providers.interview import InterviewProvider, MockInterviewProvider
 from app.providers.llm import MockPlanningProvider, PlanningProvider
+from app.providers.resume_optimization import (
+    MockResumeOptimizationProvider,
+    ResumeOptimizationProvider,
+)
 from app.schemas.agent_runs import (
     PlanningState,
     RunRequestSnapshot,
@@ -57,6 +62,7 @@ class AgentRunExecutor:
         embedding_provider: EmbeddingProvider | None = None,
         evidence_distillation_provider: EvidenceDistillationProvider | None = None,
         interview_provider: InterviewProvider | None = None,
+        resume_optimization_provider: ResumeOptimizationProvider | None = None,
         managed_resources: list[object] | None = None,
         poll_interval_seconds: float = 0.25,
         heartbeat_seconds: float = 10,
@@ -67,6 +73,9 @@ class AgentRunExecutor:
         self._session_factory = session_factory
         self._provider = provider or MockPlanningProvider()
         self._interview_provider = interview_provider or MockInterviewProvider()
+        self._resume_optimization_provider = (
+            resume_optimization_provider or MockResumeOptimizationProvider()
+        )
         self._tool_registry = tool_registry or ToolRegistry()
         self._embedding_provider = embedding_provider or MockEmbeddingProvider()
         self._evidence_distillation_provider = (
@@ -133,6 +142,13 @@ class AgentRunExecutor:
         if any(not task.done() for task in self._tasks.values()):
             raise RuntimeError("cannot replace Interview Provider while Runs are active")
         self._interview_provider = provider
+
+    def set_resume_optimization_provider(
+        self, provider: ResumeOptimizationProvider
+    ) -> None:
+        if any(not task.done() for task in self._tasks.values()):
+            raise RuntimeError("cannot replace Resume Provider while Runs are active")
+        self._resume_optimization_provider = provider
 
     def set_tool_registry(self, registry: ToolRegistry) -> None:
         if any(not task.done() for task in self._tasks.values()):
@@ -231,6 +247,34 @@ class AgentRunExecutor:
                         "run_kind": run.run_kind,
                         "interview_session_id": run.interview_session_id,
                         "interview_turn_id": run.interview_turn_id,
+                    }
+                )
+                return
+            if run.run_kind == "resume_optimization":
+                if run.interview_session_id is None:
+                    raise RuntimeError("Resume optimization Run is missing its Session")
+                frozen = None
+                if run.input_snapshot_json is not None:
+                    from app.schemas.resumes import ResumeOptimizationInputSnapshot
+
+                    frozen = ResumeOptimizationInputSnapshot.model_validate(
+                        run.input_snapshot_json
+                    )
+                await ResumeOptimizationGraph(
+                    session_factory=self._session_factory,
+                    provider=self._resume_optimization_provider,
+                    tool_registry=self._tool_registry,
+                    node_runner=runner,
+                    finalizer=finalizer,
+                    budget=budget,
+                ).execute(
+                    {
+                        "run_id": run.id,
+                        "user_id": run.user_id,
+                        "interview_session_id": run.interview_session_id,
+                        "replay_of_run_id": run.replay_of_run_id,
+                        "replay_fixture_only": config.replay_tool_mode == "fixture",
+                        **({"input_snapshot": frozen} if frozen is not None else {}),
                     }
                 )
                 return
@@ -376,6 +420,7 @@ class AgentRunExecutor:
         resources = [
             self._provider,
             self._interview_provider,
+            self._resume_optimization_provider,
             self._tool_registry,
             self._embedding_provider,
             self._evidence_distillation_provider,

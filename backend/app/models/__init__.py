@@ -17,7 +17,7 @@ from app.models.provider_call import (
     EvalProviderFixtureItem,
     ProviderCall,
 )
-from app.models.resume import JobTarget, ResumeAssessment, ResumeVersion
+from app.models.resume import JobTarget, ResumeAssessment, ResumeRewriteDecision, ResumeVersion
 from app.models.review import Review
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -45,6 +45,7 @@ __all__ = [
     "Review",
     "ResumeVersion",
     "ResumeAssessment",
+    "ResumeRewriteDecision",
     "SearchSource",
     "Task",
     "TaskAdjustmentProposal",

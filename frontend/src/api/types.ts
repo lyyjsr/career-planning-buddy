@@ -44,9 +44,9 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
-export type RunResultKind = "plan" | "clarification" | "safe_response" | "navigation" | "interview_turn" | "interview_report" | "resume_assessment";
-export type RunIntent = "create_plan" | "replan" | "navigate" | "unsupported" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment";
-export type RunKind = "planning" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment";
+export type RunResultKind = "plan" | "clarification" | "safe_response" | "navigation" | "interview_turn" | "interview_report" | "resume_assessment" | "resume_optimization";
+export type RunIntent = "create_plan" | "replan" | "navigate" | "unsupported" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment" | "resume_optimization";
+export type RunKind = "planning" | "interview_start" | "interview_answer" | "interview_report" | "resume_assessment" | "resume_optimization";
 export type RunUserStatus =
   | "queued"
   | "generating"
@@ -423,14 +423,51 @@ export interface ResumeClaimFinding {
   suggested_rewrite: string | null;
 }
 
+export interface ResumeRewriteDecisionResponse {
+  assessment_id: string;
+  claim_id: string;
+  status: "accepted" | "rejected" | "applied";
+  original_suggestion: string;
+  rewrite_text: string | null;
+  applied_resume_version_id: string | null;
+  decided_at: string;
+  applied_at: string | null;
+}
+
 export interface ResumeAssessmentResponse {
   assessment_id: string;
   resume_version_id: string;
   job_target_id: string;
   interview_session_id: string;
   claims: ResumeClaimFinding[];
+  rewrite_decisions: ResumeRewriteDecisionResponse[];
+  source_run_id: string | null;
+  context_manifest: {
+    algorithm_version: string;
+    token_budget: number;
+    used_tokens: number;
+    selected_evidence_refs: string[];
+    prompt_injection_filtered_count: number;
+    candidates: Array<{ selected: boolean; source_type: string; selection_reason: string | null; exclusion_reason: string | null }>;
+  } | null;
   limitations: string[];
   created_at: string;
+}
+
+export interface ResumeOptimizationRunResponse {
+  run_id: string;
+  status: "pending";
+  events_url: string;
+}
+
+export interface ResumeRewriteBatchApplyResponse {
+  decisions: ResumeRewriteDecisionResponse[];
+  resume_version: ResumeVersionResponse;
+}
+
+export interface ResumeRewriteApplyResponse {
+  decision: ResumeRewriteDecisionResponse;
+  resume_version: ResumeVersionResponse;
 }
 
 export interface TrainingActionsPreviewResponse {

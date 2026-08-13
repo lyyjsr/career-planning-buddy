@@ -10,6 +10,9 @@ const OnboardingPage = lazy(async () => ({
 const TodayPage = lazy(async () => ({
   default: (await import("@/pages/TodayPage")).TodayPage,
 }));
+const WorkspacePage = lazy(async () => ({
+  default: (await import("@/pages/WorkspacePage")).WorkspacePage,
+}));
 const PlansPage = lazy(async () => ({
   default: (await import("@/pages/PlansPage")).PlansPage,
 }));
@@ -30,6 +33,9 @@ const DeveloperRunsPage = lazy(async () => ({
 }));
 const DeveloperEvalsPage = lazy(async () => ({
   default: (await import("@/pages/DeveloperEvalsPage")).DeveloperEvalsPage,
+}));
+const DeveloperArchitecturePage = lazy(async () => ({
+  default: (await import("@/pages/DeveloperArchitecturePage")).DeveloperArchitecturePage,
 }));
 const MyPage = lazy(async () => ({
   default: (await import("@/pages/MyPage")).MyPage,
@@ -56,6 +62,7 @@ export const router = createBrowserRouter([
           {
             element: <AppLayout />,
             children: [
+              { path: "/workspace", element: <WorkspacePage /> },
               { path: "/today", element: <TodayPage /> },
               { path: "/interviews", element: <InterviewPage /> },
               { path: "/interviews/new", element: <InterviewSetupPage /> },
@@ -77,6 +84,7 @@ export const router = createBrowserRouter([
                 children: [
                   { path: "/dev/runs", element: <DeveloperRunsPage /> },
                   { path: "/dev/evals", element: <DeveloperEvalsPage /> },
+                  { path: "/dev/architecture", element: <DeveloperArchitecturePage /> },
                 ],
               },
             ],
@@ -85,6 +93,6 @@ export const router = createBrowserRouter([
       },
     ],
   },
-  { path: "/", element: <Navigate to="/today" replace /> },
-  { path: "*", element: <Navigate to="/today" replace /> },
+  { path: "/", element: <Navigate to="/workspace" replace /> },
+  { path: "*", element: <Navigate to="/workspace" replace /> },
 ]);

@@ -38,24 +38,25 @@ class AgentRun(Base):
         CheckConstraint(
             "result_kind IS NULL OR "
             "result_kind IN ('plan','clarification','safe_response','navigation',"
-            "'interview_turn','interview_report','resume_assessment')",
+            "'interview_turn','interview_report','resume_assessment','resume_optimization')",
             name="ck_agent_runs_result_kind",
         ),
         CheckConstraint(
             "hint_intent IS NULL OR hint_intent IN "
             "('create_plan','replan','interview_start','interview_answer','interview_report',"
-            "'resume_assessment')",
+            "'resume_assessment','resume_optimization')",
             name="ck_agent_runs_hint_intent",
         ),
         CheckConstraint(
             "resolved_intent IS NULL OR "
             "resolved_intent IN ('create_plan','replan','navigate','unsupported',"
-            "'interview_start','interview_answer','interview_report','resume_assessment')",
+            "'interview_start','interview_answer','interview_report','resume_assessment',"
+            "'resume_optimization')",
             name="ck_agent_runs_resolved_intent",
         ),
         CheckConstraint(
             "run_kind IN ('planning','interview_start','interview_answer','interview_report',"
-            "'resume_assessment')",
+            "'resume_assessment','resume_optimization')",
             name="ck_agent_runs_run_kind",
         ),
         CheckConstraint(
@@ -69,7 +70,8 @@ class AgentRun(Base):
         CheckConstraint(
             "(status <> 'completed') OR "
             "(((result_kind = 'plan' AND final_plan_id IS NOT NULL) OR "
-            "(result_kind IN ('interview_turn','interview_report','resume_assessment') "
+            "(result_kind IN ('interview_turn','interview_report','resume_assessment',"
+            "'resume_optimization') "
             "AND final_plan_id IS NULL)) AND fallback_reason IS NULL AND error_code IS NULL)",
             name="ck_agent_runs_completed_result",
         ),

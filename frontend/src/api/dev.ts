@@ -59,8 +59,16 @@ export async function fetchDevRun(runId: string): Promise<DevRunDetail> {
   return apiRequest<DevRunDetail>(`/api/v1/dev/runs/${runId}`);
 }
 
-export async function replayDevRun(runId: string): Promise<void> {
-  await apiRequest(`/api/v1/dev/runs/${runId}/replay`, {
+export interface ReplayResponse {
+  run_id: string;
+  replay_of_run_id: string;
+  status: string;
+  deterministic: boolean;
+  execution_kind: "replay_v2" | "legacy_trace_clone";
+}
+
+export async function replayDevRun(runId: string): Promise<ReplayResponse> {
+  return apiRequest<ReplayResponse>(`/api/v1/dev/runs/${runId}/replay`, {
     method: "POST",
     body: { tool_mode: "fixture" },
   });

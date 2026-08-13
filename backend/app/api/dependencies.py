@@ -112,8 +112,10 @@ def get_resume_document_service() -> ResumeDocumentService:
 
 def get_resume_assessment_service(
     session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> ResumeAssessmentService:
-    return ResumeAssessmentService(session)
+    return ResumeAssessmentService(session, settings, executor)
 
 
 def get_interview_service(
@@ -188,8 +190,9 @@ def get_memory_service(
 
 def get_dev_trace_service(
     session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
+    executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
 ) -> DevTraceService:
-    return DevTraceService(session)
+    return DevTraceService(session, executor)
 
 
 async def get_current_user(
