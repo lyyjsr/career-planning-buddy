@@ -61,3 +61,22 @@ POST   /job-targets
 GET    /job-targets
 DELETE /job-targets/{target_id}
 ```
+
+## Agent 材料优化
+
+```text
+POST /resume-assessments/optimize
+GET  /resume-assessments
+GET  /resume-assessments/{assessment_id}
+PUT  /resume-assessments/{assessment_id}/claims/{claim_id}/decision
+POST /resume-assessments/{assessment_id}/rewrites/apply-batch
+```
+
+优化输入冻结 ResumeVersion、JobTarget，以及可选的已完成 InterviewSession。没有面试证据时
+运行 `pre_interview` 诊断，所有依赖个人经历的结论必须保持 `insufficient_evidence`；有面试
+证据时运行 `evidence_enhanced`。Run 完成后客户端必须通过 `result.assessment_id` 精确加载结果，
+不能假设列表第一项属于当前 Run。
+
+Claim 必须保存 `source_start/source_end/source_hash`。批量应用仅接受同一 Assessment、同一父
+版本的 accepted decisions，并校验 source span/hash；一次请求只创建一个子版本。单条 Apply
+接口进入 deprecated，不再由普通前端调用。

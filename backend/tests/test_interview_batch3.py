@@ -208,6 +208,72 @@ async def test_claim_assessment_is_traceable_and_user_scoped(
     assert hidden.status_code == HTTPStatus.NOT_FOUND
 
 
+@pytest.mark.asyncio
+async def test_resume_rewrite_requires_human_confirmation_and_creates_child_version(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token, user, _ = await guest_login(api_client)
+    resume_id, target_id = await create_materials(api_client, token, "batch3-rewrite")
+    interview, _turn = await _ready_interview(
+        db_session,
+        user_id=UUID(user),
+        resume_id=UUID(resume_id),
+        target_id=UUID(target_id),
+    )
+    assessment_response = await api_client.post(
+        "/api/v1/resume-assessments",
+        json={
+            "resume_version_id": resume_id,
+            "job_target_id": target_id,
+            "interview_session_id": str(interview.id),
+        },
+        headers={**bearer(token), "Idempotency-Key": "batch3-rewrite-assessment"},
+    )
+    assert assessment_response.status_code == HTTPStatus.CREATED
+    assessment = assessment_response.json()
+    claim = next(item for item in assessment["claims"] if item["suggested_rewrite"])
+    apply_before_accept = await api_client.post(
+        f"/api/v1/resume-assessments/{assessment['assessment_id']}"
+        f"/claims/{claim['claim_id']}/apply",
+        headers=bearer(token),
+    )
+    assert apply_before_accept.status_code == HTTPStatus.CONFLICT
+
+    edited = f"{claim['claim_text']}，并补充了本人行动与可验证结果。"
+    decision_response = await api_client.put(
+        f"/api/v1/resume-assessments/{assessment['assessment_id']}"
+        f"/claims/{claim['claim_id']}/decision",
+        json={"status": "accepted", "rewrite_text": edited},
+        headers=bearer(token),
+    )
+    assert decision_response.status_code == HTTPStatus.OK
+    assert decision_response.json()["status"] == "accepted"
+
+    apply_response = await api_client.post(
+        f"/api/v1/resume-assessments/{assessment['assessment_id']}"
+        f"/claims/{claim['claim_id']}/apply",
+        headers=bearer(token),
+    )
+    assert apply_response.status_code == HTTPStatus.OK
+    applied = apply_response.json()
+    assert applied["decision"]["status"] == "applied"
+    assert applied["resume_version"]["parent_version_id"] == resume_id
+    assert edited in applied["resume_version"]["source_text"]
+    assert applied["resume_version"]["resume_version_id"] != resume_id
+
+    original_response = await api_client.get(
+        "/api/v1/resume-versions", headers=bearer(token)
+    )
+    original = next(
+        item for item in original_response.json()["items"] if item["resume_version_id"] == resume_id
+    )
+    assert edited not in original["source_text"]
+
+    listed = await api_client.get("/api/v1/resume-assessments", headers=bearer(token))
+    assert listed.status_code == HTTPStatus.OK
+    assert listed.json()[0]["rewrite_decisions"][0]["status"] == "applied"
+
+
 def test_audio_metrics_require_reliable_timestamps() -> None:
     reliable = _analysis(ASRResult(
         transcript="嗯 I improved PostgreSQL PostgreSQL",

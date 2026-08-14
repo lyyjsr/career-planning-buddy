@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
     )
     agent_run_executor.set_provider(providers.planning)
     agent_run_executor.set_interview_provider(providers.interview)
+    agent_run_executor.set_resume_optimization_provider(providers.resume_optimization)
     agent_run_executor.set_embedding_provider(providers.embedding)
     agent_run_executor.set_evidence_distillation_provider(providers.evidence_distillation)
     agent_run_executor.set_tool_registry(providers.tools)

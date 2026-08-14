@@ -12,7 +12,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMe } from "@/api/auth";
 import { useCancelRun, useRun } from "@/api/agent-runs";
 import { useCancelGoalBrief, useConfirmGoalBrief, useCreateGoalBrief, useRefineGoalBrief } from "@/api/goal-briefs";
-import { useInterviews } from "@/api/interviews";
 import { useRunEventStream, type RunStreamState } from "@/api/sse";
 import type { AgentRunResponse, GoalBriefResponse, ObjectiveType, TaskResponse } from "@/api/types";
 import { TaskCard } from "@/components/TaskCard";
@@ -21,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { toUserFacingError } from "@/lib/errors";
-import { isInterviewReportSeen } from "@/lib/interview-report";
 import { GOAL_LABELS, STAGE_LABELS } from "@/lib/labels";
 
 const TERMINAL = new Set(["completed", "degraded", "failed", "cancelled"]);
@@ -54,7 +52,6 @@ function nextActionTask(tasks: TaskResponse[]): TaskResponse | undefined {
 export function TodayPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const me = useMe();
-  const interviews = useInterviews();
   const createGoalBrief = useCreateGoalBrief();
   const refineGoalBrief = useRefineGoalBrief();
   const confirmGoalBrief = useConfirmGoalBrief();
@@ -109,9 +106,6 @@ export function TodayPage(): JSX.Element {
   const completedCount = tasks.filter((task) => task.state === "completed").length;
   const totalMinutes = tasks.reduce((sum, task) => sum + task.estimated_minutes, 0);
   const isPlanning = run?.status === "pending" || run?.status === "running";
-  const unfinishedInterview = interviews.data?.items.find((item) => !["completed", "aborted"].includes(item.status));
-  const readyReport = interviews.data?.items.find((item) => item.report_status === "ready" && !isInterviewReportSeen(item.interview_id));
-  const priorityInterview = unfinishedInterview ?? readyReport;
   const planningWindowValid = me.data.planning_window_valid !== false;
 
   function submitPlan(event: React.FormEvent): void {
@@ -143,33 +137,20 @@ export function TodayPage(): JSX.Element {
     <div className="mx-auto max-w-3xl space-y-6 sm:space-y-8">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-primary">{displayDate()}</p>
+          <p className="text-sm font-medium text-primary">{displayDate()} · 今日计划</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-            {firstTask !== undefined ? "今天只推进一个关键结果" : allSettled ? "今天已经收好尾了" : "把方向变成今天的一步"}
+            {firstTask !== undefined ? "今天只推进一个关键结果" : allSettled ? "今天已经收好尾了" : "今天先确定一个可执行动作"}
           </h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {me.data.profile === null
-              ? ""
+              ? "这里专注今天的执行，不展示完整工作台总览。"
               : `${GOAL_LABELS[me.data.profile.goal_type]} · ${STAGE_LABELS[me.data.profile.stage]} · 每天约 ${me.data.profile.time_budget_minutes} 分钟`}
           </p>
         </div>
-        {activePlan !== null && (
-          <Link to={`/journey/${activePlan.plan_id}`} className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
-            查看本周路线 <ArrowRight className="h-4 w-4" />
-          </Link>
-        )}
+        <Link to="/workspace" className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline">
+          回到工作台 <ArrowRight className="h-4 w-4" />
+        </Link>
       </header>
-
-      {(priorityInterview !== undefined || firstTask === undefined) && <Card className="border-primary/20 bg-gradient-to-br from-accent/35 to-card">
-        <CardHeader>
-          <CardDescription>当前最重要的一步</CardDescription>
-          <CardTitle>{unfinishedInterview ? `继续第 ${Math.max(unfinishedInterview.asked_question_count, 1)} 题面试` : readyReport ? "查看刚完成的面试报告" : "用简历和目标 JD 开始结构化面试"}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Button asChild><Link to={unfinishedInterview ? `/interviews/${unfinishedInterview.interview_id}` : readyReport ? `/interviews/${readyReport.interview_id}/report` : "/interviews/new"}>{unfinishedInterview ? "继续面试" : readyReport ? "查看报告" : "开始面试"}</Link></Button>
-          <Button asChild variant="ghost"><Link to="/interviews">查看面试记录</Link></Button>
-        </CardContent>
-      </Card>}
 
       {run !== undefined && (
         <RunPanel
@@ -181,10 +162,10 @@ export function TodayPage(): JSX.Element {
       )}
 
       {activeBrief !== null && !isPlanning && (
-          <GoalBriefPanel
-            brief={activeBrief}
-            startDate={me.data.profile?.start_date ?? null}
-            endDate={me.data.profile?.deadline ?? null}
+        <GoalBriefPanel
+          brief={activeBrief}
+          startDate={me.data.profile?.start_date ?? null}
+          endDate={me.data.profile?.deadline ?? null}
           pending={refineGoalBrief.isPending || confirmGoalBrief.isPending || cancelGoalBrief.isPending}
           onRefine={(refinement) => refineGoalBrief.mutate(
             { briefId: activeBrief.goal_brief_id, version: activeBrief.version, message: refinement },

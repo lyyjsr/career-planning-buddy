@@ -114,10 +114,15 @@ class ResumeAssessment(Base):
     job_target_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("job_targets.id"), nullable=False
     )
-    interview_session_id: Mapped[UUID] = mapped_column(
+    interview_session_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("interview_sessions.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    source_run_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        unique=True,
     )
     findings_json: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
@@ -125,8 +130,53 @@ class ResumeAssessment(Base):
     limitations_json: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    context_manifest_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class ResumeRewriteDecision(Base):
+    """Auditable human decision for one Agent-proposed resume rewrite."""
+
+    __tablename__ = "resume_rewrite_decisions"
+    __table_args__ = (
+        UniqueConstraint("assessment_id", "claim_id", name="uq_resume_rewrite_decision_claim"),
+        CheckConstraint(
+            "status IN ('accepted','rejected','applied')",
+            name="ck_resume_rewrite_decisions_status",
+        ),
+        CheckConstraint(
+            "(status = 'rejected' AND rewrite_text IS NULL) OR "
+            "(status IN ('accepted','applied') AND rewrite_text IS NOT NULL)",
+            name="ck_resume_rewrite_decisions_text",
+        ),
+        Index("ix_resume_rewrite_decisions_user_decided", "user_id", "decided_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    assessment_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("resume_assessments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    claim_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    original_suggestion: Mapped[str] = mapped_column(Text, nullable=False)
+    rewrite_text: Mapped[str | None] = mapped_column(Text)
+    applied_resume_version_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("resume_versions.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -97,7 +97,13 @@ class DevRunDetail(StrictModel):
 
 
 class ReplayRequest(StrictModel):
-    tool_mode: Literal["fixture", "live"] = "fixture"
+    # Stage 5 compatibility. Its presence selects the explicitly labelled trace clone;
+    # executable Replay callers use ``mode`` below.
+    tool_mode: Literal["fixture", "live"] | None = None
+    mode: Literal["exact_fixture_replay", "candidate_comparison"] = (
+        "exact_fixture_replay"
+    )
+    target_runtime_bundle_id: UUID | None = None
 
 
 class ReplayResponse(StrictModel):
@@ -105,7 +111,27 @@ class ReplayResponse(StrictModel):
     replay_of_run_id: UUID
     status: str
     deterministic: bool
-    execution_kind: Literal["legacy_trace_clone"]
+    execution_kind: Literal[
+        "legacy_trace_clone", "replay_v2", "exact_fixture_replay", "candidate_comparison"
+    ]
+
+
+class ReplayDiff(StrictModel):
+    source_run_id: UUID
+    replay_run_id: UUID
+    source_status: str
+    replay_status: str
+    input_snapshot_equal: bool
+    semantic_equal: bool
+    source_result_sha256: str | None
+    replay_result_sha256: str | None
+    changed_fields: list[str]
+    comparison_version: str = "resume-semantic-diff-v2"
+    context_diff: object
+    tool_diff: object
+    claim_diff: object
+    validation_diff: object
+    usage_diff: object
 
 
 class EvalDatasetSummary(StrictModel):

@@ -42,6 +42,7 @@ class RunResultKind(StrEnum):
     INTERVIEW_TURN = "interview_turn"
     INTERVIEW_REPORT = "interview_report"
     RESUME_ASSESSMENT = "resume_assessment"
+    RESUME_OPTIMIZATION = "resume_optimization"
 
 
 class PlanStatus(StrEnum):
@@ -91,6 +92,7 @@ class RunIntent(StrEnum):
     INTERVIEW_ANSWER = "interview_answer"
     INTERVIEW_REPORT = "interview_report"
     RESUME_ASSESSMENT = "resume_assessment"
+    RESUME_OPTIMIZATION = "resume_optimization"
 
 
 class RunKind(StrEnum):
@@ -99,6 +101,7 @@ class RunKind(StrEnum):
     INTERVIEW_ANSWER = "interview_answer"
     INTERVIEW_REPORT = "interview_report"
     RESUME_ASSESSMENT = "resume_assessment"
+    RESUME_OPTIMIZATION = "resume_optimization"
 
 
 class ReplanMode(StrEnum):

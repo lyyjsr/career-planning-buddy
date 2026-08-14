@@ -38,24 +38,25 @@ class AgentRun(Base):
         CheckConstraint(
             "result_kind IS NULL OR "
             "result_kind IN ('plan','clarification','safe_response','navigation',"
-            "'interview_turn','interview_report','resume_assessment')",
+            "'interview_turn','interview_report','resume_assessment','resume_optimization')",
             name="ck_agent_runs_result_kind",
         ),
         CheckConstraint(
             "hint_intent IS NULL OR hint_intent IN "
             "('create_plan','replan','interview_start','interview_answer','interview_report',"
-            "'resume_assessment')",
+            "'resume_assessment','resume_optimization')",
             name="ck_agent_runs_hint_intent",
         ),
         CheckConstraint(
             "resolved_intent IS NULL OR "
             "resolved_intent IN ('create_plan','replan','navigate','unsupported',"
-            "'interview_start','interview_answer','interview_report','resume_assessment')",
+            "'interview_start','interview_answer','interview_report','resume_assessment',"
+            "'resume_optimization')",
             name="ck_agent_runs_resolved_intent",
         ),
         CheckConstraint(
             "run_kind IN ('planning','interview_start','interview_answer','interview_report',"
-            "'resume_assessment')",
+            "'resume_assessment','resume_optimization')",
             name="ck_agent_runs_run_kind",
         ),
         CheckConstraint(
@@ -69,7 +70,8 @@ class AgentRun(Base):
         CheckConstraint(
             "(status <> 'completed') OR "
             "(((result_kind = 'plan' AND final_plan_id IS NOT NULL) OR "
-            "(result_kind IN ('interview_turn','interview_report','resume_assessment') "
+            "(result_kind IN ('interview_turn','interview_report','resume_assessment',"
+            "'resume_optimization') "
             "AND final_plan_id IS NULL)) AND fallback_reason IS NULL AND error_code IS NULL)",
             name="ck_agent_runs_completed_result",
         ),
@@ -174,6 +176,18 @@ class AgentRun(Base):
     replay_of_run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("agent_runs.id"),
+    )
+    runtime_bundle_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("agent_runtime_bundles.id", ondelete="RESTRICT"),
+    )
+    resume_version_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("resume_versions.id", ondelete="SET NULL"),
+    )
+    job_target_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("job_targets.id", ondelete="SET NULL"),
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
     result_kind: Mapped[str | None] = mapped_column(String(24))
@@ -330,6 +344,83 @@ class AgentEvent(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class AgentRuntimeBundle(Base):
+    """Content-addressed immutable identity used by live runs and Replay."""
+
+    __tablename__ = "agent_runtime_bundles"
+    __table_args__ = (
+        CheckConstraint("bundle_hash ~ '^[0-9a-f]{64}$'", name="ck_runtime_bundle_hash"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    bundle_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    bundle_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class AgentCheckpoint(Base):
+    """Serializable node output used for bounded resume after lease takeover."""
+
+    __tablename__ = "agent_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "attempt", "node_name", name="uq_agent_checkpoint_attempt_node"
+        ),
+        CheckConstraint("state_hash ~ '^[0-9a-f]{64}$'", name="ck_checkpoint_state_hash"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    node_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    state_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class ReplayComparison(Base):
+    """Persisted semantic comparison between a source and replay Run."""
+
+    __tablename__ = "replay_comparisons"
+    __table_args__ = (
+        UniqueConstraint("replay_run_id", name="uq_replay_comparison_replay_run"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    replay_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    comparison_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_equal: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    diff_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

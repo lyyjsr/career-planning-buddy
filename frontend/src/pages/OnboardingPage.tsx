@@ -59,7 +59,7 @@ export function OnboardingPage(): JSX.Element {
   }, [me.data?.profile]);
 
   if (me.data === undefined || me.data === null) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">正在准备建档…</div>;
-  if (me.data.profile_complete) return <Navigate to="/today" replace />;
+  if (me.data.profile_complete) return <Navigate to="/workspace" replace />;
 
   const error = putProfile.error === null ? null : toUserFacingError(putProfile.error);
 

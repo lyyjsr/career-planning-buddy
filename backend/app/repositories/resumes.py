@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.resume import JobTarget, ResumeAssessment, ResumeVersion
+from app.models.resume import JobTarget, ResumeAssessment, ResumeRewriteDecision, ResumeVersion
 
 
 class ResumeRepository:
@@ -101,17 +101,76 @@ class ResumeRepository:
         return result.scalar_one_or_none()
 
     async def get_assessment(
-        self, assessment_id: UUID, user_id: UUID
+        self, assessment_id: UUID, user_id: UUID, *, for_update: bool = False
+    ) -> ResumeAssessment | None:
+        statement = select(ResumeAssessment).where(
+                ResumeAssessment.id == assessment_id,
+                ResumeAssessment.user_id == user_id,
+            )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self._session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def assessment_by_source_run(
+        self, source_run_id: UUID, user_id: UUID
     ) -> ResumeAssessment | None:
         result = await self._session.execute(
             select(ResumeAssessment).where(
-                ResumeAssessment.id == assessment_id,
+                ResumeAssessment.source_run_id == source_run_id,
                 ResumeAssessment.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def create_assessment(self, row: ResumeAssessment) -> ResumeAssessment:
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def list_assessments(self, user_id: UUID) -> list[ResumeAssessment]:
+        rows = await self._session.scalars(
+            select(ResumeAssessment)
+            .where(ResumeAssessment.user_id == user_id)
+            .order_by(ResumeAssessment.created_at.desc())
+        )
+        return list(rows)
+
+    async def get_rewrite_decision(
+        self,
+        assessment_id: UUID,
+        claim_id: str,
+        user_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ResumeRewriteDecision | None:
+        statement = select(ResumeRewriteDecision).where(
+                ResumeRewriteDecision.assessment_id == assessment_id,
+                ResumeRewriteDecision.claim_id == claim_id,
+                ResumeRewriteDecision.user_id == user_id,
+            )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self._session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def list_rewrite_decisions(
+        self, assessment_id: UUID, user_id: UUID
+    ) -> list[ResumeRewriteDecision]:
+        rows = await self._session.scalars(
+            select(ResumeRewriteDecision)
+            .where(
+                ResumeRewriteDecision.assessment_id == assessment_id,
+                ResumeRewriteDecision.user_id == user_id,
+            )
+            .order_by(ResumeRewriteDecision.decided_at)
+        )
+        return list(rows)
+
+    async def create_rewrite_decision(
+        self, row: ResumeRewriteDecision
+    ) -> ResumeRewriteDecision:
         self._session.add(row)
         await self._session.flush()
         await self._session.refresh(row)

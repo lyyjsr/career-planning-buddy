@@ -82,6 +82,15 @@ class BudgetGuard:
         self.tokens_out += tokens_out
         self.check()
 
+    def validate_input_estimate(self, tokens_in: int) -> None:
+        """Reject a rendered request that already exceeds the frozen per-call budget."""
+        self.check()
+        if tokens_in > self._config.max_input_tokens_per_call:
+            raise BudgetExceededError(
+                f"estimated input_tokens {tokens_in} > "
+                f"{self._config.max_input_tokens_per_call}"
+            )
+
     def can_reserve_llm_call(self) -> bool:
         """Return whether one worst-case configured Provider call still fits.
 
