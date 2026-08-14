@@ -199,10 +199,21 @@ class ToolRegistry:
                 round_number=round_number,
             )
             await self._record_returned(tool_call_id, fixture, monotonic(), "fixture")
-            return ToolExecutionResult(success=True, result=fixture, reused=True)
+            return ToolExecutionResult(
+                success=True,
+                result=fixture,
+                tool_call_id=tool_call_id,
+                reused=True,
+            )
         reused = await self._reuse(tool_name, args_hash, context.run_id)
         if reused is not None:
-            return ToolExecutionResult(success=True, result=reused, reused=True)
+            reused_id, reused_result = reused
+            return ToolExecutionResult(
+                success=True,
+                result=reused_result,
+                tool_call_id=reused_id,
+                reused=True,
+            )
         if not await self._within_budget(context.run_id, round_number):
             return await self._record_immediate_failure(
                 tool_name=tool_name,
@@ -243,9 +254,11 @@ class ToolRegistry:
                 tool_call_id, tool_name, started, "TOOL_EXECUTION_FAILED"
             )
         await self._record_returned(tool_call_id, result, started, tool.provider)
-        return ToolExecutionResult(success=True, result=result)
+        return ToolExecutionResult(success=True, result=result, tool_call_id=tool_call_id)
 
-    async def _reuse(self, tool_name: str, args_hash: str, run_id: UUID) -> ToolResult | None:
+    async def _reuse(
+        self, tool_name: str, args_hash: str, run_id: UUID
+    ) -> tuple[UUID, ToolResult] | None:
         assert self._sessions is not None
         async with self._sessions() as session:
             row = await session.scalar(
@@ -261,7 +274,7 @@ class ToolRegistry:
             )
             if row is None or row.result_json is None:
                 return None
-            return ToolResult.model_validate(row.result_json)
+            return row.id, ToolResult.model_validate(row.result_json)
 
     async def _fixture(
         self,
@@ -556,26 +569,28 @@ def build_tool_registry(
                     "Retrieve evidence-bearing answers from the selected completed interview."
                 ),
                 input_json_schema=InterviewEvidenceRetrieveInput.model_json_schema(),
-                contract_version="1.0",
+                contract_version="2.0",
             ),
             input_model=InterviewEvidenceRetrieveInput,
             output_model=InterviewEvidenceRetrieveOutput,
             handler=InterviewEvidenceRetrieveHandler(session_factory),
             timeout_seconds=settings.tool_timeout_seconds,
             provider="local",
+            max_result_chars=32000,
         ),
         RegisteredTool(
             spec=ModelToolSpec(
                 name="resume_gap_analyze",
                 description="Analyze Resume claim coverage against the frozen target JD.",
                 input_json_schema=ResumeGapAnalyzeInput.model_json_schema(),
-                contract_version="1.0",
+                contract_version="2.0",
             ),
             input_model=ResumeGapAnalyzeInput,
             output_model=ResumeGapAnalyzeOutput,
             handler=ResumeGapAnalyzeHandler(session_factory),
             timeout_seconds=settings.tool_timeout_seconds,
             provider="local",
+            max_result_chars=32000,
         ),
     ]
     for registration in registrations:

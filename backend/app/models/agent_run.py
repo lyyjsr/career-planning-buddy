@@ -177,6 +177,18 @@ class AgentRun(Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("agent_runs.id"),
     )
+    runtime_bundle_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("agent_runtime_bundles.id", ondelete="RESTRICT"),
+    )
+    resume_version_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("resume_versions.id", ondelete="SET NULL"),
+    )
+    job_target_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("job_targets.id", ondelete="SET NULL"),
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
     result_kind: Mapped[str | None] = mapped_column(String(24))
     result_payload_json: Mapped[dict[str, object] | None] = mapped_column(JSONB)
@@ -332,6 +344,83 @@ class AgentEvent(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class AgentRuntimeBundle(Base):
+    """Content-addressed immutable identity used by live runs and Replay."""
+
+    __tablename__ = "agent_runtime_bundles"
+    __table_args__ = (
+        CheckConstraint("bundle_hash ~ '^[0-9a-f]{64}$'", name="ck_runtime_bundle_hash"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    bundle_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    bundle_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class AgentCheckpoint(Base):
+    """Serializable node output used for bounded resume after lease takeover."""
+
+    __tablename__ = "agent_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "attempt", "node_name", name="uq_agent_checkpoint_attempt_node"
+        ),
+        CheckConstraint("state_hash ~ '^[0-9a-f]{64}$'", name="ck_checkpoint_state_hash"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    node_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    state_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class ReplayComparison(Base):
+    """Persisted semantic comparison between a source and replay Run."""
+
+    __tablename__ = "replay_comparisons"
+    __table_args__ = (
+        UniqueConstraint("replay_run_id", name="uq_replay_comparison_replay_run"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    replay_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    comparison_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_equal: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    diff_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

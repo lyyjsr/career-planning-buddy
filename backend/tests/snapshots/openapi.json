@@ -5267,17 +5267,142 @@
         "title": "ReplanMode",
         "type": "string"
       },
+      "ReplayDiff": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Fields",
+            "type": "array"
+          },
+          "claim_diff": {
+            "title": "Claim Diff"
+          },
+          "comparison_version": {
+            "default": "resume-semantic-diff-v2",
+            "title": "Comparison Version",
+            "type": "string"
+          },
+          "context_diff": {
+            "title": "Context Diff"
+          },
+          "input_snapshot_equal": {
+            "title": "Input Snapshot Equal",
+            "type": "boolean"
+          },
+          "replay_result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Result Sha256"
+          },
+          "replay_run_id": {
+            "format": "uuid",
+            "title": "Replay Run Id",
+            "type": "string"
+          },
+          "replay_status": {
+            "title": "Replay Status",
+            "type": "string"
+          },
+          "semantic_equal": {
+            "title": "Semantic Equal",
+            "type": "boolean"
+          },
+          "source_result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Result Sha256"
+          },
+          "source_run_id": {
+            "format": "uuid",
+            "title": "Source Run Id",
+            "type": "string"
+          },
+          "source_status": {
+            "title": "Source Status",
+            "type": "string"
+          },
+          "tool_diff": {
+            "title": "Tool Diff"
+          },
+          "usage_diff": {
+            "title": "Usage Diff"
+          },
+          "validation_diff": {
+            "title": "Validation Diff"
+          }
+        },
+        "required": [
+          "source_run_id",
+          "replay_run_id",
+          "source_status",
+          "replay_status",
+          "input_snapshot_equal",
+          "semantic_equal",
+          "source_result_sha256",
+          "replay_result_sha256",
+          "changed_fields",
+          "context_diff",
+          "tool_diff",
+          "claim_diff",
+          "validation_diff",
+          "usage_diff"
+        ],
+        "title": "ReplayDiff",
+        "type": "object"
+      },
       "ReplayRequest": {
         "additionalProperties": false,
         "properties": {
-          "tool_mode": {
-            "default": "fixture",
+          "mode": {
+            "default": "exact_fixture_replay",
             "enum": [
-              "fixture",
-              "live"
+              "exact_fixture_replay",
+              "candidate_comparison"
             ],
-            "title": "Tool Mode",
+            "title": "Mode",
             "type": "string"
+          },
+          "target_runtime_bundle_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Runtime Bundle Id"
+          },
+          "tool_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fixture",
+                  "live"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Mode"
           }
         },
         "title": "ReplayRequest",
@@ -5291,7 +5416,12 @@
             "type": "boolean"
           },
           "execution_kind": {
-            "const": "legacy_trace_clone",
+            "enum": [
+              "legacy_trace_clone",
+              "replay_v2",
+              "exact_fixture_replay",
+              "candidate_comparison"
+            ],
             "title": "Execution Kind",
             "type": "string"
           },
@@ -5324,9 +5454,16 @@
         "additionalProperties": false,
         "properties": {
           "interview_session_id": {
-            "format": "uuid",
-            "title": "Interview Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Session Id"
           },
           "job_target_id": {
             "format": "uuid",
@@ -5341,8 +5478,7 @@
         },
         "required": [
           "resume_version_id",
-          "job_target_id",
-          "interview_session_id"
+          "job_target_id"
         ],
         "title": "ResumeAssessmentCreateRequest",
         "type": "object"
@@ -5364,15 +5500,32 @@
             "title": "Claims",
             "type": "array"
           },
+          "context_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumeContextManifest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
           "interview_session_id": {
-            "format": "uuid",
-            "title": "Interview Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Session Id"
           },
           "job_target_id": {
             "format": "uuid",
@@ -5391,6 +5544,25 @@
             "format": "uuid",
             "title": "Resume Version Id",
             "type": "string"
+          },
+          "rewrite_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeRewriteDecisionResponse"
+            },
+            "title": "Rewrite Decisions",
+            "type": "array"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
           }
         },
         "required": [
@@ -5440,13 +5612,21 @@
             "title": "Claim Text",
             "type": "string"
           },
+          "consumed_tool_call_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Consumed Tool Call Ids",
+            "type": "array"
+          },
           "evidence_turn_ids": {
             "items": {
               "format": "uuid",
               "type": "string"
             },
             "maxItems": 6,
-            "minItems": 1,
             "title": "Evidence Turn Ids",
             "type": "array"
           },
@@ -5463,6 +5643,42 @@
             "maxItems": 5,
             "title": "Requirement Ids",
             "type": "array"
+          },
+          "source_end": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source End"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "source_start": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Start"
           },
           "suggested_rewrite": {
             "anyOf": [
@@ -5491,10 +5707,251 @@
           "claim_id",
           "claim_text",
           "verdict",
-          "rationale",
-          "evidence_turn_ids"
+          "rationale"
         ],
         "title": "ResumeClaimFinding",
+        "type": "object"
+      },
+      "ResumeContextCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "compression_method": {
+            "enum": [
+              "none",
+              "truncate",
+              "excluded"
+            ],
+            "title": "Compression Method",
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "content_preview": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Content Preview",
+            "type": "string"
+          },
+          "context_item_id": {
+            "pattern": "^ctx_[0-9a-f]{16}$",
+            "title": "Context Item Id",
+            "type": "string"
+          },
+          "evidence_ref": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "exclusion_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusion Reason"
+          },
+          "final_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Final Score",
+            "type": "number"
+          },
+          "final_token_count": {
+            "minimum": 0.0,
+            "title": "Final Token Count",
+            "type": "integer"
+          },
+          "original_token_count": {
+            "minimum": 0.0,
+            "title": "Original Token Count",
+            "type": "integer"
+          },
+          "recency_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Recency Score",
+            "type": "number"
+          },
+          "relevance_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Relevance Score",
+            "type": "number"
+          },
+          "reliability_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Reliability Score",
+            "type": "number"
+          },
+          "rendered_content": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendered Content"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "selection_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Reason"
+          },
+          "source_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "enum": [
+              "resume_claim",
+              "job_requirement",
+              "interview_turn"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "source_version": {
+            "minimum": 1.0,
+            "title": "Source Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "context_item_id",
+          "source_type",
+          "source_id",
+          "source_version",
+          "content_preview",
+          "relevance_score",
+          "reliability_score",
+          "recency_score",
+          "final_score",
+          "selected",
+          "original_token_count",
+          "final_token_count",
+          "compression_method",
+          "evidence_ref",
+          "content_hash"
+        ],
+        "title": "ResumeContextCandidate",
+        "type": "object"
+      },
+      "ResumeContextManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_prompt_tokens": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Prompt Tokens"
+          },
+          "algorithm_version": {
+            "default": "resume-context-rrf-mmr-v2",
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeContextCandidate"
+            },
+            "maxItems": 240,
+            "title": "Candidates",
+            "type": "array"
+          },
+          "embedding_provider": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Provider"
+          },
+          "prompt_injection_filtered_count": {
+            "minimum": 0.0,
+            "title": "Prompt Injection Filtered Count",
+            "type": "integer"
+          },
+          "query_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Query Hash",
+            "type": "string"
+          },
+          "rendered_context_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendered Context Hash"
+          },
+          "selected_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 80,
+            "title": "Selected Evidence Refs",
+            "type": "array"
+          },
+          "token_budget": {
+            "maximum": 12000.0,
+            "minimum": 100.0,
+            "title": "Token Budget",
+            "type": "integer"
+          },
+          "used_tokens": {
+            "minimum": 0.0,
+            "title": "Used Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query_hash",
+          "token_budget",
+          "used_tokens",
+          "candidates",
+          "selected_evidence_refs",
+          "prompt_injection_filtered_count"
+        ],
+        "title": "ResumeContextManifest",
         "type": "object"
       },
       "ResumeDocumentExtractResponse": {
@@ -5535,6 +5992,202 @@
           "source_text"
         ],
         "title": "ResumeDocumentExtractResponse",
+        "type": "object"
+      },
+      "ResumeOptimizationRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events_url": {
+            "title": "Events Url",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "events_url"
+        ],
+        "title": "ResumeOptimizationRunResponse",
+        "type": "object"
+      },
+      "ResumeRewriteApplyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ResumeRewriteDecisionResponse"
+          },
+          "resume_version": {
+            "$ref": "#/components/schemas/ResumeVersionResponse"
+          }
+        },
+        "required": [
+          "decision",
+          "resume_version"
+        ],
+        "title": "ResumeRewriteApplyResponse",
+        "type": "object"
+      },
+      "ResumeRewriteBatchApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Claim Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "claim_ids"
+        ],
+        "title": "ResumeRewriteBatchApplyRequest",
+        "type": "object"
+      },
+      "ResumeRewriteBatchApplyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeRewriteDecisionResponse"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "resume_version": {
+            "$ref": "#/components/schemas/ResumeVersionResponse"
+          }
+        },
+        "required": [
+          "decisions",
+          "resume_version"
+        ],
+        "title": "ResumeRewriteBatchApplyResponse",
+        "type": "object"
+      },
+      "ResumeRewriteDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "rewrite_text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rewrite Text"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ResumeRewriteDecisionRequest",
+        "type": "object"
+      },
+      "ResumeRewriteDecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "applied_resume_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Resume Version Id"
+          },
+          "assessment_id": {
+            "format": "uuid",
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "claim_id": {
+            "pattern": "^claim_[0-9a-f]{16}$",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "original_suggestion": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Original Suggestion",
+            "type": "string"
+          },
+          "rewrite_text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rewrite Text"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "claim_id",
+          "status",
+          "original_suggestion",
+          "applied_resume_version_id",
+          "decided_at",
+          "applied_at"
+        ],
+        "title": "ResumeRewriteDecisionResponse",
         "type": "object"
       },
       "ResumeVersionCreateRequest": {
@@ -6001,7 +6654,8 @@
           "interview_start",
           "interview_answer",
           "interview_report",
-          "resume_assessment"
+          "resume_assessment",
+          "resume_optimization"
         ],
         "title": "RunIntent",
         "type": "string"
@@ -6012,7 +6666,8 @@
           "interview_start",
           "interview_answer",
           "interview_report",
-          "resume_assessment"
+          "resume_assessment",
+          "resume_optimization"
         ],
         "title": "RunKind",
         "type": "string"
@@ -6025,7 +6680,8 @@
           "navigation",
           "interview_turn",
           "interview_report",
-          "resume_assessment"
+          "resume_assessment",
+          "resume_optimization"
         ],
         "title": "RunResultKind",
         "type": "string"
@@ -8087,6 +8743,54 @@
           }
         ],
         "summary": "Replay Run",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/dev/runs/{run_id}/replay-diff": {
+      "get": {
+        "operationId": "get_replay_diff_api_v1_dev_runs__run_id__replay_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Replay Diff",
         "tags": [
           "developer"
         ]
@@ -12038,7 +12742,36 @@
       }
     },
     "/api/v1/resume-assessments": {
+      "get": {
+        "operationId": "list_resume_assessments_api_v1_resume_assessments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResumeAssessmentResponse"
+                  },
+                  "title": "Response List Resume Assessments Api V1 Resume Assessments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Resume Assessments",
+        "tags": [
+          "resume-assessments"
+        ]
+      },
       "post": {
+        "deprecated": true,
         "operationId": "create_resume_assessment_api_v1_resume_assessments_post",
         "parameters": [
           {
@@ -12096,6 +12829,65 @@
         ]
       }
     },
+    "/api/v1/resume-assessments/optimize": {
+      "post": {
+        "operationId": "optimize_resume_with_agent_api_v1_resume_assessments_optimize_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeAssessmentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeOptimizationRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Optimize Resume With Agent",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
     "/api/v1/resume-assessments/{assessment_id}": {
       "get": {
         "operationId": "get_resume_assessment_api_v1_resume_assessments__assessment_id__get",
@@ -12139,6 +12931,248 @@
           }
         ],
         "summary": "Get Resume Assessment",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments/{assessment_id}/claims/{claim_id}/apply": {
+      "post": {
+        "deprecated": true,
+        "operationId": "apply_resume_rewrite_api_v1_resume_assessments__assessment_id__claims__claim_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeRewriteApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Resume Rewrite",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments/{assessment_id}/claims/{claim_id}/decision": {
+      "put": {
+        "operationId": "decide_resume_rewrite_api_v1_resume_assessments__assessment_id__claims__claim_id__decision_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRewriteDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeRewriteDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Resume Rewrite",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments/{assessment_id}/rewrites/apply": {
+      "post": {
+        "deprecated": true,
+        "operationId": "apply_resume_rewrites_batch_api_v1_resume_assessments__assessment_id__rewrites_apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRewriteBatchApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeRewriteBatchApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Resume Rewrites Batch",
+        "tags": [
+          "resume-assessments"
+        ]
+      }
+    },
+    "/api/v1/resume-assessments/{assessment_id}/rewrites/apply-batch": {
+      "post": {
+        "operationId": "apply_resume_rewrites_batch_r2_api_v1_resume_assessments__assessment_id__rewrites_apply_batch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRewriteBatchApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeRewriteBatchApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Resume Rewrites Batch R2",
         "tags": [
           "resume-assessments"
         ]

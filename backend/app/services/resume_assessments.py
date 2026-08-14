@@ -16,6 +16,10 @@ from app.core.config import Settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.harness.events import EventRecorder
+from app.harness.runtime_bundle import (
+    build_resume_runtime_bundle,
+    get_or_create_runtime_bundle,
+)
 from app.harness.snapshots import SnapshotService
 from app.models.agent_run import AgentRun
 from app.models.interview import InterviewTurn
@@ -77,6 +81,8 @@ class ResumeAssessmentService:
                     if (
                         existing.run_kind != "resume_optimization"
                         or existing.interview_session_id != payload.interview_session_id
+                        or existing.resume_version_id != payload.resume_version_id
+                        or existing.job_target_id != payload.job_target_id
                     ):
                         raise AppError(
                             code="STATE_IDEMPOTENCY_KEY_REUSED",
@@ -91,12 +97,14 @@ class ResumeAssessmentService:
                     target = await self._materials.get_job_target(
                         payload.job_target_id, user_id, include_deleted=True
                     )
-                    interview = await self._interviews.get_session(
-                        payload.interview_session_id, user_id
+                    interview = (
+                        await self._interviews.get_session(payload.interview_session_id, user_id)
+                        if payload.interview_session_id is not None
+                        else None
                     )
-                    if resume is None or target is None or interview is None:
+                    if resume is None or target is None:
                         raise _not_found()
-                    if (
+                    if interview is not None and (
                         interview.resume_version_id != resume.id
                         or interview.job_target_id != target.id
                         or interview.report_status != "ready"
@@ -109,13 +117,20 @@ class ResumeAssessmentService:
                             ),
                             status_code=HTTPStatus.CONFLICT,
                         )
+                    runtime_bundle = await get_or_create_runtime_bundle(
+                        self._session,
+                        build_resume_runtime_bundle(self._settings, config),
+                    )
                     run = AgentRun(
                         user_id=user_id,
                         run_kind="resume_optimization",
-                        interview_session_id=interview.id,
+                        interview_session_id=interview.id if interview is not None else None,
+                        resume_version_id=resume.id,
+                        job_target_id=target.id,
+                        runtime_bundle_id=runtime_bundle.id,
                         idempotency_key=idempotency_key,
                         request_text=(
-                            "Optimize frozen Resume claims against JD and interview evidence"
+                            "Optimize frozen Resume claims against JD with bounded evidence"
                         ),
                         hint_intent="resume_optimization",
                         resolved_intent="resume_optimization",
@@ -134,6 +149,10 @@ class ResumeAssessmentService:
                             "status": "pending",
                             "graph_version": run.graph_version,
                             "run_kind": "resume_optimization",
+                            "runtime_bundle_hash": runtime_bundle.bundle_hash,
+                            "assessment_mode": (
+                                "evidence_enhanced" if interview is not None else "pre_interview"
+                            ),
                         },
                     )
                     created = True
@@ -157,6 +176,15 @@ class ResumeAssessmentService:
         payload: ResumeAssessmentCreateRequest,
         idempotency_key: str,
     ) -> ResumeAssessmentResponse:
+        if payload.interview_session_id is None:
+            raise AppError(
+                code="STATE_LEGACY_ASSESSMENT_REQUIRES_INTERVIEW",
+                message=(
+                    "the legacy synchronous assessment requires an interview; "
+                    "use /resume-assessments/optimize for pre-interview diagnosis"
+                ),
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
         request_hash = _hash(payload.model_dump(mode="json"))
         async with session_transaction(self._session):
             existing = await self._materials.assessment_by_key(user_id, idempotency_key)
@@ -312,77 +340,16 @@ class ResumeAssessmentService:
     async def apply_rewrite(
         self, *, assessment_id: UUID, claim_id: str, user_id: UUID
     ) -> ResumeRewriteApplyResponse:
-        async with session_transaction(self._session):
-            assessment = await self._materials.get_assessment(assessment_id, user_id)
-            decision = await self._materials.get_rewrite_decision(
-                assessment_id, claim_id, user_id
-            )
-            if assessment is None:
-                raise _not_found()
-            if decision is None:
-                raise AppError(
-                    code="STATE_RESUME_REWRITE_NOT_ACCEPTED",
-                    message="accept the rewrite before applying it",
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            if decision.status == "applied" and decision.applied_resume_version_id is not None:
-                applied = await self._materials.get_resume(
-                    decision.applied_resume_version_id, user_id, include_deleted=True
-                )
-                if applied is not None:
-                    return ResumeRewriteApplyResponse(
-                        decision=_decision_response(decision),
-                        resume_version=_resume_response(applied),
-                    )
-            if decision.status != "accepted" or decision.rewrite_text is None:
-                raise AppError(
-                    code="STATE_RESUME_REWRITE_NOT_ACCEPTED",
-                    message="accept the rewrite before applying it",
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            source = await self._materials.get_resume(
-                assessment.resume_version_id, user_id, include_deleted=True
-            )
-            if source is None:
-                raise _not_found()
-            finding = _finding_by_id(assessment, claim_id)
-            if finding.claim_text not in source.source_text:
-                raise AppError(
-                    code="STATE_RESUME_REWRITE_SOURCE_MISMATCH",
-                    message="the assessed claim no longer matches the frozen ResumeVersion",
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            rewritten = source.source_text.replace(
-                finding.claim_text, decision.rewrite_text, 1
-            )
-            idempotency_key = f"rewrite-{assessment.id.hex[:16]}-{claim_id[-8:]}"
-            request_payload = {
-                "source_resume_version_id": str(source.id),
-                "assessment_id": str(assessment.id),
-                "claim_id": claim_id,
-                "rewrite_text": decision.rewrite_text,
-            }
-            version = await self._materials.create_resume(
-                ResumeVersion(
-                    user_id=user_id,
-                    label=f"{source.label} · AI 优化版",
-                    source_type="pasted_text",
-                    source_text=rewritten,
-                    structured_json={"claims": stable_text_items(rewritten, prefix="claim")},
-                    content_hash=sha256(rewritten.encode()).hexdigest(),
-                    parent_version_id=source.id,
-                    idempotency_key=idempotency_key,
-                    request_hash=_hash(request_payload),
-                )
-            )
-            decision.status = "applied"
-            decision.applied_resume_version_id = version.id
-            decision.applied_at = datetime.now(UTC)
-            await self._session.flush()
-            return ResumeRewriteApplyResponse(
-                decision=_decision_response(decision),
-                resume_version=_resume_response(version),
-            )
+        """Deprecated compatibility wrapper over the canonical batch transaction."""
+        applied = await self.apply_rewrites_batch(
+            assessment_id=assessment_id,
+            user_id=user_id,
+            payload=ResumeRewriteBatchApplyRequest(claim_ids=[claim_id]),
+        )
+        return ResumeRewriteApplyResponse(
+            decision=applied.decisions[0],
+            resume_version=applied.resume_version,
+        )
 
     async def apply_rewrites_batch(
         self,
@@ -440,15 +407,24 @@ class ResumeAssessmentService:
                 raise _not_found()
             replacements: list[tuple[int, int, str]] = []
             for finding, decision in zip(findings, decisions, strict=True):
-                start = source.source_text.find(finding.claim_text)
-                if start < 0 or decision.rewrite_text is None:
+                start, end = finding.source_start, finding.source_end
+                if (
+                    start is None
+                    or end is None
+                    or finding.source_hash is None
+                    or end > len(source.source_text)
+                    or source.source_text[start:end] != finding.claim_text
+                    or sha256(source.source_text[start:end].encode()).hexdigest()
+                    != finding.source_hash
+                    or decision.rewrite_text is None
+                ):
                     raise AppError(
                         code="STATE_RESUME_REWRITE_SOURCE_MISMATCH",
                         message="a selected claim no longer matches the frozen ResumeVersion",
                         status_code=HTTPStatus.CONFLICT,
                     )
                 replacements.append(
-                    (start, start + len(finding.claim_text), decision.rewrite_text)
+                    (start, end, decision.rewrite_text)
                 )
             replacements.sort()
             if any(
@@ -615,6 +591,9 @@ def _finding(
         requirement_ids=linked_requirements,
         evidence_turn_ids=[turn.id for turn in evidence_turns],
         suggested_rewrite=rewrite,
+        source_start=claim.source_start,
+        source_end=claim.source_end,
+        source_hash=claim.source_hash,
     )
 
 

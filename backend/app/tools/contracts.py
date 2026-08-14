@@ -115,17 +115,22 @@ class WebSearchOutput(StrictModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
 
 
-class InterviewEvidenceRetrieveInput(StrictModel):
-    interview_session_id: UUID
+class InterviewEvidenceQuery(StrictModel):
     claim_id: str = Field(pattern=r"^claim_[0-9a-f]{16}$")
     claim_text: str = Field(min_length=1, max_length=1000)
-    limit: int = Field(default=5, ge=1, le=6)
+
+
+class InterviewEvidenceRetrieveInput(StrictModel):
+    interview_session_id: UUID
+    claims: list[InterviewEvidenceQuery] = Field(min_length=1, max_length=30)
+    limit_per_claim: int = Field(default=3, ge=1, le=3)
 
 
 class InterviewEvidenceRetrieveItem(StrictModel):
+    claim_id: str = Field(pattern=r"^claim_[0-9a-f]{16}$")
     turn_id: UUID
-    question: str
-    answer: str
+    question: str = Field(max_length=300)
+    answer: str = Field(max_length=500)
     relevance: float = Field(ge=0, le=1)
     reliability: float = Field(ge=0, le=1)
     explicit_conflict: bool = False
@@ -139,7 +144,7 @@ class InterviewEvidenceRetrieveOutput(StrictModel):
 class ResumeGapAnalyzeInput(StrictModel):
     resume_version_id: UUID
     job_target_id: UUID
-    claim_ids: list[str] = Field(min_length=1, max_length=20)
+    claim_ids: list[str] = Field(min_length=1, max_length=80)
 
 
 class ResumeGapItem(StrictModel):
@@ -157,6 +162,7 @@ class ResumeGapAnalyzeOutput(StrictModel):
 class ToolExecutionResult(StrictModel):
     success: bool
     result: ToolResult
+    tool_call_id: UUID | None = None
     error_code: str | None = None
     reused: bool = False
 

@@ -1,6 +1,7 @@
 """Immutable resume-version and job-target use cases."""
 
 import json
+import re
 from hashlib import sha256
 from http import HTTPStatus
 from uuid import UUID
@@ -19,24 +20,34 @@ from app.schemas.resumes import (
 )
 
 
-def stable_text_items(text: str, *, prefix: str) -> list[dict[str, str]]:
-    """Extract bounded, stable line/sentence items without inventing content."""
+def stable_text_items(text: str, *, prefix: str) -> list[dict[str, object]]:
+    """Extract stable items with exact source spans for conflict-safe rewriting."""
 
-    normalized = text.replace("\r", "\n")
-    chunks: list[str] = []
-    for line in normalized.split("\n"):
-        for part in line.replace("。", "。\n").split("\n"):
-            value = part.strip(" \t-*•")
-            if len(value) >= 8:
-                chunks.append(value[:1000])
-    unique = list(dict.fromkeys(chunks))[:80]
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    chunks: list[tuple[str, str, int, int]] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"[^\n。]+(?:。|$)", normalized):
+        raw = match.group(0)
+        leading = len(raw) - len(raw.lstrip(" \t-*•"))
+        value = raw.strip(" \t-*•")[:1000]
+        if len(value) < 8:
+            continue
+        start = match.start() + leading
+        identity = value if value not in seen else f"{value}:{start}"
+        seen.add(value)
+        chunks.append((identity, value, start, start + len(value)))
+        if len(chunks) >= 80:
+            break
     key = "claim_id" if prefix == "claim" else "requirement_id"
     return [
         {
-            key: f"{prefix}_{sha256(value.casefold().encode()).hexdigest()[:16]}",
+            key: f"{prefix}_{sha256(identity.casefold().encode()).hexdigest()[:16]}",
             "text": value,
+            "source_start": start,
+            "source_end": end,
+            "source_hash": sha256(value.encode()).hexdigest(),
         }
-        for value in unique
+        for identity, value, start, end in chunks
     ]
 
 

@@ -50,6 +50,7 @@ def test_stage_one_enums_match_contract_values() -> None:
         "interview_turn",
         "interview_report",
         "resume_assessment",
+        "resume_optimization",
     ]
     assert [item.value for item in PlanStatus] == [
         "generated",

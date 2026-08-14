@@ -6,13 +6,28 @@ from hashlib import sha256
 from http import HTTPStatus
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.executor import AgentRunExecutor
+from app.core.config import Settings
 from app.core.database import session_transaction
 from app.core.exceptions import AppError
 from app.harness.redaction import redact, redacted_snapshot
-from app.models.agent_run import AgentEvent, AgentRun, AgentStep, ToolCall
+from app.harness.runtime_bundle import (
+    build_resume_runtime_bundle,
+    get_or_create_runtime_bundle,
+)
+from app.harness.snapshots import SnapshotService
+from app.models.agent_run import (
+    AgentCheckpoint,
+    AgentEvent,
+    AgentRun,
+    AgentStep,
+    ReplayComparison,
+    ToolCall,
+)
+from app.models.resume import ResumeAssessment
 from app.repositories.dev import DevTraceRepository
 from app.schemas.dev import (
     DevEventTrace,
@@ -31,9 +46,15 @@ TERMINAL_EVENTS = {"run.completed", "run.degraded", "run.failed", "run.cancelled
 
 
 class DevTraceService:
-    def __init__(self, session: AsyncSession, executor: AgentRunExecutor | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        executor: AgentRunExecutor | None = None,
+        settings: Settings | None = None,
+    ) -> None:
         self._session = session
         self._executor = executor
+        self._settings = settings
         self._repo = DevTraceRepository(session)
 
     async def list_runs(
@@ -308,7 +329,13 @@ class DevTraceService:
             execution_kind="legacy_trace_clone",
         )
 
-    async def replay_v2(self, run_id: UUID, *, tool_mode: str) -> ReplayResponse:
+    async def replay_v2(
+        self,
+        run_id: UUID,
+        *,
+        mode: str,
+        target_runtime_bundle_id: UUID | None,
+    ) -> ReplayResponse:
         """Execute a new Resume graph from the frozen source snapshot."""
         if self._executor is None:
             raise RuntimeError("Replay V2 executor is not configured")
@@ -334,23 +361,80 @@ class DevTraceService:
                     message="the frozen input snapshot is missing",
                     status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 )
-            if tool_mode == "fixture":
-                _steps, source_tools, _events = await self._repo.get_trace(run_id)
-                if not source_tools or any(
-                    row.result_json is None or not row.success for row in source_tools
-                ):
+            if mode == "exact_fixture_replay" and target_runtime_bundle_id not in {
+                None,
+                source.runtime_bundle_id,
+            }:
+                raise AppError(
+                    code="REPLAY_RUNTIME_BUNDLE_MISMATCH",
+                    message="exact replay must use the source Runtime Bundle",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            if source.runtime_bundle_id is None:
+                raise AppError(
+                    code="REPLAY_RUNTIME_BUNDLE_MISSING",
+                    message="the immutable Runtime Bundle is missing",
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            _steps, source_tools, _events = await self._repo.get_trace(run_id)
+            provider_fixture = await self._session.scalar(
+                select(AgentCheckpoint).where(
+                    AgentCheckpoint.run_id == run_id,
+                    AgentCheckpoint.node_name == "resume_provider_generate",
+                )
+            )
+            if (
+                not source_tools
+                or any(row.result_json is None or not row.success for row in source_tools)
+                or (mode == "exact_fixture_replay" and provider_fixture is None)
+            ):
+                raise AppError(
+                    code="REPLAY_FIXTURE_MISSING",
+                    message=(
+                        "complete Tool fixtures are required; Exact Replay also requires "
+                        "a Provider fixture"
+                    ),
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                )
+            runtime_bundle_id = source.runtime_bundle_id
+            if mode == "candidate_comparison":
+                if self._settings is None:
+                    raise RuntimeError("candidate comparison requires Runtime settings")
+                current_config = SnapshotService.build_resume_optimization_config(
+                    self._settings
+                )
+                current_bundle = await get_or_create_runtime_bundle(
+                    self._session,
+                    build_resume_runtime_bundle(self._settings, current_config),
+                )
+                if target_runtime_bundle_id not in {None, current_bundle.id}:
                     raise AppError(
-                        code="REPLAY_FIXTURE_MISSING",
-                        message="complete successful Tool fixtures are required",
+                        code="REPLAY_RUNTIME_BUNDLE_NOT_ACTIVE",
+                        message=(
+                            "candidate comparison target must be the active server "
+                            "Runtime Bundle"
+                        ),
                         status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                     )
-            config = dict(source.config_snapshot_json)
-            config.update(
-                {
-                    "execution_kind": "replay_v2",
-                    "replay_tool_mode": tool_mode,
-                }
-            )
+                runtime_bundle_id = current_bundle.id
+                config = current_config.model_dump(mode="json")
+                config.update(
+                    {
+                        "execution_kind": "candidate_comparison",
+                        "replay_tool_mode": "fixture",
+                    }
+                )
+            else:
+                config = dict(source.config_snapshot_json)
+                config.update(
+                    {
+                        "execution_kind": "exact_fixture_replay",
+                        "replay_tool_mode": "fixture",
+                    }
+                )
+            deadline_seconds = config.get("deadline_seconds", 45)
+            if not isinstance(deadline_seconds, int | float):
+                deadline_seconds = 45
             replay = AgentRun(
                 user_id=source.user_id,
                 run_kind=source.run_kind,
@@ -360,12 +444,15 @@ class DevTraceService:
                 hint_intent=source.hint_intent,
                 resolved_intent=source.resolved_intent,
                 replay_of_run_id=source.id,
+                runtime_bundle_id=runtime_bundle_id,
+                resume_version_id=source.resume_version_id,
+                job_target_id=source.job_target_id,
                 status="pending",
                 graph_version=source.graph_version,
                 input_snapshot_json=source.input_snapshot_json,
                 config_snapshot_json=config,
                 deadline_at=datetime.now(UTC)
-                + timedelta(seconds=int(config.get("deadline_seconds", 45))),
+                + timedelta(seconds=int(deadline_seconds)),
             )
             self._session.add(replay)
             await self._session.flush()
@@ -377,8 +464,8 @@ class DevTraceService:
                     payload_json={
                         "status": "pending",
                         "replay_of_run_id": str(source.id),
-                        "execution_kind": "replay_v2",
-                        "tool_mode": tool_mode,
+                        "execution_kind": mode,
+                        "tool_mode": "fixture",
                     },
                 )
             )
@@ -389,8 +476,8 @@ class DevTraceService:
             run_id=replay_id,
             replay_of_run_id=run_id,
             status="pending",
-            deterministic=tool_mode == "fixture",
-            execution_kind="replay_v2",
+            deterministic=mode == "exact_fixture_replay",
+            execution_kind=mode,
         )
 
     async def replay_diff(self, replay_run_id: UUID) -> ReplayDiff:
@@ -401,15 +488,91 @@ class DevTraceService:
             source = await self._repo.get_run(replay.replay_of_run_id)
             if source is None:
                 raise self._not_found()
+            if replay.status not in {"completed", "degraded", "failed", "cancelled"}:
+                raise AppError(
+                    code="REPLAY_NOT_TERMINAL",
+                    message="Replay diff is available after the Replay reaches a terminal state",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            source_assessment = await self._session.scalar(
+                select(ResumeAssessment).where(ResumeAssessment.source_run_id == source.id)
+            )
+            replay_assessment = await self._session.scalar(
+                select(ResumeAssessment).where(ResumeAssessment.source_run_id == replay.id)
+            )
+            _source_steps, source_tools, _ = await self._repo.get_trace(source.id)
+            replay_steps, replay_tools, _ = await self._repo.get_trace(replay.id)
         source_result = self._digest(source.result_payload_json)
         replay_result = self._digest(replay.result_payload_json)
-        changed: list[str] = []
-        if source.status != replay.status:
-            changed.append("status")
-        if source.result_kind != replay.result_kind:
-            changed.append("result_kind")
-        if source_result != replay_result:
-            changed.append("result_payload")
+        source_context = source_assessment.context_manifest_json if source_assessment else None
+        replay_context = replay_assessment.context_manifest_json if replay_assessment else None
+        source_claims = (
+            self._canonical_claims(source_assessment.findings_json)
+            if source_assessment else None
+        )
+        replay_claims = (
+            self._canonical_claims(replay_assessment.findings_json)
+            if replay_assessment else None
+        )
+        source_tool_payload = [
+            {"name": item.tool_name, "args": item.args_json, "result": item.result_json}
+            for item in source_tools
+        ]
+        replay_tool_payload = [
+            {"name": item.tool_name, "args": item.args_json, "result": item.result_json}
+            for item in replay_tools
+        ]
+        source_validation = next(
+            (
+                item.trace_data
+                for item in _source_steps
+                if item.node_name == "resume_faithfulness_validator"
+            ),
+            None,
+        )
+        replay_validation = next(
+            (
+                item.trace_data
+                for item in replay_steps
+                if item.node_name == "resume_faithfulness_validator"
+            ),
+            None,
+        )
+        comparisons = {
+            "status": source.status == replay.status,
+            "result_kind": source.result_kind == replay.result_kind,
+            "context": self._digest(source_context) == self._digest(replay_context),
+            "tools": self._digest(source_tool_payload) == self._digest(replay_tool_payload),
+            "claims": self._digest(source_claims) == self._digest(replay_claims),
+            "validation": self._digest(source_validation) == self._digest(replay_validation),
+        }
+        changed = [name for name, equal in comparisons.items() if not equal]
+        semantic_equal = all(comparisons.values())
+        diff_payload = {
+            "context": self._pair_hash(source_context, replay_context),
+            "tools": self._pair_hash(source_tool_payload, replay_tool_payload),
+            "claims": self._pair_hash(source_claims, replay_claims),
+            "validation": self._pair_hash(source_validation, replay_validation),
+            "usage": {
+                "source": self._usage(source),
+                "replay": self._usage(replay),
+            },
+            "changed_fields": changed,
+        }
+        async with session_transaction(self._session):
+            existing = await self._session.scalar(
+                select(ReplayComparison).where(ReplayComparison.replay_run_id == replay.id)
+            )
+            if existing is None:
+                self._session.add(
+                    ReplayComparison(
+                        source_run_id=source.id,
+                        replay_run_id=replay.id,
+                        comparison_version="resume-semantic-diff-v2",
+                        semantic_equal=semantic_equal,
+                        diff_json=diff_payload,
+                    )
+                )
         return ReplayDiff(
             source_run_id=source.id,
             replay_run_id=replay.id,
@@ -417,11 +580,41 @@ class DevTraceService:
             replay_status=replay.status,
             input_snapshot_equal=self._digest(source.input_snapshot_json)
             == self._digest(replay.input_snapshot_json),
-            result_equal=source_result == replay_result,
+            semantic_equal=semantic_equal,
             source_result_sha256=source_result,
             replay_result_sha256=replay_result,
             changed_fields=changed,
+            context_diff=diff_payload["context"],
+            tool_diff=diff_payload["tools"],
+            claim_diff=diff_payload["claims"],
+            validation_diff=diff_payload["validation"],
+            usage_diff=diff_payload["usage"],
         )
+
+    @classmethod
+    def _pair_hash(cls, source: object, replay: object) -> dict[str, object]:
+        source_hash, replay_hash = cls._digest(source), cls._digest(replay)
+        return {
+            "equal": source_hash == replay_hash,
+            "source_sha256": source_hash,
+            "replay_sha256": replay_hash,
+        }
+
+    @staticmethod
+    def _usage(run: AgentRun) -> dict[str, object]:
+        return {
+            "tokens_in": run.total_tokens_in,
+            "tokens_out": run.total_tokens_out,
+            "cost_cny": str(run.total_cost_cny),
+            "latency_ms": run.total_latency_ms,
+        }
+
+    @staticmethod
+    def _canonical_claims(items: list[dict[str, object]]) -> list[dict[str, object]]:
+        return [
+            {key: value for key, value in item.items() if key != "consumed_tool_call_ids"}
+            for item in items
+        ]
 
     @staticmethod
     def _digest(value: object | None) -> str | None:

@@ -1,17 +1,22 @@
-# Replay V2 目标契约
+# Replay R2 契约
 
-> 当前 `POST /api/v1/dev/runs/{run_id}/replay` 仅是兼容入口，实际执行种类为
-> `legacy_trace_clone`：复制已持久化的 Run/Step/Tool/结果，不执行 Graph、Provider 或结果
-> diff，因此不得称为真实 Replay。响应会显式返回 `execution_kind=legacy_trace_clone`。
+`resume_optimization` 已进入真实重执行边界：Replay 必须创建独立 Run，使用冻结输入、不可变
+Runtime Bundle 和完整 fixture 重新执行 Graph，并在终态后持久化语义 diff。复制 Trace 的
+`legacy_trace_clone` 只保留为历史内部实现，不再由 HTTP 入口使用。
 
 ## 默认输入
 
 Replay 新建独立 Run，并使用原 Run 保存的：
 
 - `input_snapshot_json`；
-- `config_snapshot_json`；
-- `graph_version`；
+- `runtime_bundle_id` 与 bundle hash；
 - `tool_calls.result_json` fixture。
+
+精确 fixture replay 还必须冻结 Provider response fixture。只冻结 Tool、不冻结 LLM 响应时，
+不得标记 deterministic。
+
+Candidate Comparison 只复用源 Tool fixture，Provider 使用当前进程配置重新执行；服务端校验目标
+Runtime Bundle 必须等于当前生效 bundle，避免把任意历史 bundle 与当前 Provider 错配。
 
 可变项：model、prompt_version、quality reviewer 模式。默认不读取用户当前 Profile/Plan/Memory，避免历史输入漂移。
 
@@ -31,13 +36,14 @@ tool_name + args_hash + tool_contract_version
 
 ## 输出对比
 
-至少对比：
+至少对比并忽略 run_id、assessment_id、时间戳等生成字段：
 
 - resolved_intent；
 - result_kind/status/fallback_reason；
-- PlanCandidate Schema；
-- 各规则 Grader；
-- source integrity；
+- Context 入选/排除与真实 Token；
+- Tool 参数、输出及消费关系；
+- Claim verdict/rewrite/requirement/evidence；
+- Validation 与 source integrity；
 - token、cost、latency；
 - 节点和 Tool 调用差异。
 
@@ -45,9 +51,9 @@ Replay 不修改原 Run、原 Plan、原 Trace。默认只保存实验结果，�
 
 ## V2 完成条件
 
-只有同时满足以下条件，才可把执行种类标记为 Replay：从不可变 input/config snapshot
-重建上下文；按 fixture contract 执行 Tool；重新运行 Graph/Provider；生成独立结果；对新旧
-输出、规则、成本和 Trace 做 diff。复制旧结果不属于 Replay。
+只有同时满足以下条件，才可把执行种类标记为 deterministic Replay：从不可变 input/runtime
+bundle 重建上下文；按 fixture contract 执行 Tool 和 Provider；重新运行 Graph；生成独立
+结果；对新旧输出、规则、成本和 Trace 做语义 diff。复制旧结果不属于 Replay。
 
 ## Eval Harness V2 编排入口
 

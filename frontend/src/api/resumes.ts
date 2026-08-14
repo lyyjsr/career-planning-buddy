@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
-import type { JobTargetResponse, ResumeAssessmentResponse, ResumeDocumentExtractResponse, ResumeOptimizationRunResponse, ResumeRewriteApplyResponse, ResumeRewriteBatchApplyResponse, ResumeRewriteDecisionResponse, ResumeVersionResponse } from "./types";
+import type { JobTargetResponse, ResumeAssessmentResponse, ResumeDocumentExtractResponse, ResumeOptimizationRunResponse, ResumeRewriteBatchApplyResponse, ResumeRewriteDecisionResponse, ResumeVersionResponse } from "./types";
 
 export function useResumeVersions() {
   return useQuery({
@@ -12,7 +12,7 @@ export function useResumeVersions() {
 export function useCreateResumeAssessment() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: { resume_version_id: string; job_target_id: string; interview_session_id: string }) =>
+    mutationFn: (body: { resume_version_id: string; job_target_id: string; interview_session_id?: string | null }) =>
       apiRequest<ResumeOptimizationRunResponse>("/api/v1/resume-assessments/optimize", {
         method: "POST", body, idempotencyKey: crypto.randomUUID(),
       }),
@@ -24,7 +24,7 @@ export function useApplyResumeRewritesBatch() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: { assessmentId: string; claimIds: string[] }) =>
-      apiRequest<ResumeRewriteBatchApplyResponse>(`/api/v1/resume-assessments/${input.assessmentId}/rewrites/apply`, {
+      apiRequest<ResumeRewriteBatchApplyResponse>(`/api/v1/resume-assessments/${input.assessmentId}/rewrites/apply-batch`, {
         method: "POST",
         body: { claim_ids: input.claimIds },
       }),
@@ -42,6 +42,14 @@ export function useResumeAssessments() {
   });
 }
 
+export function useResumeAssessment(assessmentId: string | undefined) {
+  return useQuery({
+    queryKey: ["resume-assessments", assessmentId],
+    queryFn: () => apiRequest<ResumeAssessmentResponse>(`/api/v1/resume-assessments/${assessmentId}`),
+    enabled: assessmentId !== undefined,
+  });
+}
+
 export function useDecideResumeRewrite() {
   const client = useQueryClient();
   return useMutation({
@@ -51,18 +59,6 @@ export function useDecideResumeRewrite() {
         body: { status: input.status, rewrite_text: input.status === "accepted" ? input.rewriteText : null },
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["resume-assessments"] }),
-  });
-}
-
-export function useApplyResumeRewrite() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { assessmentId: string; claimId: string }) =>
-      apiRequest<ResumeRewriteApplyResponse>(`/api/v1/resume-assessments/${input.assessmentId}/claims/${input.claimId}/apply`, { method: "POST" }),
-    onSuccess: async () => Promise.all([
-      client.invalidateQueries({ queryKey: ["resume-assessments"] }),
-      client.invalidateQueries({ queryKey: ["resume-versions"] }),
-    ]),
   });
 }
 

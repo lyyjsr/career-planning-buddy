@@ -1,6 +1,7 @@
 """Single authority for Run terminal state and terminal event convergence."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from time import monotonic
 from uuid import UUID
 
@@ -214,6 +215,24 @@ class AgentRunFinalizer:
                     run.error_message = None
                     run.total_tokens_in = self._budget.tokens_in
                     run.total_tokens_out = self._budget.tokens_out
+                    model_steps = list(
+                        (
+                            await session.scalars(
+                                select(AgentStep)
+                                .where(
+                                    AgentStep.run_id == run_id,
+                                    AgentStep.model_id.is_not(None),
+                                )
+                                .order_by(AgentStep.sequence)
+                            )
+                        ).all()
+                    )
+                    if model_steps:
+                        run.model_id = model_steps[-1].model_id
+                        run.total_cost_cny = sum(
+                            (item.cost_cny for item in model_steps),
+                            start=Decimal("0"),
+                        )
                     run.model_id = model_id
                     run.total_latency_ms = max(
                         0,
@@ -372,6 +391,24 @@ class AgentRunFinalizer:
                     run.error_message = None
                     run.total_tokens_in = self._budget.tokens_in
                     run.total_tokens_out = self._budget.tokens_out
+                    model_steps = list(
+                        (
+                            await session.scalars(
+                                select(AgentStep)
+                                .where(
+                                    AgentStep.run_id == run_id,
+                                    AgentStep.model_id.is_not(None),
+                                )
+                                .order_by(AgentStep.sequence)
+                            )
+                        ).all()
+                    )
+                    if model_steps:
+                        run.model_id = model_steps[-1].model_id
+                        run.total_cost_cny = sum(
+                            (item.cost_cny for item in model_steps),
+                            start=Decimal("0"),
+                        )
                     run.finished_at = datetime.now(UTC)
                     run.total_latency_ms = max(
                         0,
@@ -480,6 +517,24 @@ class AgentRunFinalizer:
                     run.error_message = None
                     run.total_tokens_in = self._budget.tokens_in
                     run.total_tokens_out = self._budget.tokens_out
+                    model_steps = list(
+                        (
+                            await session.scalars(
+                                select(AgentStep)
+                                .where(
+                                    AgentStep.run_id == run_id,
+                                    AgentStep.model_id.is_not(None),
+                                )
+                                .order_by(AgentStep.sequence)
+                            )
+                        ).all()
+                    )
+                    if model_steps:
+                        run.model_id = model_steps[-1].model_id
+                        run.total_cost_cny = sum(
+                            (item.cost_cny for item in model_steps),
+                            start=Decimal("0"),
+                        )
                     run.finished_at = datetime.now(UTC)
                     run.total_latency_ms = max(
                         0,

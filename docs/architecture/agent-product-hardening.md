@@ -56,8 +56,10 @@ suggested → accepted → applied
 
 - 当前是单 Agent 受控工作流，不宣称多 Agent、MCP 工具市场或微服务；
 - Tool 对业务状态只读，业务写入由 Service 完成；
-- `/dev/runs/{id}/replay` 当前兼容操作是 `legacy_trace_clone`，不是 V2 真实重放；
-- V2 Replay 只有在使用原输入/配置快照重新执行、复用 Tool fixture 并输出 diff 后才算完成；
+- `/dev/runs/{id}/replay` 对材料优化使用冻结 input/runtime bundle、Tool/Provider fixture
+  重新执行并生成语义 diff；其他 Run kind 不在该 Replay 边界；
+- 只有 Tool 和 Provider fixture 都完整时才标记 deterministic；live Provider 重放必须标记
+  non-deterministic；
 - 简历核验不是背景调查；面试回答只是当前证据来源之一；
 - Eval 结果必须标注 provider mode、数据集版本和运行时身份，不能把 mock 指标描述为线上质量。
 

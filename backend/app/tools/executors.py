@@ -246,43 +246,50 @@ class InterviewEvidenceRetrieveHandler:
                 turn for turn in await repository.list_turns(interview.id, context.user_id)
                 if turn.answer_status == "submitted" and turn.answer_text
             ]
-        ranked: list[InterviewEvidenceRetrieveItem] = []
-        for turn in turns:
-            content = f"{turn.question_text} {turn.answer_text or ''}"
-            relevance = lexical_similarity(request.claim_text, content)
-            explicit_conflict = any(
-                isinstance(item, dict)
-                and item.get("verdict") == "incorrect"
-                and lexical_similarity(request.claim_text, str(item.get("claim", ""))) > 0
-                for item in (
+        items: list[InterviewEvidenceRetrieveItem] = []
+        for query in request.claims:
+            ranked: list[InterviewEvidenceRetrieveItem] = []
+            for turn in turns:
+                content = f"{turn.question_text} {turn.answer_text or ''}"
+                relevance = lexical_similarity(query.claim_text, content)
+                raw_findings = (
                     turn.analysis_json.get("factual_findings", [])
                     if isinstance(turn.analysis_json, dict)
                     else []
                 )
-            )
-            ranked.append(
-                InterviewEvidenceRetrieveItem(
-                    turn_id=turn.id,
-                    question=turn.question_text,
-                    answer=turn.answer_text or "",
-                    relevance=relevance,
-                    reliability=0.9 if turn.analysis_json else 0.72,
-                    explicit_conflict=explicit_conflict,
+                findings = raw_findings if isinstance(raw_findings, list) else []
+                explicit_conflict = any(
+                    isinstance(item, dict)
+                    and item.get("verdict") == "incorrect"
+                    and lexical_similarity(query.claim_text, str(item.get("claim", ""))) > 0
+                    for item in findings
                 )
+                ranked.append(
+                    InterviewEvidenceRetrieveItem(
+                        claim_id=query.claim_id,
+                        turn_id=turn.id,
+                        question=turn.question_text[:300],
+                        answer=(turn.answer_text or "")[:500],
+                        relevance=relevance,
+                        reliability=0.9 if turn.analysis_json else 0.72,
+                        explicit_conflict=explicit_conflict,
+                    )
+                )
+            items.extend(
+                sorted(ranked, key=lambda item: (-item.relevance, str(item.turn_id)))[
+                    : request.limit_per_claim
+                ]
             )
-        items = sorted(ranked, key=lambda item: (-item.relevance, str(item.turn_id)))[
-            : request.limit
-        ]
         return InterviewEvidenceRetrieveOutput(
             items=items,
             evidence=[
                 EvidenceItem(
                     kind="interview_turn", id=item.turn_id,
-                    title=f"面试回答 {item.turn_id}",
+                    title=f"主张 {item.claim_id} 的面试回答 {item.turn_id}",
                     content=f"{item.question}\n{item.answer}",
                     reliability=item.reliability,
                 )
-                for item in items
+                for item in {item.turn_id: item for item in items}.values()
             ],
         )
 
@@ -299,18 +306,20 @@ class ResumeGapAnalyzeHandler:
             target = await repository.get_job_target(request.job_target_id, context.user_id)
             if resume is None or target is None:
                 raise ValueError("resume or target not found")
+        raw_claims = resume.structured_json.get(
+            "claims", stable_text_items(resume.source_text, prefix="claim")
+        )
+        raw_requirements = target.requirements_json.get(
+            "requirements", stable_text_items(target.jd_text, prefix="req")
+        )
         claims = [
             ResumeClaim.model_validate(item)
-            for item in resume.structured_json.get(
-                "claims", stable_text_items(resume.source_text, prefix="claim")
-            )
+            for item in (raw_claims if isinstance(raw_claims, list) else [])
             if isinstance(item, dict)
         ]
         requirements = [
             JobRequirement.model_validate(item)
-            for item in target.requirements_json.get(
-                "requirements", stable_text_items(target.jd_text, prefix="req")
-            )
+            for item in (raw_requirements if isinstance(raw_requirements, list) else [])
             if isinstance(item, dict)
         ]
         selected = [claim for claim in claims if claim.claim_id in request.claim_ids]

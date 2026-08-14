@@ -1,12 +1,12 @@
 import { FormEvent, ReactNode, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, FileText, GitBranch, Sparkles, Target, XCircle } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { useRun } from "@/api/agent-runs";
 import {
   useApplyResumeRewritesBatch,
-  useApplyResumeRewrite,
+  useCreateResumeAssessment,
   useCreateJobTarget,
   useCreateResumeVersion,
   useDecideResumeRewrite,
@@ -15,6 +15,7 @@ import {
   useExtractResumeDocument,
   useJobTargets,
   useResumeAssessments,
+  useResumeAssessment,
   useResumeVersions,
 } from "@/api/resumes";
 import type { ResumeClaimFinding } from "@/api/types";
@@ -41,12 +42,18 @@ export function MaterialsPage(): JSX.Element {
   const deleteResume = useDeleteResumeVersion();
   const deleteTarget = useDeleteJobTarget();
   const decideRewrite = useDecideResumeRewrite();
-  const applyRewrite = useApplyResumeRewrite();
   const applyBatch = useApplyResumeRewritesBatch();
+  const createAssessment = useCreateResumeAssessment();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const runId = searchParams.get("run_id") ?? undefined;
   const run = useRun(runId);
+  const runAssessmentId = run.data?.result && "assessment_id" in run.data.result
+    ? run.data.result.assessment_id
+    : undefined;
+  const runAssessment = useResumeAssessment(runAssessmentId);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [showBatchPreview, setShowBatchPreview] = useState(false);
   const [resume, setResume] = useState<{
     label: string;
     source_text: string;
@@ -56,7 +63,9 @@ export function MaterialsPage(): JSX.Element {
   }>({ label: "我的简历", source_text: "", source_type: "pasted_text" });
   const [target, setTarget] = useState({ title: "", company: "", jd_text: "" });
 
-  const latestAssessment = assessments.data?.[0] ?? null;
+  const latestAssessment = runId
+    ? runAssessment.data ?? null
+    : assessments.data?.[0] ?? null;
   const decisionByClaim = useMemo(
     () => new Map(latestAssessment?.rewrite_decisions.map((item) => [item.claim_id, item]) ?? []),
     [latestAssessment],
@@ -110,7 +119,7 @@ export function MaterialsPage(): JSX.Element {
 
     {searchParams.get("next") === "/interviews/new" && resumes.data?.items.length && targets.data?.items.length ? <Card className="border-primary/25 bg-accent/40"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5"><p className="text-sm">材料已经齐全，可以继续刚才的面试设置。</p><Button asChild><Link to="/interviews/new">继续设置面试</Link></Button></CardContent></Card> : null}
 
-    {runId && <Card className="border-primary/25 bg-accent/35"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><strong>{run.data?.status === "completed" ? "材料优化已完成" : run.data?.status === "failed" ? "材料优化未完成" : "材料优化 Agent 正在运行"}</strong><p className="mt-1 text-sm text-muted-foreground">{run.data?.status === "completed" ? "已冻结输入、筛选证据并完成事实一致性校验。" : run.data?.status === "failed" ? `错误码：${run.data.error_code ?? "未知"}` : "任务由持久化运行时执行，刷新页面不会丢失。"}</p></div>{run.data?.status === "completed" && <Button variant="outline" onClick={() => void assessments.refetch()}>查看新建议</Button>}</CardContent></Card>}
+    {runId && <Card className="border-primary/25 bg-accent/35"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><strong>{run.data?.status === "completed" ? "材料优化已完成" : run.data?.status === "failed" ? "材料优化未完成" : "材料优化 Agent 正在运行"}</strong><p className="mt-1 text-sm text-muted-foreground">{run.data?.status === "completed" ? "已按本次 Run 的结果资源精确加载建议。" : run.data?.status === "failed" ? `错误码：${run.data.error_code ?? "未知"}` : "任务由持久化运行时执行，刷新页面不会丢失。"}</p></div>{run.data?.status === "completed" && runAssessment.isLoading && <span className="text-sm text-muted-foreground">正在加载本次结果…</span>}</CardContent></Card>}
 
     <section className="space-y-3">
       <div><h2 className="text-xl font-semibold">材料资产</h2><p className="text-sm text-muted-foreground">先冻结输入，Agent 的判断才能回溯到具体版本。</p></div>
@@ -136,13 +145,13 @@ export function MaterialsPage(): JSX.Element {
     <section className="space-y-3">
       <div><h2 className="text-xl font-semibold">Agent 优化建议</h2><p className="text-sm text-muted-foreground">建议来自“简历版本 + 目标 JD + 面试原回答”，你决定哪些内容进入下一版本。</p></div>
       {assessments.isLoading && <Card><CardContent className="p-6 text-sm text-muted-foreground">正在加载评估结果…</CardContent></Card>}
-      {!assessments.isLoading && !latestAssessment && <Card className="border-dashed"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-6"><div><strong>还没有可用的材料评估</strong><p className="mt-1 text-sm text-muted-foreground">完成一次面试复盘后，验证所用简历，搭子才有真实证据给出改写建议。</p></div><Button asChild variant="outline"><Link to="/interviews">前往面试</Link></Button></CardContent></Card>}
+      {!assessments.isLoading && !latestAssessment && <Card className="border-dashed"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-6"><div><strong>还没有可用的材料评估</strong><p className="mt-1 text-sm text-muted-foreground">可以先用简历和 JD 做面试前诊断；完成面试后再用真实回答增强证据。</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={createAssessment.isPending || !resumes.data?.items[0] || !targets.data?.items[0]} onClick={() => { const resumeItem = resumes.data?.items[0]; const targetItem = targets.data?.items[0]; if (resumeItem && targetItem) createAssessment.mutate({ resume_version_id: resumeItem.resume_version_id, job_target_id: targetItem.job_target_id, interview_session_id: null }, { onSuccess: (data) => navigate(`/materials?run_id=${data.run_id}`) }); }}>{createAssessment.isPending ? "正在启动…" : "先做材料诊断"}</Button><Button asChild variant="outline"><Link to="/interviews">用面试补充证据</Link></Button></div></CardContent></Card>}
       {latestAssessment && <div className="grid gap-4">
-        {latestAssessment.context_manifest && <Card><CardContent className="grid gap-4 p-5 sm:grid-cols-4"><Metric icon={Sparkles} label="上下文候选" value={latestAssessment.context_manifest.candidates.length} /><Metric icon={CheckCircle2} label="入选证据" value={latestAssessment.context_manifest.selected_evidence_refs.length} /><Metric icon={FileText} label="上下文 Token" value={latestAssessment.context_manifest.used_tokens} /><Metric icon={XCircle} label="注入过滤" value={latestAssessment.context_manifest.prompt_injection_filtered_count} /><p className="sm:col-span-4 text-xs text-muted-foreground">选择算法 {latestAssessment.context_manifest.algorithm_version}；每条候选都保留入选或排除原因，可在开发者运行详情查看完整清单。</p></CardContent></Card>}
-        {acceptedClaimIds.length > 0 && <Card className="border-primary/25"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><strong>已接受 {acceptedClaimIds.length} 条改写</strong><p className="mt-1 text-sm text-muted-foreground">一次确认后合并为一个新版本，原简历保持不变。</p></div><Button disabled={applyBatch.isPending} onClick={() => applyBatch.mutate({ assessmentId: latestAssessment.assessment_id, claimIds: acceptedClaimIds })}><GitBranch className="mr-2 h-4 w-4" />{applyBatch.isPending ? "正在合并…" : "合并生成一个新版本"}</Button></CardContent></Card>}
+        {latestAssessment.context_manifest && <Card><CardContent className="grid gap-4 p-5 sm:grid-cols-4"><Metric icon={Sparkles} label="上下文候选" value={latestAssessment.context_manifest.candidates.length} /><Metric icon={CheckCircle2} label="入选证据" value={latestAssessment.context_manifest.selected_evidence_refs.length} /><Metric icon={FileText} label="实际 Prompt Token" value={latestAssessment.context_manifest.actual_prompt_tokens ?? latestAssessment.context_manifest.used_tokens} /><Metric icon={XCircle} label="注入过滤" value={latestAssessment.context_manifest.prompt_injection_filtered_count} /><p className="sm:col-span-4 text-xs text-muted-foreground">{latestAssessment.interview_session_id ? "面试后证据增强" : "面试前材料诊断"} · {latestAssessment.context_manifest.algorithm_version} · Embedding {latestAssessment.context_manifest.embedding_provider ?? "未记录"}</p><details className="sm:col-span-4"><summary className="cursor-pointer text-sm font-medium">查看入选证据与选择原因</summary><ul className="mt-3 space-y-2 text-xs text-muted-foreground">{latestAssessment.context_manifest.candidates.filter((item) => item.selected).map((item) => <li className="rounded-lg border p-3" key={item.evidence_ref}><strong>{item.source_type} · {item.source_id}</strong><p className="mt-1">{item.rendered_content}</p><p className="mt-1">{item.selection_reason}</p></li>)}</ul></details></CardContent></Card>}
+        {acceptedClaimIds.length > 0 && <Card className="border-primary/25"><CardContent className="space-y-4 p-5"><div className="flex flex-wrap items-center justify-between gap-4"><div><strong>已接受 {acceptedClaimIds.length} 条改写</strong><p className="mt-1 text-sm text-muted-foreground">先检查统一变更清单，再一次确认生成一个子版本。</p></div><Button variant="outline" disabled={applyBatch.isPending} onClick={() => setShowBatchPreview((value) => !value)}><GitBranch className="mr-2 h-4 w-4" />{showBatchPreview ? "收起变更预览" : "预览全部变更"}</Button></div>{showBatchPreview && <div className="space-y-3 border-t pt-4"><h3 className="font-medium">最终版本变更清单</h3>{acceptedClaimIds.map((claimId) => { const claim = latestAssessment.claims.find((item) => item.claim_id === claimId); const decision = latestAssessment.rewrite_decisions.find((item) => item.claim_id === claimId); if (!claim || !decision) return null; return <div className="grid gap-2 rounded-xl border p-3 text-sm sm:grid-cols-2" key={claimId}><div><span className="text-xs text-muted-foreground">原文</span><p className="mt-1">{claim.claim_text}</p></div><div><span className="text-xs text-muted-foreground">确认稿</span><p className="mt-1 text-primary">{decision.rewrite_text}</p></div></div>; })}<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-accent/40 p-4"><p className="text-sm">父版本保持不变；本次只创建 1 个可追溯子版本。</p><Button disabled={applyBatch.isPending} onClick={() => applyBatch.mutate({ assessmentId: latestAssessment.assessment_id, claimIds: acceptedClaimIds }, { onSuccess: () => setShowBatchPreview(false) })}>{applyBatch.isPending ? "正在生成…" : "确认并生成新版本"}</Button></div></div>}</CardContent></Card>}
         {latestAssessment.claims.map((claim) => {
           const decision = decisionByClaim.get(claim.claim_id);
-          return <RewriteCard key={claim.claim_id} claim={claim} decision={decision} draft={drafts[claim.claim_id] ?? claim.suggested_rewrite ?? ""} onDraft={(value) => setDrafts((current) => ({ ...current, [claim.claim_id]: value }))} onAccept={() => decideRewrite.mutate({ assessmentId: latestAssessment.assessment_id, claimId: claim.claim_id, status: "accepted", rewriteText: drafts[claim.claim_id] ?? claim.suggested_rewrite ?? "" })} onReject={() => decideRewrite.mutate({ assessmentId: latestAssessment.assessment_id, claimId: claim.claim_id, status: "rejected" })} onApply={() => applyRewrite.mutate({ assessmentId: latestAssessment.assessment_id, claimId: claim.claim_id })} busy={decideRewrite.isPending || applyRewrite.isPending || applyBatch.isPending} />;
+          return <RewriteCard key={claim.claim_id} claim={claim} decision={decision} draft={drafts[claim.claim_id] ?? claim.suggested_rewrite ?? ""} onDraft={(value) => setDrafts((current) => ({ ...current, [claim.claim_id]: value }))} onAccept={() => decideRewrite.mutate({ assessmentId: latestAssessment.assessment_id, claimId: claim.claim_id, status: "accepted", rewriteText: drafts[claim.claim_id] ?? claim.suggested_rewrite ?? "" })} onReject={() => decideRewrite.mutate({ assessmentId: latestAssessment.assessment_id, claimId: claim.claim_id, status: "rejected" })} busy={decideRewrite.isPending || applyBatch.isPending} />;
         })}
         <p className="text-xs text-muted-foreground">{latestAssessment.limitations.join(" · ")}</p>
       </div>}
@@ -158,10 +167,10 @@ function AssetList({ loading, error, empty, children }: { loading: boolean; erro
   return <div className="mt-5 space-y-2">{loading && <p role="status" className="text-sm text-muted-foreground">正在加载…</p>}{error && <p className="text-sm text-destructive">加载失败，请刷新重试。</p>}{!loading && !error && !children && <p className="text-sm text-muted-foreground">{empty}</p>}{children}</div>;
 }
 
-function RewriteCard({ claim, decision, draft, onDraft, onAccept, onReject, onApply, busy }: { claim: ResumeClaimFinding; decision?: { status: "accepted" | "rejected" | "applied"; rewrite_text: string | null }; draft: string; onDraft: (value: string) => void; onAccept: () => void; onReject: () => void; onApply: () => void; busy: boolean }): JSX.Element {
+function RewriteCard({ claim, decision, draft, onDraft, onAccept, onReject, busy }: { claim: ResumeClaimFinding; decision?: { status: "accepted" | "rejected" | "applied"; rewrite_text: string | null }; draft: string; onDraft: (value: string) => void; onAccept: () => void; onReject: () => void; busy: boolean }): JSX.Element {
   return <Card className={decision?.status === "applied" ? "border-emerald-300" : ""}><CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
     <div className="space-y-3"><div className="flex flex-wrap items-center gap-2"><Badge variant={claim.verdict === "supported" ? "secondary" : "outline"}>{VERDICT_LABEL[claim.verdict] ?? claim.verdict}</Badge>{decision && <Badge>{decision.status === "applied" ? "已生成新版本" : decision.status === "accepted" ? "已接受" : "已拒绝"}</Badge>}</div><div><p className="text-xs text-muted-foreground">原简历主张</p><p className="mt-1 font-medium leading-6">{claim.claim_text}</p></div><p className="text-sm leading-6 text-muted-foreground">{claim.rationale}</p><div className="flex gap-4 text-xs text-muted-foreground"><span>岗位要求 {claim.requirement_ids.length}</span><span>面试证据 {claim.evidence_turn_ids.length}</span></div></div>
-    <div className="rounded-2xl bg-accent/45 p-4">{claim.suggested_rewrite ? <><div className="mb-2 flex items-center gap-2 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" />建议改写</div><Textarea aria-label={`改写 ${claim.claim_id}`} className="min-h-28 bg-background" value={decision?.rewrite_text ?? draft} disabled={Boolean(decision)} onChange={(event) => onDraft(event.target.value)} />{!decision && <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" disabled={busy || draft.trim().length === 0} onClick={onAccept}><CheckCircle2 className="mr-1.5 h-4 w-4" />接受并锁定</Button><Button size="sm" variant="outline" disabled={busy} onClick={onReject}><XCircle className="mr-1.5 h-4 w-4" />不采用</Button></div>}{decision?.status === "accepted" && <Button className="mt-3" size="sm" disabled={busy} onClick={onApply}><GitBranch className="mr-1.5 h-4 w-4" />生成新简历版本</Button>}{decision?.status === "applied" && <p className="mt-3 text-sm font-medium text-emerald-700">已保留原版本，并创建可回溯的新版本。</p>}{decision?.status === "rejected" && <p className="mt-3 text-sm text-muted-foreground">已记录你的选择，不会修改简历。</p>}</> : <div className="flex min-h-28 items-center text-sm text-muted-foreground"><CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" />当前主张已有证据支持，无需改写。</div>}</div>
+    <div className="rounded-2xl bg-accent/45 p-4">{claim.suggested_rewrite ? <><div className="mb-2 flex items-center gap-2 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" />建议改写</div><Textarea aria-label={`改写 ${claim.claim_id}`} className="min-h-28 bg-background" value={decision?.rewrite_text ?? draft} disabled={Boolean(decision)} onChange={(event) => onDraft(event.target.value)} />{!decision && <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" disabled={busy || draft.trim().length === 0} onClick={onAccept}><CheckCircle2 className="mr-1.5 h-4 w-4" />接受并锁定</Button><Button size="sm" variant="outline" disabled={busy} onClick={onReject}><XCircle className="mr-1.5 h-4 w-4" />不采用</Button></div>}{decision?.status === "accepted" && <p className="mt-3 text-sm text-primary">已加入变更清单，请在页面上方统一预览并生成版本。</p>}{decision?.status === "applied" && <p className="mt-3 text-sm font-medium text-emerald-700">已保留原版本，并创建可回溯的新版本。</p>}{decision?.status === "rejected" && <p className="mt-3 text-sm text-muted-foreground">已记录你的选择，不会修改简历。</p>}</> : <div className="flex min-h-28 items-center text-sm text-muted-foreground"><CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" />当前主张已有证据支持，无需改写。</div>}</div>
   </CardContent></Card>;
 }
 

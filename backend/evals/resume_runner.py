@@ -18,7 +18,9 @@ from app.agent.resume_optimization_nodes import (
 from app.schemas.resumes import (
     JobRequirement,
     ResumeClaim,
+    ResumeClaimToolEvidence,
     ResumeOptimizationInputSnapshot,
+    ResumeToolEvidenceBundle,
 )
 
 
@@ -53,10 +55,11 @@ def run_resume_evaluation(*, persist: bool = True) -> dict[str, object]:
     ]
     results: list[dict[str, object]] = []
     for case_id, snapshot in cases:
-        candidate = deterministic_candidate(snapshot)
+        tool_evidence = _tool_evidence(case_id, snapshot)
+        candidate = deterministic_candidate(snapshot, tool_evidence)
         valid = True
         try:
-            validate_faithfulness(candidate, snapshot)
+            validate_faithfulness(candidate, snapshot, tool_evidence)
         except StructuredOutputError:
             valid = False
         selected = snapshot.context_manifest.selected_evidence_refs
@@ -70,7 +73,7 @@ def run_resume_evaluation(*, persist: bool = True) -> dict[str, object]:
         }
         evidence_ok = all(item.evidence_turn_ids for item in candidate.claims)
         determinism_ok = (
-            deterministic_candidate(snapshot).model_dump(mode="json")
+            deterministic_candidate(snapshot, tool_evidence).model_dump(mode="json")
             == candidate.model_dump(mode="json")
         )
         passed = all((valid, injection_ok, coverage_ok, evidence_ok, determinism_ok))
@@ -104,6 +107,9 @@ def run_resume_evaluation(*, persist: bool = True) -> dict[str, object]:
         "experiment_id": f"resume-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
         "dataset_id": "resume-agent-v1",
         "provider": "deterministic-domain-eval",
+        "diagnostic_only": True,
+        "production_gate": False,
+        "persistence": "legacy_file_artifact",
         "case_count": len(results),
         "passed_cases": passed_count,
         "failed_cases": len(results) - passed_count,
@@ -170,9 +176,40 @@ def _case(
         jd_text=jd_text,
         jd_hash=sha256(jd_text.encode()).hexdigest(),
         interview_session_id=UUID(int=3),
+        assessment_mode="evidence_enhanced",
         claims=[claim],
         requirements=[requirement],
         evidence_turns=turns,
         context_manifest=manifest,
         requirement_matches=matches,
     )
+
+
+def _tool_evidence(
+    case_id: str,
+    snapshot: ResumeOptimizationInputSnapshot,
+) -> ResumeToolEvidenceBundle:
+    turn_id = UUID(str(snapshot.evidence_turns[0]["turn_id"]))
+    call_id = UUID(int=int(sha256(f"tool:{case_id}".encode()).hexdigest()[:32], 16))
+    claims = [
+        ResumeClaimToolEvidence(
+            claim_id=claim.claim_id,
+            gap="covered",
+            coverage_score=0.8,
+            requirement_ids=[snapshot.requirements[0].requirement_id],
+            evidence_turn_ids=[turn_id],
+            explicit_conflict_turn_ids=(
+                [turn_id] if case_id in {"sparse"} else []
+            ),
+            tool_call_ids=[call_id],
+        )
+        for claim in snapshot.claims
+    ]
+    raw = {
+        "claims": [item.model_dump(mode="json") for item in claims],
+        "unavailable_claim_ids": [],
+    }
+    bundle_hash = sha256(
+        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return ResumeToolEvidenceBundle(**raw, bundle_hash=bundle_hash)

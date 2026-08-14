@@ -114,10 +114,10 @@ class ResumeAssessment(Base):
     job_target_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("job_targets.id"), nullable=False
     )
-    interview_session_id: Mapped[UUID] = mapped_column(
+    interview_session_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("interview_sessions.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     source_run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),

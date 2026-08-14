@@ -191,8 +191,9 @@ def get_memory_service(
 def get_dev_trace_service(
     session: Annotated[AsyncSession, Depends(get_db_session, use_cache=False)],
     executor: Annotated[AgentRunExecutor, Depends(get_agent_run_executor)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> DevTraceService:
-    return DevTraceService(session, executor)
+    return DevTraceService(session, executor, settings)
 
 
 async def get_current_user(

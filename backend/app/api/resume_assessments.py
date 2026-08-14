@@ -43,7 +43,12 @@ async def optimize_resume_with_agent(
     )
 
 
-@router.post("", status_code=HTTPStatus.CREATED, response_model=ResumeAssessmentResponse)
+@router.post(
+    "",
+    status_code=HTTPStatus.CREATED,
+    response_model=ResumeAssessmentResponse,
+    deprecated=True,
+)
 async def create_resume_assessment(
     payload: ResumeAssessmentCreateRequest,
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
@@ -94,6 +99,7 @@ async def decide_resume_rewrite(
 @router.post(
     "/{assessment_id}/claims/{claim_id}/apply",
     response_model=ResumeRewriteApplyResponse,
+    deprecated=True,
 )
 async def apply_resume_rewrite(
     assessment_id: UUID,
@@ -109,8 +115,26 @@ async def apply_resume_rewrite(
 @router.post(
     "/{assessment_id}/rewrites/apply",
     response_model=ResumeRewriteBatchApplyResponse,
+    deprecated=True,
 )
 async def apply_resume_rewrites_batch(
+    assessment_id: UUID,
+    payload: ResumeRewriteBatchApplyRequest,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    service: Annotated[ResumeAssessmentService, Depends(get_resume_assessment_service)],
+) -> ResumeRewriteBatchApplyResponse:
+    return await service.apply_rewrites_batch(
+        assessment_id=assessment_id,
+        user_id=current_user.id,
+        payload=payload,
+    )
+
+
+@router.post(
+    "/{assessment_id}/rewrites/apply-batch",
+    response_model=ResumeRewriteBatchApplyResponse,
+)
+async def apply_resume_rewrites_batch_r2(
     assessment_id: UUID,
     payload: ResumeRewriteBatchApplyRequest,
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],

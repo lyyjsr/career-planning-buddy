@@ -251,8 +251,8 @@ class AgentRunExecutor:
                 )
                 return
             if run.run_kind == "resume_optimization":
-                if run.interview_session_id is None:
-                    raise RuntimeError("Resume optimization Run is missing its Session")
+                if run.resume_version_id is None or run.job_target_id is None:
+                    raise RuntimeError("Resume optimization Run is missing frozen materials")
                 frozen = None
                 if run.input_snapshot_json is not None:
                     from app.schemas.resumes import ResumeOptimizationInputSnapshot
@@ -267,13 +267,20 @@ class AgentRunExecutor:
                     node_runner=runner,
                     finalizer=finalizer,
                     budget=budget,
+                    embedding_provider=self._embedding_provider,
                 ).execute(
                     {
                         "run_id": run.id,
                         "user_id": run.user_id,
                         "interview_session_id": run.interview_session_id,
+                        "resume_version_id": run.resume_version_id,
+                        "job_target_id": run.job_target_id,
+                        "attempt_count": run.attempt_count,
                         "replay_of_run_id": run.replay_of_run_id,
-                        "replay_fixture_only": config.replay_tool_mode == "fixture",
+                        "replay_tool_fixture_only": config.replay_tool_mode == "fixture",
+                        "replay_provider_fixture_only": (
+                            config.execution_kind == "exact_fixture_replay"
+                        ),
                         **({"input_snapshot": frozen} if frozen is not None else {}),
                     }
                 )

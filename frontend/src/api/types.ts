@@ -421,6 +421,10 @@ export interface ResumeClaimFinding {
   requirement_ids: string[];
   evidence_turn_ids: string[];
   suggested_rewrite: string | null;
+  consumed_tool_call_ids: string[];
+  source_start: number | null;
+  source_end: number | null;
+  source_hash: string | null;
 }
 
 export interface ResumeRewriteDecisionResponse {
@@ -438,7 +442,7 @@ export interface ResumeAssessmentResponse {
   assessment_id: string;
   resume_version_id: string;
   job_target_id: string;
-  interview_session_id: string;
+  interview_session_id: string | null;
   claims: ResumeClaimFinding[];
   rewrite_decisions: ResumeRewriteDecisionResponse[];
   source_run_id: string | null;
@@ -446,9 +450,12 @@ export interface ResumeAssessmentResponse {
     algorithm_version: string;
     token_budget: number;
     used_tokens: number;
+    actual_prompt_tokens: number | null;
+    rendered_context_hash: string | null;
+    embedding_provider: string | null;
     selected_evidence_refs: string[];
     prompt_injection_filtered_count: number;
-    candidates: Array<{ selected: boolean; source_type: string; selection_reason: string | null; exclusion_reason: string | null }>;
+    candidates: Array<{ selected: boolean; source_type: string; source_id: string; evidence_ref: string; rendered_content: string | null; selection_reason: string | null; exclusion_reason: string | null }>;
   } | null;
   limitations: string[];
   created_at: string;

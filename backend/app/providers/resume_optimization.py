@@ -10,16 +10,17 @@ from app.providers.llm_client import LLMClient
 from app.providers.llm_contracts import LLMRequest
 from app.providers.llm_profiles import model_for_operation
 from app.schemas.agent_runs import ProviderUsage
-from app.schemas.resumes import ResumeOptimizationInputSnapshot
+from app.schemas.resumes import ResumeOptimizationInputSnapshot, ResumeToolEvidenceBundle
 
 
 class ResumeOptimizationProvider(Protocol):
     async def generate(
-        self, snapshot: ResumeOptimizationInputSnapshot
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle
     ) -> Mapping[str, object]: ...
 
     async def repair(
-        self, snapshot: ResumeOptimizationInputSnapshot, raw: object, error: str
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle,
+        raw: object, error: str
     ) -> Mapping[str, object]: ...
 
 
@@ -30,16 +31,18 @@ class LLMResumeOptimizationProvider:
         self._max_output_tokens = settings.agent_max_output_tokens_per_call
 
     async def generate(
-        self, snapshot: ResumeOptimizationInputSnapshot
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle
     ) -> Mapping[str, object]:
-        return await self._complete(snapshot, operation="resume_optimization")
+        return await self._complete(snapshot, tool_evidence, operation="resume_optimization")
 
     async def repair(
-        self, snapshot: ResumeOptimizationInputSnapshot, raw: object, error: str
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle,
+        raw: object, error: str
     ) -> Mapping[str, object]:
         del raw
         return await self._complete(
             snapshot,
+            tool_evidence,
             operation="resume_optimization_repair",
             extra=(
                 f"Previous candidate failed validation: {error}. "
@@ -50,11 +53,12 @@ class LLMResumeOptimizationProvider:
     async def _complete(
         self,
         snapshot: ResumeOptimizationInputSnapshot,
+        tool_evidence: ResumeToolEvidenceBundle,
         *,
         operation: str,
         extra: str | None = None,
     ) -> Mapping[str, object]:
-        messages = resume_optimization_messages(snapshot)
+        messages = resume_optimization_messages(snapshot, tool_evidence)
         if extra:
             messages.append(type(messages[0])(role="user", content=extra))
         response = await self._client.complete(
@@ -92,22 +96,23 @@ class MockResumeOptimizationProvider:
     model_id = "mock-resume-optimizer-v1"
 
     async def generate(
-        self, snapshot: ResumeOptimizationInputSnapshot
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle
     ) -> Mapping[str, object]:
         from app.agent.resume_optimization_nodes import deterministic_candidate
 
         return {
-            **deterministic_candidate(snapshot).model_dump(mode="json"),
+            **deterministic_candidate(snapshot, tool_evidence).model_dump(mode="json"),
             "usage": ProviderUsage(
                 model_id=self.model_id, tokens_in=180, tokens_out=160, latency_ms=1
             ).model_dump(mode="json"),
         }
 
     async def repair(
-        self, snapshot: ResumeOptimizationInputSnapshot, raw: object, error: str
+        self, snapshot: ResumeOptimizationInputSnapshot, tool_evidence: ResumeToolEvidenceBundle,
+        raw: object, error: str
     ) -> Mapping[str, object]:
         del raw, error
-        return await self.generate(snapshot)
+        return await self.generate(snapshot, tool_evidence)
 
 
 def build_resume_optimization_provider(

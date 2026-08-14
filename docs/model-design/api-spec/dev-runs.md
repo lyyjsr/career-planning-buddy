@@ -22,35 +22,41 @@
 
 ## POST /api/v1/dev/runs/{run_id}/replay
 
-PR-0 兼容语义：当前端点只创建 `legacy_trace_clone`，不会重新执行 Agent。响应包含：
+R2 语义：对 `resume_optimization` Run 创建独立 Replay Run，使用冻结 input/runtime
+bundle 重新执行 Graph。默认使用 Tool 与 Provider fixture；缺少任一必需 fixture 时失败，绝不
+静默访问网络。其他 Run kind 在完成相同契约前返回 `REPLAY_KIND_UNSUPPORTED`。
+
+Stage 5 客户端仍可提交 `{"tool_mode":"fixture|live"}`，但该请求只执行明确标记为
+`legacy_trace_clone` 的兼容操作。新客户端使用 `mode=exact_fixture_replay` 或
+`mode=candidate_comparison`；两者执行真实 Agent 图，不把 Trace 克隆伪装成 Replay。
 
 ```json
 {
   "run_id": "...",
   "replay_of_run_id": "...",
-  "status": "completed",
+  "status": "pending",
   "deterministic": true,
-  "execution_kind": "legacy_trace_clone"
+  "execution_kind": "exact_fixture_replay"
 }
 ```
 
-请求体中的 V2 字段和下列真实 Replay 行为是目标契约；在重执行引擎交付前不得据此声称
-端点已经完成 Replay。
-
 ```json
 {
-  "target_model": null,
-  "target_prompt_versions": null,
-  "tool_mode": "fixture",
-  "quality_reviewer_mode": "offline_shadow"
+  "mode": "exact_fixture_replay",
+  "target_runtime_bundle_id": null
 }
 ```
 
 字段：
 
-- `tool_mode=fixture`：默认；缺 fixture 返回 REPLAY_FIXTURE_MISSING；
-- `tool_mode=live`：显式真实访问 Provider，结果标记 non_deterministic；
-- target model/prompt 为空时使用原 config snapshot；
+- `exact_fixture_replay`：使用源 Run 的 Tool/Provider fixture 与 runtime bundle；
+- `candidate_comparison`：冻结源 input 和 Tool fixture，调用当前服务端 Provider；目标 bundle
+  必须是服务端当前生效的 Runtime Bundle，响应必须标记 `deterministic=false`；
 - Replay 使用原 input snapshot，不读取当前用户画像；
 - 原 Run 必须处于终态；
 - 新 Run 写 replay_of_run_id，不修改原 Plan 和原 Trace。
+
+## GET /api/v1/dev/runs/{run_id}/replay-diff
+
+`run_id` 必须是已完成的 Replay Run。响应比较业务语义而非数据库生成 ID，至少包含 Context、
+Tool、Claim、Validation、Usage 五类 diff，并返回 `semantic_equal` 与 comparison version。

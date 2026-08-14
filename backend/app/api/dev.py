@@ -65,7 +65,13 @@ async def replay_run(
     service: Annotated[DevTraceService, Depends(get_dev_trace_service)],
     _dev: Annotated[AuthenticatedUser, Depends(require_dev)],
 ) -> ReplayResponse:
-    return await service.replay_v2(run_id, tool_mode=payload.tool_mode)
+    if payload.tool_mode is not None:
+        return await service.legacy_trace_clone(run_id, tool_mode=payload.tool_mode)
+    return await service.replay_v2(
+        run_id,
+        mode=payload.mode,
+        target_runtime_bundle_id=payload.target_runtime_bundle_id,
+    )
 
 
 @router.get("/runs/{run_id}/replay-diff", response_model=ReplayDiff)
@@ -92,8 +98,8 @@ async def list_eval_datasets(
                 dataset_id="resume-agent-v1",
                 case_count=10,
                 description=(
-                    "Resume context, faithfulness, prompt-injection, "
-                    "sparse-evidence, and determinism cases"
+                    "Diagnostic-only resume context, faithfulness, prompt-injection, "
+                    "sparse-evidence, and determinism cases; not an Eval V2 release gate"
                 ),
             ),
         ]
