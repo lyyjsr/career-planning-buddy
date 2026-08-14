@@ -19,6 +19,9 @@ from app.repositories.goal_briefs import GoalBriefRepository
 from app.repositories.reviews import ReviewRepository
 from app.schemas.agent_runs import AgentRunResponse
 from app.schemas.auth import (
+    AuthTokenResponse,
+    EmailLoginRequest,
+    EmailRegisterRequest,
     GuestLoginRequest,
     GuestLoginResponse,
     MeResponse,
@@ -36,6 +39,14 @@ from app.services.profiles import ProfileService
 from app.services.reviews import ReviewService
 
 router = APIRouter(tags=["auth"])
+
+
+def _token_response(user: object, access_token: str, expires_in: int) -> AuthTokenResponse:
+    return AuthTokenResponse(
+        access_token=access_token,
+        expires_in=expires_in,
+        user=UserSummary.model_validate(user, from_attributes=True),
+    )
 
 
 @router.post(
@@ -59,6 +70,43 @@ async def guest_login(
         expires_in=result.expires_in,
         user=UserSummary.model_validate(result.user, from_attributes=True),
     )
+
+
+@router.post(
+    "/auth/register",
+    response_model=AuthTokenResponse,
+    status_code=201,
+    responses={
+        409: {"model": ErrorResponse, "description": "Email already registered"},
+        422: {"model": ErrorResponse, "description": "Invalid request"},
+    },
+)
+async def register_email(
+    payload: EmailRegisterRequest,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> AuthTokenResponse:
+    result = await service.register_email(
+        email=str(payload.email),
+        password=payload.password,
+        display_name=payload.display_name,
+    )
+    return _token_response(result.user, result.access_token, result.expires_in)
+
+
+@router.post(
+    "/auth/login",
+    response_model=AuthTokenResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Invalid credentials"},
+        422: {"model": ErrorResponse, "description": "Invalid request"},
+    },
+)
+async def login_email(
+    payload: EmailLoginRequest,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> AuthTokenResponse:
+    result = await service.login_email(email=str(payload.email), password=payload.password)
+    return _token_response(result.user, result.access_token, result.expires_in)
 
 
 @router.get(
@@ -127,6 +175,7 @@ async def get_me(
     return MeResponse(
         user=UserSummary(
             id=current_user.id,
+            email=current_user.email,
             display_name=current_user.display_name,
             role="dev" if current_user.role == "dev" else "user",
         ),

@@ -24,6 +24,43 @@ export function useGuestLogin() {
   });
 }
 
+interface EmailLoginInput {
+  email: string;
+  password: string;
+}
+
+interface EmailRegisterInput extends EmailLoginInput {
+  display_name?: string | null;
+}
+
+export function useEmailLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: EmailLoginInput) => apiRequest<GuestLoginResponse>("/api/v1/auth/login", {
+      method: "POST",
+      body,
+    }),
+    onSuccess: (data) => {
+      setAuthToken(data.access_token);
+      qc.removeQueries({ queryKey: ["me"], exact: true });
+    },
+  });
+}
+
+export function useEmailRegister() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: EmailRegisterInput) => apiRequest<GuestLoginResponse>("/api/v1/auth/register", {
+      method: "POST",
+      body,
+    }),
+    onSuccess: (data) => {
+      setAuthToken(data.access_token);
+      qc.removeQueries({ queryKey: ["me"], exact: true });
+    },
+  });
+}
+
 async function loginGuestOnce(): Promise<GuestLoginResponse> {
   if (guestLoginInFlight !== null) return guestLoginInFlight;
   const request = apiRequest<GuestLoginResponse>("/api/v1/auth/guest", {
@@ -57,4 +94,12 @@ export function useDeleteMe() {
       qc.clear();
     },
   });
+}
+
+export function useLogout() {
+  const qc = useQueryClient();
+  return () => {
+    setAuthToken(null);
+    qc.clear();
+  };
 }

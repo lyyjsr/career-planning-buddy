@@ -16,6 +16,10 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("auth_type IN ('guest', 'email', 'github')", name="ck_users_auth_type"),
+        CheckConstraint(
+            "(auth_type != 'email') OR (email IS NOT NULL AND password_hash IS NOT NULL)",
+            name="ck_users_email_auth_has_password",
+        ),
         CheckConstraint("role IN ('user', 'dev')", name="ck_users_role"),
         Index(
             "uq_users_guest_device_hash",
@@ -26,6 +30,12 @@ class User(Base):
         Index(
             "uq_users_email",
             "email",
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
+        Index(
+            "uq_users_email_lower",
+            text("lower(email)"),
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
         ),
@@ -43,6 +53,7 @@ class User(Base):
     )
     guest_device_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     role: Mapped[str] = mapped_column(
         String(16),

@@ -1,8 +1,11 @@
-"""JWT creation and validation for Guest authentication."""
+"""JWT creation, validation and password hashing for application authentication."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from hashlib import pbkdf2_hmac
+from hmac import compare_digest
 from http import HTTPStatus
+from os import urandom
 from uuid import UUID
 
 import jwt
@@ -17,6 +20,7 @@ class AuthenticatedUser:
     """Trusted identity derived from a verified JWT and active database user."""
 
     id: UUID
+    email: str | None
     display_name: str | None
     role: str
 
@@ -74,3 +78,42 @@ class TokenService:
                 status_code=HTTPStatus.UNAUTHORIZED,
             ) from exc
         return user_id, role
+
+
+class PasswordService:
+    """Hash and verify passwords using stdlib PBKDF2-HMAC-SHA256."""
+
+    _algorithm = "pbkdf2_sha256"
+    _iterations = 210_000
+    _salt_bytes = 16
+
+    def hash(self, password: str) -> str:
+        salt = urandom(self._salt_bytes)
+        digest = pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            self._iterations,
+        )
+        return f"{self._algorithm}${self._iterations}${salt.hex()}${digest.hex()}"
+
+    def verify(self, password: str, encoded: str | None) -> bool:
+        if encoded is None:
+            return False
+        try:
+            algorithm, iterations_raw, salt_hex, expected_hex = encoded.split("$", 3)
+            if algorithm != self._algorithm:
+                return False
+            iterations = int(iterations_raw)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(expected_hex)
+        except (TypeError, ValueError):
+            return False
+
+        actual = pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return compare_digest(actual, expected)

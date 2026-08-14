@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import product_today
+from app.models.user import User
 from app.models.user_profile import UserProfile
 
 
@@ -55,6 +56,73 @@ async def test_guest_login_creates_then_reuses_device(api_client: AsyncClient) -
     assert first_user_id == second_user_id
     assert first_token
     assert second_token
+
+
+@pytest.mark.asyncio
+async def test_email_register_login_reuses_same_account_and_profile(
+    api_client: AsyncClient,
+) -> None:
+    registered = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "AnQi@example.com",
+            "password": "correct-password",
+            "display_name": "AnQi",
+        },
+    )
+    token = registered.json()["access_token"]
+    user_id = registered.json()["user"]["id"]
+
+    await api_client.put(
+        "/api/v1/profile",
+        json=profile_body(90),
+        headers={**bearer(token), "Idempotency-Key": "email-profile-create"},
+    )
+    logged_in = await api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "anqi@example.com", "password": "correct-password"},
+    )
+    restored = await api_client.get(
+        "/api/v1/me",
+        headers=bearer(logged_in.json()["access_token"]),
+    )
+
+    assert registered.status_code == HTTPStatus.CREATED
+    assert registered.json()["user"]["email"] == "anqi@example.com"
+    assert logged_in.status_code == HTTPStatus.OK
+    assert logged_in.json()["user"]["id"] == user_id
+    assert restored.status_code == HTTPStatus.OK
+    assert restored.json()["user"]["email"] == "anqi@example.com"
+    assert restored.json()["profile"]["time_budget_minutes"] == 90
+
+
+@pytest.mark.asyncio
+async def test_email_auth_rejects_duplicate_and_wrong_password(
+    api_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    created = await api_client.post(
+        "/api/v1/auth/register",
+        json={"email": "owner@example.com", "password": "correct-password"},
+    )
+    duplicate = await api_client.post(
+        "/api/v1/auth/register",
+        json={"email": "OWNER@example.com", "password": "another-password"},
+    )
+    wrong_password = await api_client.post(
+        "/api/v1/auth/login",
+        json={"email": "owner@example.com", "password": "wrong-password"},
+    )
+    user = await db_session.scalar(select(User).where(User.email == "owner@example.com"))
+
+    assert created.status_code == HTTPStatus.CREATED
+    assert duplicate.status_code == HTTPStatus.CONFLICT
+    assert duplicate.json()["error"]["code"] == "AUTH_EMAIL_EXISTS"
+    assert wrong_password.status_code == HTTPStatus.UNAUTHORIZED
+    assert wrong_password.json()["error"]["code"] == "AUTH_INVALID_CREDENTIALS"
+    assert user is not None
+    assert user.password_hash is not None
+    assert "correct-password" not in user.password_hash
 
 
 @pytest.mark.asyncio
