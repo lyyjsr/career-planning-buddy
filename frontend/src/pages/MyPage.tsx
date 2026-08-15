@@ -1,6 +1,6 @@
-import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, Network, Settings2, ShieldCheck, Target } from "lucide-react";
+import { Brain, ChartNoAxesCombined, ChevronRight, Clock3, Code2, LogOut, Mail, Network, Settings2, ShieldCheck, Target } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useDeleteMe, useMe } from "@/api/auth";
+import { useDeleteMe, useLogout, useMe } from "@/api/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,9 @@ function MenuLink({
 export function MyPage(): JSX.Element {
   const me = useMe();
   const deleteMe = useDeleteMe();
+  const logout = useLogout();
   const profile = me.data?.profile;
+  const accountLabel = me.data?.user.email ?? "访客账号";
 
   if (profile === null || profile === undefined) {
     return <div className="text-sm text-muted-foreground">正在加载你的资料…</div>;
@@ -49,12 +51,30 @@ export function MyPage(): JSX.Element {
         <p className="text-sm font-medium text-primary">我的搭子设置</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">让计划更懂你的节奏</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          目标、时间和记忆都由你控制。当前是访客身份，数据只可在这个浏览器中恢复。
+          目标、时间和记忆都由你控制。当前账号下的材料、面试记录、计划和长期记忆会保持一致。
         </p>
       </header>
 
       <Card className="overflow-hidden border-primary/15 bg-gradient-to-br from-card to-accent/30">
         <CardContent className="space-y-5 p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Mail className="h-4 w-4 text-primary" />
+              <span>{accountLabel}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                logout();
+                window.location.assign("/login");
+              }}
+            >
+              <LogOut className="h-4 w-4" />
+              退出登录
+            </Button>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{GOAL_LABELS[profile.goal_type]}</Badge>
             <Badge variant="outline">{STAGE_LABELS[profile.stage]}</Badge>

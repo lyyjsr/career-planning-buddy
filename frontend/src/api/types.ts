@@ -582,6 +582,7 @@ export interface GoalBriefConfirmResponse {
 
 export interface UserSummary {
   id: string;
+  email: string | null;
   display_name: string | null;
   role: "user" | "dev";
 }

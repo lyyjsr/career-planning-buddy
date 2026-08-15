@@ -227,6 +227,7 @@ async def get_current_user(
         )
     return AuthenticatedUser(
         id=user.id,
+        email=user.email,
         display_name=user.display_name,
         role=user.role,
     )

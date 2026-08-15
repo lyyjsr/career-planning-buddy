@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,12 @@ class UserRepository:
     async def get_by_guest_device_hash(self, device_hash: str) -> User | None:
         result = await self._session.execute(
             select(User).where(User.guest_device_hash == device_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_email(self, email: str) -> User | None:
+        result = await self._session.execute(
+            select(User).where(func.lower(User.email) == email.lower())
         )
         return result.scalar_one_or_none()
 
@@ -50,6 +56,23 @@ class UserRepository:
         if existing_user is None:
             raise RuntimeError("guest device conflict did not resolve to a user")
         return existing_user, False
+
+    async def create_email_user(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        display_name: str | None,
+    ) -> User:
+        user = User(
+            auth_type="email",
+            email=email.lower(),
+            password_hash=password_hash,
+            display_name=display_name,
+        )
+        self._session.add(user)
+        await self._session.flush()
+        return user
 
     async def delete(self, user: User) -> None:
         await self._session.delete(user)

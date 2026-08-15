@@ -19,10 +19,34 @@ class GuestLoginRequest(StrictModel):
     device_id: str | None = Field(default=None, min_length=16, max_length=128)
 
 
+class EmailRegisterRequest(StrictModel):
+    """Create a stable email/password account."""
+
+    email: str = Field(
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class EmailLoginRequest(StrictModel):
+    """Authenticate an existing email/password account."""
+
+    email: str = Field(
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=8, max_length=128)
+
+
 class UserSummary(StrictModel):
     """Public user fields safe for client identity restoration."""
 
     id: UUID
+    email: str | None = None
     display_name: str | None
     role: Literal["user", "dev"]
 
@@ -34,6 +58,10 @@ class GuestLoginResponse(StrictModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(ge=1)
     user: UserSummary
+
+
+class AuthTokenResponse(GuestLoginResponse):
+    """Bearer token returned by email registration/login."""
 
 
 class MeResponse(StrictModel):
