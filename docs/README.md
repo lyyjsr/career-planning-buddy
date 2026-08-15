@@ -1,57 +1,65 @@
-# Career Planning Buddy 文档索引
+# Career Planning Buddy 文档中心
 
-本目录是独立求职规划项目的实现依据，不依赖 ClawAgent。
+这里保存产品设计、当前架构、接口契约、实现任务和验证记录。首页只介绍如何理解与运行项目；需要继续阅读时，按下面的受众路径进入即可。
 
-## 最短阅读路径
+## 推荐阅读路径
 
-准备开始编码时，只需按顺序读：
+### 招聘方 / 项目评审
+
+1. [项目首页](../README.md)
+2. [当前系统全景](./architecture/current-system-overview.md)
+3. [V2 求职教练设计](./v2/career-coach-v2-design.md)
+4. [5 分钟演示脚本](./overview/demo-walkthrough.md)
+5. [生产就绪审查](./review/production-readiness-audit-2026-08-10.md)
+
+### 开发者
 
 1. [项目实现基线](./implementation/project-baseline.md)
-2. [阶段任务书](./implementation/README.md)
-3. [TDD 技术设计](./architecture/tdd.md)
-4. [API 与数据契约](./architecture/api-and-data-contracts.md)
-5. 当前功能对应的 [model-design](./model-design/README.md)
+2. [TDD 技术设计](./architecture/tdd.md)
+3. [API 与数据契约](./architecture/api-and-data-contracts.md)
+4. [Agent Runtime](./model-design/agent-runtime/README.md)
+5. [Agent Tool](./model-design/tools/README.md)
+6. 当前功能对应的 API、数据模型、状态机和节点 Spec
 
-## 目录职责
+### Eval / Agent 工程方向
 
-| 目录 | 用途 | 权威级别 |
+1. [Harness 总览](./model-design/harness/README.md)
+2. [Eval Harness V2](./implementation/eval-harness-v2.md)
+3. [运行与可靠性边界](./implementation/eval-operations-boundary.md)
+4. [LLM Provider 与调用观测](./architecture/llm-provider-and-telemetry.md)
+5. [Provider 配置与部署](./third-party-integration/provider-configuration.md)
+
+## 文档状态
+
+| 类别 | 目录 | 用途 |
 |---|---|---|
-| `implementation/` | 给编码助手直接执行的阶段任务与验收标准 | 最高 |
-| `architecture/` | 技术选型、分层、运行时和跨模块协议 | 高 |
-| `model-design/` | API、表、状态机、Agent 节点施工 spec | 高 |
-| `overview/` | 产品背景、用户旅程和验收目标 | 中 |
-| `standards/` | 编码、安全、测试和 Prompt 规范 | 中 |
-| `governance/` | 协作和交付流程 | 中 |
-| `third-party-integration/` | 外部模型、搜索和向量服务接入说明 | 中 |
-| `requirements/` | 某次需求的 clarify / plan / tasks 留痕 | 任务级 |
-| `design-input/` | 早期原始材料 | 只读归档 |
+| 当前事实 | `architecture/current-system-overview.md`、代码、迁移 | 描述当前已经存在的行为和限制 |
+| 产品设计 | `v2/`、`overview/` | 用户价值、信息架构、演示和产品决策 |
+| 实现契约 | `model-design/`、`standards/` | API、数据、状态机、Agent 节点和编码规范 |
+| 实施任务 | `implementation/` | 分阶段实现范围与验收标准 |
+| 工程治理 | `governance/` | 开发流程、审查和交付定义 |
+| 第三方接入 | `third-party-integration/` | LLM、Search、Embedding 等配置方式 |
+| 历史证据 | `review/`、`requirements/`、`design-input/` | 某一时间点的审查、需求和早期输入，不代表当前状态 |
 
-## 实现约束摘要
+文档与代码冲突时，以项目实现基线、当前系统全景、最新迁移和代码为准。带日期的 Review/Handoff 只证明对应提交和环境中的结果，不应被引用为持续有效的测试结论。
 
-- 独立 FastAPI 单体，不基于 ClawAgent；
-- 单核心 Agent + 受控节点，不做多 Agent；
-- PostgreSQL + pgvector，MVP 不用 Redis；
-- Provider 只保留 LLM、Search、Embedding 三类；
-- Codex 用于阅读规范、修改代码和执行测试；项目运行时模型由 Provider 配置决定；
-- Agent Run 使用数据库持久化事件 + SSE；
-- Agent Run 使用 PostgreSQL lease 接管；Eval/Pairwise 仍是单 Worker 有限能力；
-- 先跑通 Mock 纵切，再接真实模型。
+## 核心契约入口
 
-## 关键入口
-
-- [产品概览](./overview/product-overview.md)
-- [需求规格 SRS](./overview/srs.md)
-- [架构决策 ADR](./architecture/adr.md)
-- [技术设计 TDD](./architecture/tdd.md)
-- [API 与数据契约](./architecture/api-and-data-contracts.md)
+- [API 规范](./model-design/api-spec/README.md)
 - [数据模型](./model-design/data-models/README.md)
-- [API 端点](./model-design/api-spec/README.md)
-- [Agent Runtime](./model-design/agent-runtime/README.md)
+- [状态机](./model-design/state-machines/README.md)
 - [Agent 节点](./model-design/agent-nodes/README.md)
-- [Agent Tool](./model-design/tools/README.md)
-- [Provider 配置与部署](./third-party-integration/provider-configuration.md)
-- [生产就绪审查与演进边界](./review/production-readiness-audit-2026-08-10.md)
+- [前端 UI 规范](./model-design/ui-spec/README.md)
 - [端到端运行链路](./model-design/end-to-end-runtime-flow.md)
-- [Eval Harness 运行与可靠性边界](./implementation/eval-operations-boundary.md)
-- [2026-08-09 项目加固与面试复习](./review/job-search-project-review-2026-08-09.md)
-- [本轮审查报告](./review/revision-report.md)
+- [Prompt 标准](./standards/prompts/README.md)
+- [安全与合规](./standards/security-and-compliance.md)
+
+## 项目边界
+
+- 独立 FastAPI 单体 + React SPA，不基于 ClawAgent；
+- 单核心 Agent + 受控节点，不使用多 Agent 框架；
+- PostgreSQL + pgvector，不在 MVP 引入 Redis/Celery；
+- Runtime 模型访问统一经过 Provider Protocol；
+- Agent Run 事件持久化后才通过 SSE 推送；
+- 默认 Mock 模式可离线验证，真实 Provider 必须显式启用；
+- 当前为作品集 / Release Candidate，不宣称大规模生产验证。

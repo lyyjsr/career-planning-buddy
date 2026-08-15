@@ -57,7 +57,10 @@ def test_duplicate_claims_keep_distinct_exact_source_spans() -> None:
     assert len(items) == 2
     assert items[0]["claim_id"] != items[1]["claim_id"]
     for item in items:
-        start, end = int(item["source_start"]), int(item["source_end"])
+        start = item["source_start"]
+        end = item["source_end"]
+        assert isinstance(start, int)
+        assert isinstance(end, int)
         assert text[start:end] == item["text"]
         assert sha256(text[start:end].encode()).hexdigest() == item["source_hash"]
 

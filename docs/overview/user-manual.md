@@ -1,5 +1,7 @@
 # Career Planning Buddy 用户使用说明书
 
+> **历史 v1 使用说明。** 本文保留早期规划、任务、复盘与记忆流程；当前界面还包含工作台、求职材料、模拟面试、报告和成长页。公开演示请以 [5 分钟演示脚本](./demo-walkthrough.md) 和 [Current System Overview](../architecture/current-system-overview.md) 为准。
+
 | 项目 | 内容 |
 |---|---|
 | 版本 | v1.0 |

@@ -1,5 +1,7 @@
 # AI 求职规划搭子 PRD v3.0
 
+> **历史产品基线（Stage 1–6）。** 本文保留早期规划/执行闭环的需求来源；当前已经扩展到简历、目标 JD、模拟面试、报告回流和复测，最新产品设计见 [Career Planning Buddy V2 最终设计](../v2/career-coach-v2-design.md)，当前实现事实见 [Current System Overview](../architecture/current-system-overview.md)。
+
 ## 1. 产品定位
 
 面向计算机专业学生，把“我该准备什么”转成“我今天先做什么”，并根据真实执行结果持续调整。
