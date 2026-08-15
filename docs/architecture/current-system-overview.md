@@ -1,6 +1,6 @@
 # Current System Overview
 
-> 当前系统事实文档。代码、Alembic 迁移和测试是最终依据；带日期的 Review 与 Stage 文档只描述对应历史切片。
+> 当前系统事实文档。代码、Alembic 迁移和测试是最终依据；历史设计与审查文档只描述对应时间点的状态。
 
 ## 产品边界
 
@@ -125,7 +125,7 @@ Audio 只支持单题短音频。原始媒体不持久化；ASR 失败不能覆�
 - 报告训练动作、任务调整和简历改写都需要用户确认；
 - Retest 只有在维度与证据可比时才输出改善比较。
 
-## Eval Harness V2
+## Evaluation Harness
 
 ```text
 Dataset / Case → Experiment → Trial → Agent Run
@@ -154,7 +154,7 @@ Pairwise 支持位置平衡和人工校准。在真实人工样本没有达到�
 - `/health/ready`：检查 PostgreSQL、Alembic head 和脱敏 Provider 配置，不发起计费调用；
 - Docker Compose 启动 PostgreSQL、单 Worker FastAPI 和 React/Nginx；
 - `.env.example` 默认全部使用 Mock Provider；
-- `scripts/check.ps1` / `scripts/check.sh` 运行 lint、type check、迁移、测试、离线 Eval、Eval V2 smoke 和前端构建。
+- `scripts/check.ps1` / `scripts/check.sh` 运行 lint、type check、迁移、测试、离线评测冒烟和前端构建。
 
 ## 安全与隐私边界
 

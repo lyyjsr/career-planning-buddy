@@ -7,7 +7,7 @@
 
 Career Planning Buddy is an evidence-grounded career coaching Agent for CS students. It turns job-search context into executable plans, structured interview practice, traceable feedback, and the next concrete action.
 
-这是一个用于秋招作品集展示的完整 Web 项目，而不是聊天框套壳。项目重点不在让模型自由发挥，而在于如何用受控工作流、状态机、快照、人工确认和离线评测，把 LLM 能力放进可验证的软件系统。
+项目重点不在让模型自由发挥，而在于如何用受控工作流、状态机、快照、人工确认和离线评测，把 LLM 能力放进可验证的软件系统。
 
 ## 项目解决什么问题
 
@@ -25,6 +25,22 @@ Career Planning Buddy is an evidence-grounded career coaching Agent for CS stude
       ↓                         ↑
 定向模拟面试 → 证据化报告 → 训练任务 / 简历新版本 → 复测
 ```
+
+## 界面预览
+
+> 截图位置已预留。请将脱敏后的图片放入 [`docs/assets/screenshots/`](docs/assets/screenshots/README.md)，再按目录说明替换下面的占位内容。
+
+| 求职工作台 | 材料诊断 |
+|---|---|
+| _截图位：`workspace.png`_ | _截图位：`materials.png`_ |
+
+| 模拟面试 | 面试报告 |
+|---|---|
+| _截图位：`interview-room.png`_ | _截图位：`interview-report.png`_ |
+
+| 开发者追踪 |
+|---|
+| _截图位：`developer-trace.png`_ |
 
 ## 当前能力
 
@@ -66,7 +82,7 @@ flowchart TB
 
     RT --> TRACE[Snapshots / Steps / Tool Calls / Events]
     TRACE --> DB
-    EVAL[Eval Harness V2] --> RT
+    EVAL[Evaluation Harness] --> RT
     EVAL --> REPORT[Trial / Grade / Pairwise / Report]
 ```
 
@@ -93,7 +109,7 @@ L3 共享知识
 - Frontend：React、TypeScript、Vite、React Router、TanStack Query、Tailwind CSS
 - Data：PostgreSQL 16、pgvector
 - Runtime：OpenAI-compatible LLM、Baidu AI Search、本地 BGE Embedding、可替换 ASR Provider
-- Quality：Pytest、Vitest、Ruff、Mypy、OpenAPI Snapshot、GitHub Actions、Eval Harness V2
+- Quality：Pytest、Vitest、Ruff、Mypy、OpenAPI Snapshot、GitHub Actions、Evaluation Harness
 - Delivery：Docker Compose，单 Uvicorn Worker
 
 ## 快速开始：免费 Mock 模式
@@ -172,7 +188,7 @@ cd backend
 
 ## 测试与评测
 
-仓库的标准验收命令会执行后端 lint/type check、数据库迁移、单元与集成测试、离线 Eval、Eval V2 smoke、前端测试和生产构建：
+仓库的标准验收命令会执行后端 lint/type check、数据库迁移、单元与集成测试、离线评测冒烟、前端测试和生产构建：
 
 ```powershell
 .\scripts\check.ps1
@@ -182,7 +198,7 @@ cd backend
 ./scripts/check.sh
 ```
 
-CI 强制使用 Mock Provider，不读取开发者真实密钥，也不会产生付费调用。单独运行 Eval V2：
+CI 强制使用 Mock Provider，不读取开发者真实密钥，也不会产生付费调用。单独运行评测冒烟：
 
 ```powershell
 cd backend
@@ -202,7 +218,7 @@ career-planning-buddy/
 ├─ backend/
 │  ├─ app/                 # API、Service、Repository、Agent、Provider、Harness
 │  ├─ alembic/             # 数据库迁移
-│  ├─ evals/               # 固定数据集与 Eval Harness V2
+│  ├─ evals/               # 固定数据集与评测框架
 │  └─ tests/               # Schema/Service/Repository/API/Runtime 测试
 ├─ frontend/
 │  └─ src/                 # 页面、组件、API Client、路由与前端测试
@@ -216,7 +232,8 @@ career-planning-buddy/
 
 - [文档总索引](docs/README.md)
 - [当前系统全景与已知限制](docs/architecture/current-system-overview.md)
-- [V2 求职教练设计](docs/v2/career-coach-v2-design.md)
+- [产品概览](docs/overview/product-overview.md)
+- [用户使用说明](docs/overview/user-manual.md)
 - [Agent Runtime 契约](docs/model-design/agent-runtime/README.md)
 - [Tool 契约](docs/model-design/tools/README.md)
 - [数据模型](docs/model-design/data-models/README.md)
@@ -228,8 +245,8 @@ career-planning-buddy/
 
 - 用户身份来自 JWT Claims，业务请求不接受客户端传入的 `user_id` 作为身份依据。
 - SSE 使用 Header 鉴权；Provider Key 不进入前端 Bundle、快照或稳定错误响应。
-- 简历、JD、面试回答和个人记忆属于敏感数据，本项目默认面向本地/作品集演示，不提供公共托管实例。
-- 当前是单机、单后端 Worker 的 Release Candidate，不宣称已经完成大规模生产验证或水平扩展。
+- 简历、JD、面试回答和个人记忆属于敏感数据，本项目默认面向本地部署，不提供公共托管实例。
+- 当前部署形态为单机、单后端 Worker，尚未完成大规模生产验证或水平扩展。
 - Agent Run 有数据库租约恢复和过期尝试隔离，但不宣称 LLM 调用 exactly-once。
 - 现有兼容 Replay 接口明确属于 `legacy_trace_clone`；确定性 Graph Replay 仍是后续验收目标。
 - 面试与简历建议是求职训练辅助，不等同于招聘决策、背景调查或专业法律意见。

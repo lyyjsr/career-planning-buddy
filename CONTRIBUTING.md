@@ -48,7 +48,7 @@ macOS/Linux：
 ./scripts/check.sh
 ```
 
-完整检查包含 Ruff、Mypy、Alembic、Pytest、离线 Eval、Eval V2 smoke、Vitest 和前端生产构建。只修改文档时，至少检查 Markdown 本地链接、`git diff --check` 和敏感信息扫描。
+完整检查包含 Ruff、Mypy、Alembic、Pytest、离线评测冒烟、Vitest 和前端生产构建。只修改文档时，至少检查 Markdown 本地链接、`git diff --check` 和敏感信息扫描。
 
 ## Pull Request 清单
 

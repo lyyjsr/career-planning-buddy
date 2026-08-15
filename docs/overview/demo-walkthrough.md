@@ -1,6 +1,6 @@
 # Career Planning Buddy · 5 分钟演示脚本
 
-这份脚本面向面试、作品集评审和项目答辩。目标不是展示“模型会聊天”，而是在 5 分钟内证明：产品能把材料、规划、面试证据和下一步行动连接起来，工程上也能追踪与评测。
+这份脚本用于产品演示和技术讲解。目标不是展示“模型会聊天”，而是在 5 分钟内说明：产品能把材料、规划、面试证据和下一步行动连接起来，工程上也能追踪与评测。
 
 ## 演示前准备
 
@@ -135,11 +135,11 @@ cd backend
 | 问题 | 回答要点 |
 |---|---|
 | 为什么不用多 Agent？ | MVP 只有规划决策需要受控工具调用，其他步骤更适合确定性节点，成本和故障面更小。 |
-| 为什么不用 Redis/Celery？ | 单机作品集范围内，PostgreSQL lease 已覆盖 Run claim、heartbeat、恢复和取消；Eval 仍明确限制单 Worker。 |
+| 为什么不用 Redis/Celery？ | 当前单机部署中，PostgreSQL lease 已覆盖 Run claim、heartbeat、恢复和取消；Eval 仍明确限制单 Worker。 |
 | 如何避免模型乱写数据库？ | Agent 不依赖 ORM，输出先过 Schema 和规则，所有写入由 Service/Repository 事务完成。 |
 | 如何处理上下文过长？ | 场景化候选选择、确定性压缩、Token 预算和冻结的 Context Manifest。 |
 | 如何证明输出质量？ | 固定数据集、硬规则 Grader、Provider 调用审计、Fixture Replay、Pairwise 与人工校准门禁。 |
-| 项目是否生产可用？ | 当前是 Release Candidate；确定性检查完整，但多副本 Eval、集中 Secret、监控和真实用户验证仍是生产前工作。 |
+| 项目是否生产可用？ | 当前适合本地单机部署；多副本 Eval、集中 Secret、监控和真实用户验证仍是生产部署前需要完成的工作。 |
 
 ## 演示禁区
 
@@ -152,7 +152,7 @@ cd backend
 
 ## 建议录制素材
 
-公开 GitHub 前建议补充以下脱敏素材，并放在独立的 `docs/assets/`：
+建议补充以下脱敏素材，并放在 `docs/assets/screenshots/`：
 
 1. 工作台与下一步建议；
 2. 材料诊断和改写确认；

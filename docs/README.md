@@ -4,13 +4,13 @@
 
 ## 推荐阅读路径
 
-### 招聘方 / 项目评审
+### 产品与功能
 
 1. [项目首页](../README.md)
 2. [当前系统全景](./architecture/current-system-overview.md)
-3. [V2 求职教练设计](./v2/career-coach-v2-design.md)
+3. [产品概览](./overview/product-overview.md)
 4. [5 分钟演示脚本](./overview/demo-walkthrough.md)
-5. [生产就绪审查](./review/production-readiness-audit-2026-08-10.md)
+5. [用户使用说明](./overview/user-manual.md)
 
 ### 开发者
 
@@ -24,22 +24,21 @@
 ### Eval / Agent 工程方向
 
 1. [Harness 总览](./model-design/harness/README.md)
-2. [Eval Harness V2](./implementation/eval-harness-v2.md)
-3. [运行与可靠性边界](./implementation/eval-operations-boundary.md)
-4. [LLM Provider 与调用观测](./architecture/llm-provider-and-telemetry.md)
-5. [Provider 配置与部署](./third-party-integration/provider-configuration.md)
+2. [运行与可靠性边界](./implementation/eval-operations-boundary.md)
+3. [LLM Provider 与调用观测](./architecture/llm-provider-and-telemetry.md)
+4. [Provider 配置与部署](./third-party-integration/provider-configuration.md)
 
 ## 文档状态
 
 | 类别 | 目录 | 用途 |
 |---|---|---|
 | 当前事实 | `architecture/current-system-overview.md`、代码、迁移 | 描述当前已经存在的行为和限制 |
-| 产品设计 | `v2/`、`overview/` | 用户价值、信息架构、演示和产品决策 |
+| 产品说明 | `overview/` | 当前用户价值、使用方式和演示路径 |
 | 实现契约 | `model-design/`、`standards/` | API、数据、状态机、Agent 节点和编码规范 |
 | 实施任务 | `implementation/` | 分阶段实现范围与验收标准 |
 | 工程治理 | `governance/` | 开发流程、审查和交付定义 |
 | 第三方接入 | `third-party-integration/` | LLM、Search、Embedding 等配置方式 |
-| 历史证据 | `review/`、`requirements/`、`design-input/` | 某一时间点的审查、需求和早期输入，不代表当前状态 |
+| 历史设计与证据 | `review/`、`requirements/`、`design-input/` 等 | 某一时间点的设计输入与审查记录，不代表当前状态 |
 
 文档与代码冲突时，以项目实现基线、当前系统全景、最新迁移和代码为准。带日期的 Review/Handoff 只证明对应提交和环境中的结果，不应被引用为持续有效的测试结论。
 
@@ -62,4 +61,4 @@
 - Runtime 模型访问统一经过 Provider Protocol；
 - Agent Run 事件持久化后才通过 SSE 推送；
 - 默认 Mock 模式可离线验证，真实 Provider 必须显式启用；
-- 当前为作品集 / Release Candidate，不宣称大规模生产验证。
+- 当前为单机、单后端 Worker 部署，不宣称已经完成大规模生产验证。
