@@ -51,9 +51,9 @@ Career Planning Buddy is an evidence-grounded career coaching Agent for CS stude
 | 求职材料 | 简历版本、目标 JD、材料诊断、主张与证据关联、用户确认后生成可回溯的新简历版本 |
 | 模拟面试 | 基于冻结的简历和 JD 生成 4–6 题训练，支持逐题分析、有限追问、文本/单题音频回答和失败恢复 |
 | 面试报告 | 用原回答证据生成优势、薄弱点和训练建议，可批量确认训练动作并进行跨场次复测比较 |
-| 记忆与 RAG | Run 工作记忆、用户确认的个人记忆、经过审核的共享知识；支持 pgvector 检索和来源引用 |
-| Agent Runtime | 固定 LangGraph、预算与截止时间、一次受控修复、取消、租约接管、降级和唯一终态 |
-| Trace 与 Eval | 持久化 Step/Tool/Event/Snapshot，固定数据集、规则 Grader、Fixture、Provider 调用审计和 Pairwise 校准 |
+| 记忆与 RAG | Run 工作记忆、用户确认的个人记忆、经过审核的共享知识；简历/JD 文档自动分块入库，pgvector + pg_trgm 混合检索（RRF 融合）+ 可替换 Reranker + 可答复性门控，来源引用经证据可见性校验 |
+| Agent Runtime | 固定 LangGraph、预算与截止时间、一次受控修复、取消、租约接管、降级和唯一终态；LLM 线级流式（SSE 进度事件 + 首 token 延迟指标） |
+| Trace 与 Eval | 持久化 Step/Tool/Event/Snapshot，固定数据集、规则 Grader、Fixture、Provider 调用审计、Pairwise 校准与 Rubric 质量标注/Judge 校准管道、bad case 自动导出、检索指标（Recall@K/MRR/nDCG） |
 
 ## 为什么不是普通 LLM Wrapper
 
@@ -107,10 +107,32 @@ L3 共享知识
 
 - Backend：Python 3.12、FastAPI、Pydantic v2、SQLAlchemy 2 Async、Alembic、LangGraph
 - Frontend：React、TypeScript、Vite、React Router、TanStack Query、Tailwind CSS
-- Data：PostgreSQL 16、pgvector
-- Runtime：OpenAI-compatible LLM、Baidu AI Search、本地 BGE Embedding、可替换 ASR Provider
+- Data：PostgreSQL 16、pgvector + pg_trgm（文档混合检索）
+- Runtime：OpenAI-compatible LLM、Baidu AI Search、本地 BGE Embedding、TEI Reranker（可替换）、可替换 ASR Provider
 - Quality：Pytest、Vitest、Ruff、Mypy、OpenAPI Snapshot、GitHub Actions、Evaluation Harness
 - Delivery：Docker Compose，单 Uvicorn Worker
+
+## HTTP 边界防护与可观测性
+
+所有请求经过一个边界守卫中间件（详见 [HTTP 限流与指标接入指南](docs/architecture/http-guard-and-metrics.md)）：
+
+- **限流**：固定窗口计数，按"客户端 IP + Authorization 哈希"分桶（不同登录用户各自独立额度）；超限返回 `429` + `Retry-After`；health/metrics/docs 与 OPTIONS 预检豁免。`RATE_LIMIT_PER_MINUTE=0` 可整体关闭（Compose 默认 120/分钟），零外部依赖。
+- **指标**：`GET /metrics` 暴露 Prometheus 文本格式——请求计数（路径已归一化防标签爆炸）、延迟 count/sum、在途请求数、限流拒绝数。
+- **用量报表**：`GET /api/v1/dev/usage-report`（dev 角色）按状态/图/日/Provider 聚合成本（CNY）、延迟 P50/P95、token 量；`GET /api/v1/dev/repair-report` 输出修复机制触发/成功/预算拒绝率——全部来自既有数据，零额外埋点。
+
+## 实测质量指标
+
+冻结数据集、确定性 Grader、CI 硬门禁。当前数字（评测命令见 [测试与评测](#测试与评测)）：
+
+| 评测 | 数据集 | 结果 |
+|---|---|---|
+| 意图路由（规则路由 `intent-rule-v3`） | `intent-routing-v1`（23 例） | 23/23 = 100% |
+| Stage 5 规划/修复/重规划/安全 | `stage5-v1`（30 例，11 个 Grader） | 30/30 = 100% |
+| Stage 5（Eval V2 全硬门禁） | `stage5-v1`，每例 1 trial | 硬门禁通过率 1.0，首试成功率 1.0 |
+| Stage 6 记忆/上下文选择 | `stage6-memory-context-v1`（12 例） | 12/12 = 100% |
+| 文档检索（bge-m3 向量） | `retrieval-v1`（10 例，语料级） | 纯向量 Recall@5 1.0 / MRR 1.0；混合 0.85/0.90；词法 0.85 |
+
+检索评测（`python -m scripts.run_retrieval_eval`）在冻结 golden set 上对比纯向量/词法/混合/混合+重排四种模式：本地 bge-m3 下语义通道单独达到 Recall@5 1.0，RRF 混合以少量精度换取词法鲁棒性，确定性 Mock 重排会劣化排序（0.60）——生产使用 TEI bge-reranker（`RERANK_PROVIDER=tei`）。报告记录 Provider，每个数字都可对照自己的配置复现。失败用例自动导出为结构化 bad case（`backend/evals/bad_cases/`），支持复现与归因。
 
 ## 快速开始：免费 Mock 模式
 
@@ -232,6 +254,9 @@ career-planning-buddy/
 
 - [文档总索引](docs/README.md)
 - [当前系统全景与已知限制](docs/architecture/current-system-overview.md)
+- [ETCLOVG 七层架构审计](docs/architecture/etclovg-mapping.md)
+- [HTTP 限流与指标接入指南](docs/architecture/http-guard-and-metrics.md)
+- [规划质量 Rubric 与 Judge 校准标准](docs/standards/plan-quality-rubric.md)
 - [产品概览](docs/overview/product-overview.md)
 - [用户使用说明](docs/overview/user-manual.md)
 - [Agent Runtime 契约](docs/model-design/agent-runtime/README.md)

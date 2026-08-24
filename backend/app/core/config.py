@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     llm_goal_understanding_reasoning: Literal["off", "auto"] = "off"
     llm_evidence_distillation_reasoning: Literal["off", "auto"] = "off"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    # Wire-level SSE streaming for openai_compatible providers. Off by
+    # default: Mock/deterministic paths never stream, and streaming only
+    # changes transport, never response semantics.
+    llm_streaming_enabled: bool = False
     asr_provider: Literal["mock", "openai_compatible"] = "mock"
     asr_api_key: SecretStr | None = Field(default=None, min_length=1)
     asr_base_url: AnyHttpUrl | None = None
@@ -80,6 +84,16 @@ class Settings(BaseSettings):
     baidu_search_max_results: int = Field(default=5, ge=1, le=10)
     baidu_search_timeout_seconds: float = Field(default=8, gt=0, le=30)
     rag_min_similarity: float = Field(default=0.35, ge=0, le=1)
+    # Second-stage reranker for document retrieval. "mock" is a deterministic
+    # lexical reranker (CI/Mock mode never touches the network); "tei" targets
+    # a HuggingFace text-embeddings-inference /rerank endpoint (bge-reranker).
+    rerank_provider: Literal["mock", "tei"] = "mock"
+    rerank_base_url: AnyHttpUrl | None = None
+    rerank_timeout_seconds: float = Field(default=8, gt=0, le=30)
+    # Answerability gate: chunks scoring below this rerank score are
+    # dropped; the search returns "insufficient evidence" instead of
+    # forcing a weak match.
+    rag_min_rerank_score: float = Field(default=0.05, ge=0, le=1)
     embedding_provider: Literal["mock", "local"] = "mock"
     embedding_model_path: Path | None = None
 
@@ -136,6 +150,10 @@ class Settings(BaseSettings):
     agent_lease_seconds: float = Field(default=45, ge=5, le=300)
     agent_max_run_attempts: int = Field(default=3, ge=1, le=10)
     agent_worker_concurrency: int = Field(default=2, ge=1, le=16)
+
+    # HTTP boundary guard: 0 disables request-rate limiting entirely
+    # (test default); Compose deployments set a positive value via .env.
+    rate_limit_per_minute: int = Field(default=0, ge=0, le=100_000)
 
     # Pairwise Judge credentials are intentionally independent from the
     # agent-under-test. Live Judge mode fails closed when any field is absent.

@@ -1,6 +1,6 @@
 """Strict developer Trace, Replay, and Eval API contracts."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -100,9 +100,7 @@ class ReplayRequest(StrictModel):
     # Stage 5 compatibility. Its presence selects the explicitly labelled trace clone;
     # executable Replay callers use ``mode`` below.
     tool_mode: Literal["fixture", "live"] | None = None
-    mode: Literal["exact_fixture_replay", "candidate_comparison"] = (
-        "exact_fixture_replay"
-    )
+    mode: Literal["exact_fixture_replay", "candidate_comparison"] = "exact_fixture_replay"
     target_runtime_bundle_id: UUID | None = None
 
 
@@ -158,3 +156,84 @@ class EvalExperimentResponse(StrictModel):
     experiment_id: str
     status: Literal["completed", "not_found"]
     report: object | None
+
+
+class UsageTotals(StrictModel):
+    """Window-wide run aggregates for cost and latency reporting."""
+
+    run_count: int
+    completed_count: int
+    degraded_count: int
+    failed_count: int
+    fallback_count: int
+    total_cost_cny: Decimal = Field(default=Decimal("0"))
+    total_tokens_in: int = 0
+    total_tokens_out: int = 0
+    avg_cost_per_run_cny: Decimal = Field(default=Decimal("0"))
+    latency_p50_ms: int = 0
+    latency_p95_ms: int = 0
+    latency_max_ms: int = 0
+
+
+class UsageGraphBreakdown(StrictModel):
+    """Per (graph_version, model_id) slice of the same window."""
+
+    graph_version: str
+    model_id: str | None
+    run_count: int
+    total_cost_cny: Decimal
+    avg_latency_ms: int
+
+
+class UsageDailyPoint(StrictModel):
+    """One UTC day of run activity for trend charts."""
+
+    date: date
+    run_count: int
+    total_cost_cny: Decimal
+
+
+class UsageProviderKind(StrictModel):
+    """Provider-call health per provider kind in the window."""
+
+    provider_kind: str
+    call_count: int
+    error_count: int
+    avg_latency_ms: int
+
+
+class UsageReportResponse(StrictModel):
+    window_days: int = Field(ge=1, le=365)
+    generated_at: datetime
+    totals: UsageTotals
+    graphs: list[UsageGraphBreakdown]
+    daily: list[UsageDailyPoint]
+    provider_kinds: list[UsageProviderKind]
+
+
+class RepairStat(StrictModel):
+    """One repair mechanism's outcome over the reporting window."""
+
+    kind: Literal["format_repair", "business_repair"]
+    # Repair LLM attempts actually made (persisted steps with the repair
+    # prompt version).
+    triggered: int
+    succeeded: int
+    # Runs that still fell back after a repair attempt.
+    failed_after_attempt: int
+    # Runs where repair was requested but declined by the budget guard
+    # (no LLM attempt was made).
+    declined_by_budget: int
+    success_rate: float = Field(ge=0.0, le=1.0)
+
+
+class FallbackReasonCount(StrictModel):
+    reason: str
+    count: int
+
+
+class RepairReportResponse(StrictModel):
+    window_days: int = Field(ge=1, le=365)
+    generated_at: datetime
+    repairs: list[RepairStat]
+    fallback_reasons: list[FallbackReasonCount]

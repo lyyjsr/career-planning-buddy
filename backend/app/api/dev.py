@@ -15,9 +15,11 @@ from app.schemas.dev import (
     EvalExperimentResponse,
     EvalStartRequest,
     EvalStartResponse,
+    RepairReportResponse,
     ReplayDiff,
     ReplayRequest,
     ReplayResponse,
+    UsageReportResponse,
 )
 from app.services.dev import DevTraceService
 from evals.resume_runner import load_resume_experiment, run_resume_evaluation
@@ -43,6 +45,28 @@ async def list_runs(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get("/usage-report", response_model=UsageReportResponse)
+async def get_usage_report(
+    service: Annotated[DevTraceService, Depends(get_dev_trace_service)],
+    _dev: Annotated[AuthenticatedUser, Depends(require_dev)],
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> UsageReportResponse:
+    """Cost, latency, and provider-health aggregates over the window."""
+
+    return await service.usage_report(days=days)
+
+
+@router.get("/repair-report", response_model=RepairReportResponse)
+async def get_repair_report(
+    service: Annotated[DevTraceService, Depends(get_dev_trace_service)],
+    _dev: Annotated[AuthenticatedUser, Depends(require_dev)],
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> RepairReportResponse:
+    """Repair-mechanism outcomes and fallback-reason distribution."""
+
+    return await service.repair_report(days=days)
 
 
 @router.get("/runs/{run_id}", response_model=DevRunDetail)
