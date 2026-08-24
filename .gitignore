@@ -245,6 +245,14 @@ backend/evals/bad_cases/*.jsonl
 .run/
 .tmp/
 tmp/
+.run/
+
+# Local credentials and private deployment material
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account*.json
 
 # Local credentials and private deployment material
 *.pem
@@ -260,3 +268,9 @@ service-account*.json
 *.swo
 *~
 output/
+
+# Rubric annotation working files (CSV) — golden labels live in the JSONL
+backend/evals/annotations/*.csv
+
+# Personal annotation working files (Excel/CSV); golden labels live in the JSONL
+backend/evals/annotations/*.xlsx
