@@ -131,8 +131,11 @@ L3 共享知识
 | Stage 5（Eval V2 全硬门禁） | `stage5-v1`，每例 1 trial | 硬门禁通过率 1.0，首试成功率 1.0 |
 | Stage 6 记忆/上下文选择 | `stage6-memory-context-v1`（12 例） | 12/12 = 100% |
 | 文档检索（bge-m3 向量） | `retrieval-v1`（10 例，语料级） | 纯向量 Recall@5 1.0 / MRR 1.0；混合 0.85/0.90；词法 0.85 |
+| 真实运行（GLM-4.7，开发部署） | 58 条持久化 Run | 完成 89.7% / 降级 10.3%（业务修复路径）；延迟 P50 25.4s / P95 72.2s；token 输入 13.5 万 / 输出 7.6 万 |
 
 检索评测（`python -m scripts.run_retrieval_eval`）在冻结 golden set 上对比纯向量/词法/混合/混合+重排四种模式：本地 bge-m3 下语义通道单独达到 Recall@5 1.0，RRF 混合以少量精度换取词法鲁棒性，确定性 Mock 重排会劣化排序（0.60）——生产使用 TEI bge-reranker（`RERANK_PROVIDER=tei`）。报告记录 Provider，每个数字都可对照自己的配置复现。失败用例自动导出为结构化 bad case（`backend/evals/bad_cases/`），支持复现与归因。
+
+真实运行数字来自开发部署的持久化 Run（`GET /api/v1/dev/usage-report` 与 `GET /api/v1/dev/repair-report` 聚合）。收割过程暴露了两个诚实的可观测性缺口：真实 Provider 的按调用成本记账尚未接线（cost_cny 恒为 0，token 有记录）；provider_calls 审计表仅评测链路写入——生产可观测依赖 Run/Step 记录。
 
 ## 快速开始：免费 Mock 模式
 
