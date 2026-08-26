@@ -130,11 +130,11 @@ L3 共享知识
 | Stage 5 规划/修复/重规划/安全 | `stage5-v1`（30 例，11 个 Grader） | 30/30 = 100% |
 | Stage 5（Eval V2 全硬门禁） | `stage5-v1`，每例 1 trial | 硬门禁通过率 1.0，首试成功率 1.0 |
 | Stage 6 记忆/上下文选择 | `stage6-memory-context-v1`（12 例） | 12/12 = 100% |
-| 文档检索（bge-m3 向量） | `retrieval-v1`（10 例，语料级） | 纯向量 Recall@5 1.0 / MRR 1.0；混合 0.85/0.90；词法 0.85 |
+| 文档检索（bge-m3 + bge-reranker） | `retrieval-v1`（10 例，语料级） | 纯向量 Recall@5 1.0；混合+真实重排 0.95 / MRR 1.00 / nDCG 0.96；混合 0.85；词法 0.85 |
 | 真实运行（GLM-4.7，开发部署） | 58 条持久化 Run | 完成 89.7% / 降级 10.3%（业务修复路径）；延迟 P50 25.4s / P95 72.2s；token 输入 13.5 万 / 输出 7.6 万 |
 | **stage5 真实基线（GLM-4.7，k=3）** | 30 例 × 3 trial = 90 次真实运行 | **硬门禁 72.2%**；首试成功率 73.3%（95%CI 55.6–85.8）；pass^3 70.0%；21 例 3/3 全过、8 例 0/3 全败（集中在工具调用与修复/重规划路径）；P50 26.1s / P95 47.0s |
 
-检索评测（`python -m scripts.run_retrieval_eval`）在冻结 golden set 上对比纯向量/词法/混合/混合+重排四种模式：本地 bge-m3 下语义通道单独达到 Recall@5 1.0，RRF 混合以少量精度换取词法鲁棒性，确定性 Mock 重排会劣化排序（0.60）——生产使用 TEI bge-reranker（`RERANK_PROVIDER=tei`）。报告记录 Provider，每个数字都可对照自己的配置复现。失败用例自动导出为结构化 bad case（`backend/evals/bad_cases/`），支持复现与归因。
+检索评测（`python -m scripts.run_retrieval_eval`）在冻结 golden set 上对比纯向量/词法/混合/混合+重排四种模式（bge-m3 向量 + GPU bge-reranker-v2-m3 重排）：纯向量 Recall@5 1.0；**混合+真实重排 0.95 / MRR 1.00 / nDCG@5 0.96**——重排把 RRF 融合的排序修正到首位命中率 100%（MRR 1.0），同时保留混合召回的鲁棒性。对照：确定性 Mock 重排只有 0.60（词法打分无法识别语义相关），验证了生产必须用真实 reranker（`RERANK_PROVIDER=tei`，兼容 HuggingFace TEI 协议的 GPU 服务）。报告记录 Provider，每个数字都可对照自己的配置复现。失败用例自动导出为结构化 bad case（`backend/evals/bad_cases/`），支持复现与归因。
 
 stage5 真实基线（`python -m evals.v2 run --dataset stage5 --provider-mode live --trial-count 3`，隔离库）：mock 30/30 证明系统契约正确，真实 GLM 72.2% 是质量基线——失败集中在工具调用轮（create-07/08/09）、格式修复（repair-02/04）与重规划（replan-01/02/05）路径，与开发部署观察到的业务修复 0/6 相互印证；这 8 个全败 case 是 bad case 归因与下一轮 prompt 改进的直接输入。运行间方差（replan-03 二过一败）证明了 k=3 重复测量的必要性。
 
