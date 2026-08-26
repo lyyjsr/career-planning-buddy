@@ -74,23 +74,39 @@ def _gen_corpus(rng: random.Random, target_chunks: int) -> tuple[list[str], list
     """Returns (documents, queries with golden content marker).
 
     Golden documents get a UNIQUE (skill, domain) combination so the
-    query semantically identifies exactly one document — reusing combos
-    would make several chunks equally valid answers while only the
-    marked one counts, deflating the metric unfairly.
+    query semantically identifies exactly one document. The combo pool
+    is 8×8=64; golden count is capped at 60 to leave headroom and avoid
+    the exhaustive `continue` loop that dead-locked the 500/2000-chunk
+    generation (found the hard way: 100% CPU for 30+ minutes with zero
+    DB writes). Chunk count is tracked incrementally — the original
+    O(n²) re-chunking of all accumulated docs per while-iteration was
+    the secondary bottleneck.
     """
     docs: list[str] = []
     queries: list[tuple[str, str]] = []
     marker_counter = 0
+    chunk_count = 0
+    golden_count = 0
+    skip_count = 0
     used_combos: set[tuple[str, str]] = set()
-    while sum(len(chunk_document(d)) for d in docs) < target_chunks:
+    while chunk_count < target_chunks:
         skill, detail = rng.choice(SKILL_POOL)
         domain = rng.choice(DOMAIN_POOL)
         company = rng.choice(COMPANY_POOL)
-        is_golden_candidate = (marker_counter + 1) % 3 == 0
+        # Circuit breaker: when the golden-combo hunt stalls (rng keeps
+        # hitting used combos because marker_counter froze), fall through
+        # as a distractor instead of looping forever.
+        is_golden_candidate = (
+            (marker_counter + 1) % 3 == 0
+            and golden_count < 60
+            and skip_count < 20
+        )
         if is_golden_candidate:
             if (skill[0], domain) in used_combos:
-                continue  # golden combos stay unique
+                skip_count += 1
+                continue
             used_combos.add((skill[0], domain))
+        skip_count = 0
         # distractor docs may reuse combos freely (they add noise, not
         # ambiguity, because only the golden doc's (skill, domain) is
         # query-identifiable via the unique-combo reservation)
@@ -105,9 +121,11 @@ def _gen_corpus(rng: random.Random, target_chunks: int) -> tuple[list[str], list
             )
             sections.append(body)
         docs.append("\n\n".join(sections))
+        chunk_count += len(sections) - 1  # approximate: one chunk per section
         # every 3rd doc becomes a query target with a unique marker
         marker_counter += 1
-        if marker_counter % 3 == 0:
+        if is_golden_candidate:
+            golden_count += 1
             marker = f"专项编号S{marker_counter:04d}"
             sections.append(f"备注：本段属于{marker}性能专项记录。")
             docs[-1] = "\n\n".join(sections)
