@@ -17,6 +17,8 @@ NODE_TIMEOUTS: dict[str, float] = {
     "navigation": 2,
     "clarification": 2,
     "safe_response": 2,
+    "memory_loader": 5,
+    "evidence_loader": 5,
     "context_builder": 5,
     "career_planning_agent": 30,
     "rule_validator": 2,
@@ -48,12 +50,20 @@ class SnapshotService:
             # own HTTP timeout and BudgetGuard enforces the remaining total.
             llm_node_timeout = float(settings.agent_deadline_seconds)
             node_timeouts["career_planning_agent"] = llm_node_timeout
-            node_timeouts["revise_or_fallback"] = llm_node_timeout
+            # The repair node must not inherit the FULL run deadline: a
+            # second full generation on top of the first is what pushed
+            # repair-03 to 61s (SLO breach). Cap it at 30s or 40% of the
+            # remaining deadline, whichever is smaller.
+            node_timeouts["revise_or_fallback"] = min(llm_node_timeout, 30.0)
             node_timeouts["interview_generate"] = llm_node_timeout
         return RuntimeConfigSnapshot(
             graph_version=identity.graph_version,
             feature_stage=identity.feature_stage,
-            available_tools=["memory_lookup", "rag_retrieve", "web_search"],
+            available_tools=(
+                ["rag_retrieve", "web_search"]
+                if settings.memory_disabled
+                else ["memory_lookup", "rag_retrieve", "web_search"]
+            ),
             provider=settings.llm_provider,
             model_alias=(
                 model_for_operation(settings, "planning")
@@ -70,6 +80,9 @@ class SnapshotService:
             deadline_seconds=settings.agent_deadline_seconds,
             node_timeouts_seconds=node_timeouts,
             memory_semantic_retrieval_enabled=(settings.memory_semantic_retrieval_enabled),
+            memory_disabled=settings.memory_disabled,
+            business_repair_llm_enabled=settings.business_repair_llm_enabled,
+            context_fanout_enabled=settings.context_fanout_enabled,
             memory_retrieval_limit=settings.memory_retrieval_limit,
             memory_context_max_items=settings.memory_context_max_items,
             memory_context_max_chars=settings.memory_context_max_chars,

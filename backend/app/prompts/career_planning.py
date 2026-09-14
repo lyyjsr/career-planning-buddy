@@ -7,7 +7,7 @@ from app.prompts.context_renderer import render_planning_context
 from app.schemas.agent_runs import EvidenceCatalogItem, PlanCandidate, PlanningContext
 from app.schemas.enums import ReplanMode
 
-PLAN_PROMPT_VERSION = "openai_compatible_plan_stage6_week_schedule_v5"
+PLAN_PROMPT_VERSION = "openai_compatible_plan_stage6_week_schedule_v6_memoryuse"
 DIRECT_BASELINE_PROMPT_VERSION = "direct_llm_baseline_v1"
 FORMAT_REPAIR_PROMPT_VERSION = "openai_compatible_format_repair_v1"
 BUSINESS_REPAIR_PROMPT_VERSION = "openai_compatible_business_repair_v1"
@@ -38,6 +38,10 @@ deliverable and its pass condition; execution steps and deliverable must be trac
 Name the concrete object, quantity, method, file/page or command when the context supports it.
 Every deliverable must define a measurable artifact and a pass condition; avoid vague outputs
 such as "完成学习", "推进项目", "整理材料", or a bare checklist name.
+Every retrieved_memory in retrieved_memories is a confirmed user preference or learned
+working pattern: the corresponding tasks MUST operationalize it concretely (preferred
+time-of-day, method, or lesson) in the task's schedule, starter_action, or deliverable —
+memories supplied but unused are a planning failure.
 Use task rationale to connect the task to the current goal and recent execution progress.
 Keep the complete JSON under 1500 output tokens; use concise but operational Chinese.
 Return exactly the required number of dated tasks (between one and seven) and no more
@@ -160,6 +164,15 @@ def business_repair_messages(
         "operation": "repair_business_rules_once",
         "violations": repair_instructions,
         "candidate": candidate.model_dump(mode="json"),
+        # LLM violation-type classification: the model labels the dominant
+        # violation it fixed so unknown rule codes get a semantic category
+        # in the provenance event (input for offline rule iteration).
+        "violation_classification": (
+            "after repairing, add a top-level field \"violation_category\": "
+            "one short snake_case label classifying the dominant violation "
+            "type you fixed (e.g. replan_continuity, week_alignment, "
+            "time_budget, task_uniqueness, schema_shape, other)"
+        ),
         "output_schema": plan_json_schema(),
     }
     return _messages(

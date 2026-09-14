@@ -38,7 +38,7 @@ from app.core.config import Settings
 from app.schemas.agent_runs import PlanCandidate
 from app.schemas.base import StrictModel
 
-RUBRIC_JUDGE_PROMPT_VERSION = "rubric_judge_v1"
+RUBRIC_JUDGE_PROMPT_VERSION = "rubric_judge_v9"
 
 DIMENSIONS = (
     "goal_alignment",
@@ -51,13 +51,23 @@ RUBRIC_SYSTEM_PROMPT = """你是规划质量评审员，按以下四个维度为
 
 D1 goal_alignment 目标对齐：规划是否回应用户请求与画像（方向、阶段、技能水平、时间预算）。
 5=精确匹配并尊重时间预算；3=方向正确但阶段错位或忽略明确约束；1=答非所问或强加用户未提的目标。
+方向假设规则（锚点1/2）：画像未指明具体技术方向时，规划自选具体技术栈（如Java/React）且未在assumptions声明=D1≤2；方向来自goal_type本身的泛化准备可接受；请求明确要N周只给1周属范围偏离扣1档。
+补充判据：a)预算利用率——尊重预算不等于只不超限，单日任务合计应达到声明预算的80%以上，明显用不满（如预算75分钟只排45分钟）按3分处理；b)流程完整性——任务序列不得跳过必要环节（如开发项目从环境搭建直接跳到联调、缺失开发环节），关键环节缺失按3分以下处理。
 D2 evidence_grounding 证据支撑：关键主张是否有证据目录中的来源支撑。
-5=关键主张全部有可见证据且引用真实；3=多数有支撑但一处关键判断无证据；
-1=大量无证据主张或引用目录中不存在的来源（硬错误，直接 1 分）。
+5=关键主张全部有可见证据且引用真实；3=多数有支撑但一处关键判断无证据，或证据目录为空、规划未引用任何证据（不可验证但无造假）；
+1=仅当引用了证据目录中不存在的 id（硬错误）。
+注意：目录为空时规划没有引用，这是 3 分（不可验证），绝不是 1 分。
 D3 executability 可执行性：任务具体、交付物可验证、单日工作量合理。
-5=步骤可操作、交付物可检验、时长贴合预算；3=含糊占位≥2处或超预算50%；1=愿望式空洞任务或严重超载。冗长但无信息增量的堆砌按3分以下处理（反注水条款）。
+5=每个任务拿到就能开始做、交付物可独立检验、时长贴合预算；3=含糊占位≥2处或单日超预算50%；1=愿望式空洞任务或严重超载。
+流程完整性（锚点3）：完成项目类目标必须覆盖必要环节（搭建→开发→联调），缺失核心环节=D3=1，具体性不能弥补结构性缺失。
+预算利用率（锚点4）：单日任务合计低于声明预算60%且未声明原因=D3≤3。
+先逐个任务问：用户明天打开这条任务能否直接开始并知道做完长什么样？两题答不上的任务≥2个只能给3分。冗长堆砌按3分以下处理。
 D4 horizon_compliance 周期合规：7天任务与 weekly_focus 对齐、日期连续、周序不超前。
-5=日期连续无缺且每任务对应当周focus；3=日期连续但1-2个任务与当周focus脱节；1=日期缺失/重复或周对齐混乱。
+5=日期连续无缺且每个任务的主题与当周focus直接对应；3=日期连续但1-2个任务与当周focus脱节（做的是别的周或与focus无关的事）；1=日期缺失/重复或周对齐混乱。
+判定方法：对每个任务问"这个任务做完，当周focus的success_signal是否更近了？"答不上就是脱节；只看任务内容，任务或理由里复述focus字眼不算对应。
+校准警告：不要因为日期连续就给5分——日期连续只是不扣分的必要条件，focus对应才是本维核心；多数任务只是泛泛推进（如都是"学习/复习"类）而与具体focus无对应时，最高3分。
+泛化推进规则（锚点5）：复习/练习/学习类无具体对象的任务≥3个=D4≤3，日期连续只是不扣分底线。
+
 
 硬规则：
 - 只依据输入中的请求、画像与证据目录评分，不引入外部知识。
@@ -195,6 +205,7 @@ class OpenAICompatibleRubricJudge:
         timeout_seconds: float = 30,
         max_output_tokens: int = 800,
         transport: httpx.AsyncBaseTransport | None = None,
+        disable_thinking: bool = False,
     ) -> None:
         self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key
@@ -202,6 +213,10 @@ class OpenAICompatibleRubricJudge:
         self._timeout = timeout_seconds
         self._max_tokens = max_output_tokens
         self._transport = transport
+        # DeepSeek's hybrid reasoning models burn the output budget on
+        # hidden thinking and return empty content under json_object;
+        # disabling thinking is required for stable structured judging.
+        self._disable_thinking = disable_thinking
 
     async def score(self, prompt: RubricJudgeInput) -> RubricJudgeOutput:
         messages: list[dict[str, str]] = [
@@ -233,6 +248,8 @@ class OpenAICompatibleRubricJudge:
             "max_tokens": self._max_tokens,
             "response_format": {"type": "json_object"},
         }
+        if self._disable_thinking:
+            request_body["thinking"] = {"type": "disabled"}
         try:
             async with httpx.AsyncClient(
                 transport=self._transport,
@@ -290,6 +307,7 @@ def build_rubric_judge(
         model=settings.judge_llm_model,
         timeout_seconds=settings.judge_llm_timeout_seconds,
         max_output_tokens=settings.judge_llm_max_output_tokens,
+        disable_thinking="deepseek" in str(settings.judge_llm_base_url).lower(),
     )
 
 

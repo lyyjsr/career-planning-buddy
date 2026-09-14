@@ -169,10 +169,14 @@ Pairwise 支持位置平衡和人工校准。在真实人工样本没有达到�
 ## 当前已知限制
 
 - 单后端 Worker 部署；Eval/Pairwise 尚无多副本可靠调度；
-- Agent Run 没有节点级 durable checkpoint，不保证 LLM exactly-once；
+- Agent Run 已实现关键模型节点（planning）的 durable checkpoint / result
+  reuse：相同输入 fingerprint 下恢复时跳过昂贵 provider call（E3 实测 0 次
+  新增物理调用）；尚未实现完整 graph-level exactly-once execution；
 - 现有兼容 Replay 是明确标记的 `legacy_trace_clone`，不是完整 Graph 重执行；
 - 没有 Redis、Celery、Kubernetes、微服务、MCP 或多 Agent；
-- 没有任意网页爬虫、混合 BM25/vector、reranker 或在线漂移平台；
+- 混合检索已实现（pgvector 余弦 + pg_trgm 词面、RRF 融合、TEI GPU
+  reranker、"宽召回窄重排"、相对可答性门控）；没有任意网页爬虫或在线
+  漂移检测平台；
 - 本地 BGE 需要宿主机预下载模型，Compose 不自动下载，也未提供 GPU 镜像；
 - 单题 Audio 依赖 Provider 时间戳质量，不保存原始媒体，不支持实时语音或 Video；
 - Pairwise 在人工校准不足时只用于诊断；

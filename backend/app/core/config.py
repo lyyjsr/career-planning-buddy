@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     llm_goal_understanding_reasoning: Literal["off", "auto"] = "off"
     llm_evidence_distillation_reasoning: Literal["off", "auto"] = "off"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    # Disable hybrid reasoning models' hidden thinking tokens (3-10x latency
+    # reduction for structured-output tasks). GLM-4.7, DeepSeek v4-pro verified.
+    llm_disable_thinking: bool = True
     # Wire-level SSE streaming for openai_compatible providers. Off by
     # default: Mock/deterministic paths never stream, and streaming only
     # changes transport, never response semantics.
@@ -93,9 +96,12 @@ class Settings(BaseSettings):
     # Answerability gate: chunks scoring below this rerank score are
     # dropped; the search returns "insufficient evidence" instead of
     # forcing a weak match.
-    rag_min_rerank_score: float = Field(default=0.05, ge=0, le=1)
-    embedding_provider: Literal["mock", "local"] = "mock"
+    rag_min_rerank_score: float = Field(default=0.001, ge=0, le=1)
+    embedding_provider: Literal["mock", "local", "openai_compatible"] = "mock"
     embedding_model_path: Path | None = None
+    embedding_api_key: SecretStr | None = Field(default=None, min_length=1)
+    embedding_base_url: AnyHttpUrl | None = None
+    embedding_api_model: str | None = Field(default=None, min_length=1, max_length=128)
 
     # PR-5: per-process eval provider mode. TrialRunner honours "fixture" /
     # "mock" / "live" when building the executor's providers (LLM + Search +
@@ -132,6 +138,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("embedding_dim", "EMBEDDING_DIM", "EMBEDDING_DIMENSION"),
     )
     memory_semantic_retrieval_enabled: bool = True
+    # Counterfactual ablation switch: empty the L2 Personal memory layer
+    # (planning catalog AND the memory_lookup tool) for controlled
+    # experiments that measure the memory layer's contribution.
+    memory_disabled: bool = False
+    # LLM business-rule repair switch. Sunset criterion (docs/standards/
+    # slo.md v1.4): rolling rescue rate (llm_repair provenance among
+    # hard-gate passes) < 5% over 100 calls -> disable. Remaining role is
+    # a violation_category probe, re-enabled in pulses when a new unknown
+    # rule code appears in the backlog.
+    business_repair_llm_enabled: bool = True
+    # LangGraph context fan-out: false runs the memory branch serially
+    # inside the evidence branch (A/B measurement or degraded operation).
+    context_fanout_enabled: bool = True
     memory_retrieval_limit: int = Field(default=8, ge=1, le=20)
     memory_context_max_items: int = Field(default=5, ge=1, le=5)
     memory_context_max_chars: int = Field(default=1200, ge=100, le=10000)

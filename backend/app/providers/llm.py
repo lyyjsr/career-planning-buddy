@@ -25,6 +25,7 @@ from app.providers.llm_contracts import (
     LLMToolDefinition,
 )
 from app.providers.llm_profiles import model_for_operation, resolve_provider_profile
+from app.providers.pricing import estimate_cost_cny
 from app.providers.streaming import current_stream_delta_sink
 from app.schemas.agent_runs import (
     AgentTurnResponse,
@@ -207,6 +208,11 @@ class OpenAICompatiblePlanningProvider:
                 "usage": usage.model_dump(mode="json"),
             }
         if response.tool_calls:
+            # Live models occasionally emit more tool calls than the
+            # per-turn schema allows (AgentTurnResponse.tool_calls is
+            # capped at 2); keep the leading calls rather than failing
+            # the whole Run — the graph re-truncates to the Run budget.
+            capped_calls = response.tool_calls[:2]
             return AgentTurnResponse(
                 tool_calls=[
                     ProviderToolCall(
@@ -214,7 +220,7 @@ class OpenAICompatiblePlanningProvider:
                         name=call.name,
                         arguments=call.arguments,
                     )
-                    for call in response.tool_calls
+                    for call in capped_calls
                 ],
                 usage=usage,
             ).model_dump(mode="json")
@@ -298,10 +304,17 @@ class OpenAICompatiblePlanningProvider:
                 "usage": usage.model_dump(mode="json"),
             }
         candidate = {str(key): value for key, value in candidate_object.items()}
-        return {
+        # The business-repair prompt asks the model to classify the dominant
+        # violation it fixed; lift that label out of the candidate payload
+        # so PlanCandidate validation stays strict.
+        violation_category = candidate.pop("violation_category", None)
+        result: dict[str, object] = {
             "candidate": candidate,
             "usage": usage.model_dump(mode="json"),
         }
+        if isinstance(violation_category, str) and violation_category.strip():
+            result["violation_category"] = violation_category.strip()[:64]
+        return result
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -343,6 +356,12 @@ class OpenAICompatiblePlanningProvider:
             tokens_in=response.usage.input_tokens,
             tokens_out=response.usage.output_tokens,
             latency_ms=response.latency_ms,
+            # Estimated list-price cost; unknown models stay at 0.
+            cost_cny=estimate_cost_cny(
+                response.model_id,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            ),
         )
 
 

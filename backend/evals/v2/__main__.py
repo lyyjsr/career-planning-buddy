@@ -47,13 +47,38 @@ def _build_dataset(args: argparse.Namespace) -> DatasetBundle:
         bundle = load_dataset()
     else:
         bundle = load_runtime_smoke_dataset()
+    mode = args.provider_mode
+    if mode is None:
+        from app.core.config import get_settings
+
+        mode = get_settings().eval_provider_mode
+    # Mode-scoped validity: [mock:tool-...] cases script TOOL CALLS for the
+    # deterministic mock — a real model gets no callable signal from them.
+    # (Other [mock:...] markers, e.g. malformed-output scripts for repair
+    # cases, are live-tolerable: the case passes whenever the model simply
+    # does not err.) live_only cases (seeded memories + natural references)
+    # only make sense against a real model.
+    if mode == "live":
+        bundle.cases = [
+            case
+            for case in bundle.cases
+            if "[mock:tool-" not in case.scenario.user_request
+        ]
+    else:
+        bundle.cases = [
+            case for case in bundle.cases if not case.scenario.confirmed_memories
+        ]
     if args.cases:
         bundle = filter_cases(bundle, list(args.cases))
     return bundle
 
 
 def _build_config(
-    settings: Settings, bundle: DatasetBundle, *, trial_count: int
+    settings: Settings,
+    bundle: DatasetBundle,
+    *,
+    trial_count: int,
+    agent_variant: str | None = None,
 ) -> ExperimentCreate:
     manifest = bundle.manifest
     identity = build_runtime_identity(settings)
@@ -74,6 +99,7 @@ def _build_config(
         execution_mode=_PROVIDER_MODE_TO_EXECUTION[settings.eval_provider_mode],
         variant_role="baseline",
         trial_count=trial_count,
+        agent_variant=agent_variant,
     )
 
 
@@ -103,7 +129,12 @@ async def _run_experiment(args: argparse.Namespace, settings: Settings) -> dict[
             if args.experiment_id:
                 experiment_id = UUID(args.experiment_id)
             else:
-                config = _build_config(settings, dataset, trial_count=args.trial_count)
+                config = _build_config(
+                    settings,
+                    dataset,
+                    trial_count=args.trial_count,
+                    agent_variant=args.agent_variant,
+                )
                 experiment, _ = await EvalService(session).create_experiment(
                     dataset=dataset,
                     config=config,
@@ -157,6 +188,14 @@ def main() -> int:
         type=int,
         default=1,
         help="Number of Trials per case (>=1).",
+    )
+    run_p.add_argument(
+        "--agent-variant",
+        default=None,
+        help=(
+            "Agent variant id (e.g. direct_llm_v1: bare LLM with no tools, "
+            "memory, or evidence visibility — the model-capability baseline arm)."
+        ),
     )
     run_p.add_argument(
         "--run-type",

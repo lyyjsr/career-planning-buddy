@@ -14,6 +14,7 @@ projection.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -34,7 +35,49 @@ ALLOWED_KINDS = frozenset({
     EvidenceKind.REPAIR_SIGNAL,
     EvidenceKind.PROVIDER_CALL_PROJECTION,
     EvidenceKind.EXPECTED_CITATIONS_MAP,
+    EvidenceKind.TASK_PROJECTION,
 })
+
+
+
+_FUNCTIONAL = frozenset(
+    (
+        "计划 任务 完成 进行 需要 可以 一个 相关 提高 提升 分析 整理 "
+        "准备 制定 记录 帮助 情况 内容 通过 检查 优化 撰写 梳理"
+    ).split()
+)
+
+
+def _distinctive_anchors(
+    memory: str, plan_text: str, *, request_text: str = ""
+) -> int:
+    """Count memory terms that reappear in the plan: ASCII entity words
+    plus CJK bigrams, ignoring generic planning vocabulary AND anything
+    the user request already contained (request-echo control: a plan that
+    merely paraphrases the request must not score as memory-grounded)."""
+    request_lower = request_text.lower()
+    request_bigrams = _text_bigrams(request_text)
+    plan_lower = plan_text.lower()
+    plan_bigrams = _text_bigrams(plan_text)
+    count = 0
+    for word in re.findall(r"[a-z0-9]+", memory.lower()):
+        if len(word) >= 2 and word in plan_lower and word not in request_lower:
+            count += 1
+    for bigram in _text_bigrams(memory):
+        if any(bigram in phrase for phrase in _FUNCTIONAL):
+            continue
+        if bigram in request_bigrams:
+            continue
+        if bigram in plan_bigrams:
+            count += 1
+    return count
+
+
+def _text_bigrams(text: str) -> set[str]:
+    normalized = "".join(text.split()).lower()
+    if len(normalized) < 2:
+        return set()
+    return {normalized[i : i + 2] for i in range(len(normalized) - 1)}
 
 
 def _boolean_grade(
@@ -202,6 +245,83 @@ async def grade(outcome: RunOutcome, view: AuthorizedView, expected: EvalCase) -
 
     # 4. token_usage_nonzero -- quality (soft). Mock provider should still emit >0 tokens.
     total = outcome.total_tokens_in + outcome.total_tokens_out
+    # memory_grounded -- quality signal (hard_gate=False): the plan TEXT must
+    # actually use the planted Personal memories, not merely have the
+    # memory tool invoked. Closes the ablation gap where the memory layer's
+    # measured value was tool-matching only (risk item #3).
+    memories = [
+        str(item.get("content", "")).strip()
+        for item in as_dict_list(expected.scenario.confirmed_memories)
+        if str(item.get("category", "relevant")) == "relevant"
+        and str(item.get("content", "")).strip()
+    ]
+    if not memories:
+        results.append(_not_applicable(
+            "memory_grounded", [],
+            "case plants no relevant memories",
+        ))
+    elif plan_item is None or not plan_item.projection:
+        results.append(_not_applicable(
+            "memory_grounded", [],
+            "no plan projection to verify grounding against",
+        ))
+    else:
+        plan_text = " ".join(
+            str(part)
+            for part in (
+                plan_item.projection.get("summary"),
+                plan_item.projection.get("rationale"),
+            )
+            if part
+        )
+        for task_item in view.items(EvidenceKind.TASK_PROJECTION):
+            projection = getattr(task_item, "projection", None) or {}
+            plan_text += " " + " ".join(
+                str(part)
+                for part in (
+                    projection.get("title"),
+                    projection.get("deliverable"),
+                    projection.get("starter_action"),
+                )
+                if part
+            )
+        plan_bigrams = _text_bigrams(plan_text)
+        grounded = 0
+        for memory in memories:
+            memory_bigrams = _text_bigrams(memory)
+            if not memory_bigrams:
+                continue
+            hit = len(memory_bigrams & plan_bigrams) / len(memory_bigrams)
+            # Char-bigram ratios dilute short-keyword memories (e.g. a
+            # "JD定制简历" lesson yields only the JD/简历 anchors). Counting
+            # DISTINCTIVE anchors (ASCII entities + non-generic CJK
+            # bigrams) catches plans that operationalize the memory's core
+            # entities without verbatim restatement.
+            anchors = _distinctive_anchors(
+                memory, plan_text, request_text=expected.scenario.user_request
+            )
+            if hit >= 0.10 or anchors >= 2:
+                grounded += 1
+        need = max(1, (len(memories) + 1) // 2)
+        results.append(GradeResult(
+            grader_name=f"{GRADER_NAME_PREFIX}.memory_grounded",
+            grader_version=GRADER_VERSION,
+            domain="model",
+            metric_type="boolean",
+            passed=grounded >= need, hard_gate=False,
+            evidence_item_ids=[plan_id] if plan_id else [],
+            evidence={
+                "grounded_count": grounded,
+                "planted_count": len(memories),
+                "required": need,
+                "subgrader": "memory_grounded",
+            },
+            rationale=(
+                "at least half of the planted Personal memories must leave "
+                "lexical traces in the plan text (bigram hit ratio >= 0.10)"
+            ),
+        ))
+
     results.append(_numeric_grade(
         name="token_usage_nonzero",
         score=float(total),

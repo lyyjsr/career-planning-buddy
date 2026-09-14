@@ -9,6 +9,56 @@ Career Planning Buddy is an evidence-grounded career coaching Agent for CS stude
 
 项目重点不在让模型自由发挥，而在于如何用受控工作流、状态机、快照、人工确认和离线评测，把 LLM 能力放进可验证的软件系统。
 
+## 30 秒读懂（写给 Agent Engineer / Agent Infra 面试官）
+
+**1. 这是个什么 Agent？** 证据化求职教练 Agent：LangGraph 13 节点受控状态机
+（原生 fan-out/join 并行 + 有界修复环），把求职上下文变成可执行、可校验、
+可复盘的 7 天行动计划。
+
+**2. 为什么不是普通 LangGraph Demo？** 四个工程面：
+- **Durable Agent Runtime**：PostgreSQL lease/heartbeat/attempt-fencing，
+  关键模型节点 durable checkpoint（崩溃恢复实测 **0 次重复 provider 调用**），
+  BudgetGuard 四重硬限（调用/token/deadline/取消）+ 节点独立超时；
+- **Tool Governance**：schema 校验注册表、allowlist、轮次/次数/超时预算、
+  显式错误分类，评测臂不变量断言（配错实验臂在机器层面被判无效）；
+- **Context / Memory Engineering**：三级压缩（混合语义召回→动态 token
+  预算→摘要折叠）、双层记忆（Run/Personal）带消融开关与成本账本；
+- **Eval Harness**：八级类型化评测数据模型、六域确定性 grader、双维度
+  归因（model_pass/工程兜底逐 trial 拆分）、预注册指标制度 + Wilson CI。
+
+**3. 实际 Eval 结果？**（详见下文与 [`backend/evals/releases/`](backend/evals/releases/)）
+- 硬门禁 **72.2%（初始基线）→ 88.9%**（当前验证，k=3，Wilson 95%CI [80.7, 93.9]）
+- 延迟 P95 **45.5s → 28.6s**；814 项后端测试 + 36 项前端测试全绿
+- 混合检索（pgvector+pg_trgm RRF + GPU rerank）Recall@5 = 1.0
+
+**4. 系统的明确 limitation？**（完整清单见文末）单 worker 部署未做 HA 验证；
+关键节点 checkpoint ≠ 全图 exactly-once；记忆层对硬门禁的贡献经 k=3 复跑
+不显著（+4.3pp, p=0.429，可证价值为接地能力与零边际成本）；无大规模真实
+用户流量验证。
+
+## 可观测性（数据即真相）
+
+每次 Run 的执行痕迹全部持久化，可逐层下钻定位失败根因：
+
+```text
+AgentRun ── status / result_kind / tokens / cost / latency / fallback_reason
+ ├── AgentStep（每节点）── status / latency / trace_data / error_code
+ │     ├── provider call（planning / repair，含 prompt 版本与 usage）
+ │     ├── tool calls（schema、参数、延迟、错误分类）
+ │     ├── checkpoint（输入指纹 → 恢复时跳过昂贵调用）
+ │     └── provenance（model_pass | format_repair | deterministic_repair
+ │                     | llm_repair | fallback —— 归因报告的数据源）
+ ├── AgentEvent（原子递增序号，SSE 断线续传的锚点）
+ └── RunInputSnapshot（冻结的规划上下文，评测与审计的输入凭证）
+```
+
+## 真实运行证据（非截图，可复算）
+
+界面截图位保留在下方（待补脱敏图）。当前公开证据以**可复算的评测工件**
+形式提供：[`backend/evals/releases/v0.3-hardgate-88.9/`](backend/evals/releases/v0.3-hardgate-88.9/)
+——90 trial 匿名记录、全量 grader 行、失败分解、SHA256 校验和，一条命令
+重新生成并与 summary 逐行对账。
+
 ## 项目解决什么问题
 
 计算机学生准备求职时，常见问题不是缺少建议，而是信息无法形成连续行动：
@@ -28,19 +78,19 @@ Career Planning Buddy is an evidence-grounded career coaching Agent for CS stude
 
 ## 界面预览
 
-> 截图位置已预留。请将脱敏后的图片放入 [`docs/assets/screenshots/`](docs/assets/screenshots/README.md)，再按目录说明替换下面的占位内容。
+以下截图来自本地 Mock Provider 演示环境，使用虚构、脱敏数据生成。
 
 | 求职工作台 | 材料诊断 |
 |---|---|
-| _截图位：`workspace.png`_ | _截图位：`materials.png`_ |
+| <img src="docs/assets/screenshots/workspace.png" alt="Career Planning Buddy 求职工作台" width="100%"> | <img src="docs/assets/screenshots/materials.png" alt="Career Planning Buddy 材料诊断与改写建议" width="100%"> |
 
 | 模拟面试 | 面试报告 |
 |---|---|
-| _截图位：`interview-room.png`_ | _截图位：`interview-report.png`_ |
+| <img src="docs/assets/screenshots/interview-room.png" alt="Career Planning Buddy 模拟面试答题页面" width="100%"> | <img src="docs/assets/screenshots/interview-report.png" alt="Career Planning Buddy 面试报告" width="100%"> |
 
 | 开发者追踪 |
 |---|
-| _截图位：`developer-trace.png`_ |
+| <img src="docs/assets/screenshots/developer-trace.png" alt="Career Planning Buddy Agent 运行与决策轨迹" width="100%"> |
 
 ## 当前能力
 
@@ -130,9 +180,17 @@ L3 共享知识
 | Stage 5 规划/修复/重规划/安全 | `stage5-v1`（30 例，11 个 Grader） | 30/30 = 100% |
 | Stage 5（Eval V2 全硬门禁） | `stage5-v1`，每例 1 trial | 硬门禁通过率 1.0，首试成功率 1.0 |
 | Stage 6 记忆/上下文选择 | `stage6-memory-context-v1`（12 例） | 12/12 = 100% |
-| 文档检索（bge-m3 向量） | `retrieval-v1`（10 例，语料级） | 纯向量 Recall@5 1.0 / MRR 1.0；混合 0.85/0.90；词法 0.85 |
+| 文档检索-字面查询（v1 集） | `retrieval-v1`（10 例，小语料） | 纯向量 1.0；混合+真实重排 0.95/MRR 1.00；混合 0.85；词法 0.85 |
+| **文档检索-转述硬化（v2 集）** | `retrieval-v2`（15 例，6 篇文档/例 + 同域干扰 + 转述查询） | **混合 1.0/MRR 0.95 最优**；向量 1.0/0.84；词法 1.0/0.92；混合+重排降至 0.73/0.70（见下） |
+| 真实运行（GLM-4.7，开发部署） | 58 条持久化 Run | 完成 89.7% / 降级 10.3%（业务修复路径）；延迟 P50 25.4s / P95 72.2s；token 输入 13.5 万 / 输出 7.6 万 |
+| stage5 真实**初始基线**（GLM-4.7，k=3，2026-08-26 早期 commit） | 30 例 × 3 trial | 硬门禁 **72.2%**（首试 73.3%，95%CI 55.6–85.8；pass^3 70.0%；8 例 0/3 全败集中在工具/修复/重规划路径） |
+| **stage5 当前验证结果**（GLM-4.7，k=3，实验 `cd3eb74e`，代码 `97a3256`，2026-08-26） | 30 例 × 3 trial = 90 次真实运行 | 硬门禁 **88.9%**（Wilson 95%CI [80.7, 93.9]）；延迟 P50 20.2s / **P95 28.6s**（修复环下线判据 + 30s 节点上限后从 45.5–57.3s 降）；消融与基线对照见 docs/standards/slo.md |
 
-检索评测（`python -m scripts.run_retrieval_eval`）在冻结 golden set 上对比纯向量/词法/混合/混合+重排四种模式：本地 bge-m3 下语义通道单独达到 Recall@5 1.0，RRF 混合以少量精度换取词法鲁棒性，确定性 Mock 重排会劣化排序（0.60）——生产使用 TEI bge-reranker（`RERANK_PROVIDER=tei`）。报告记录 Provider，每个数字都可对照自己的配置复现。失败用例自动导出为结构化 bad case（`backend/evals/bad_cases/`），支持复现与归因。
+检索评测（`python -m scripts.run_retrieval_eval --dataset retrieval-v1|v2`）在两代金标集上对比四模式（bge-m3 向量 + GPU bge-reranker-v2-m3）：**v1（字面查询、小语料）的绝对值偏乐观**——语料仅 2-4 chunk 且查询直引原文；v2 做了三项硬化（每例 6 篇文档含同域干扰、转述式查询不引原词、每 case 独立语料用户）。两代结论不同且都诚实记录：v1 上重排修正排序至 MRR 1.00；**v2 上混合融合是最优模式（Recall 1.0 / MRR 0.95），而神经重排在转述查询下反而劣化（0.73/0.70）**——诊断表明门控过严（降到 0.005 仅恢复至 0.733）与重排器对转述配对误排并存。生产启示：重排应条件启用或与混合分数融合而非替换排序——这是下一项改进的明确输入。失败用例自动导出为结构化 bad case，支持复现与归因。
+
+stage5 真实基线（`python -m evals.v2 run --dataset stage5 --provider-mode live --trial-count 3`，隔离库）：mock 30/30 证明系统契约正确，真实 GLM 72.2% 是质量基线——失败集中在工具调用轮（create-07/08/09）、格式修复（repair-02/04）与重规划（replan-01/02/05）路径，与开发部署观察到的业务修复 0/6 相互印证；这 8 个全败 case 是 bad case 归因与下一轮 prompt 改进的直接输入。运行间方差（replan-03 二过一败）证明了 k=3 重复测量的必要性。
+
+真实运行数字来自开发部署的持久化 Run（`GET /api/v1/dev/usage-report` 与 `GET /api/v1/dev/repair-report` 聚合）。收割过程暴露了两个诚实的可观测性缺口：真实 Provider 的按调用成本记账尚未接线（cost_cny 恒为 0，token 有记录）；provider_calls 审计表仅评测链路写入——生产可观测依赖 Run/Step 记录。
 
 ## 快速开始：免费 Mock 模式
 
