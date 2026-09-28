@@ -29,7 +29,7 @@ router = APIRouter(prefix="/reviews", tags=["reviews"])
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def create_review(
@@ -51,7 +51,10 @@ async def create_review(
 @router.get(
     "",
     response_model=ReviewListResponse,
-    responses={401: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
+    },
 )
 async def list_reviews(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
@@ -92,7 +95,7 @@ async def get_review(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def update_review(
@@ -132,7 +135,7 @@ async def delete_review(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def start_next_plan(

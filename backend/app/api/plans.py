@@ -131,7 +131,7 @@ async def list_tasks(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def update_task(
@@ -154,7 +154,7 @@ async def update_task(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def update_task_checklist(
@@ -177,7 +177,7 @@ async def update_task_checklist(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def verify_task(
@@ -213,7 +213,7 @@ async def get_task_detail(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def edit_task_details(
@@ -241,7 +241,7 @@ async def edit_task_details(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
         502: {"model": ErrorResponse},
     },
 )
@@ -269,7 +269,7 @@ async def create_task_adjustment_proposal(
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def confirm_task_adjustment(

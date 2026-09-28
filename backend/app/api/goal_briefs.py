@@ -28,7 +28,7 @@ router = APIRouter(prefix="/goal-briefs", tags=["goal-briefs"])
     responses={
         401: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
+        422: {"model": ErrorResponse, "description": "Unprocessable Content"},
     },
 )
 async def create_goal_brief(

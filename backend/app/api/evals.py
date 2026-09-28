@@ -69,7 +69,7 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
-    422: {"model": ErrorResponse},
+    422: {"model": ErrorResponse, "description": "Unprocessable Content"},
 }
 
 
